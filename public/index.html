@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PublisHearts Books</title>
     <meta
+      id="site-meta-description"
       name="description"
       content="PublisHearts bookstore. Shop featured books, pay securely by card, and get your receipt by email."
     />
@@ -22,8 +23,11 @@
     <header class="site-header">
       <div class="container row-between">
         <a class="brand" href="/">
-          <span class="brand-mark">P</span>
-          <span>PublisHearts</span>
+          <span class="brand-mark">
+            <img id="brand-mark-image" class="brand-mark-image hidden" alt="Brand logo" />
+            <span id="brand-mark-text">P</span>
+          </span>
+          <span id="brand-name-header">PublisHearts</span>
         </a>
         <div class="header-actions">
           <a class="ghost-btn ghost-link" href="/admin.html">Admin</a>
@@ -37,35 +41,35 @@
 
     <main>
       <section class="hero container">
-        <p class="eyebrow">Bookshop</p>
-        <h1>Stories worth shipping.</h1>
-        <p class="hero-copy">
+        <p id="hero-eyebrow" class="eyebrow">Bookshop</p>
+        <h1 id="hero-title">Stories worth shipping.</h1>
+        <p id="hero-copy" class="hero-copy">
           Discover curated titles from PublisHearts and check out securely with card payment.
           Every customer receives a receipt email instantly.
         </p>
-        <a class="primary-btn" href="#books">Shop Books</a>
+        <a id="hero-cta" class="primary-btn" href="#books">Shop Books</a>
       </section>
 
       <section id="books" class="container">
         <div class="section-head">
-          <h2>Featured Titles</h2>
-          <p>Each order is processed securely and shipped to the address collected at checkout.</p>
+          <h2 id="featured-title">Featured Titles</h2>
+          <p id="featured-copy">Each order is processed securely and shipped to the address collected at checkout.</p>
         </div>
         <div id="products-grid" class="products-grid" aria-live="polite"></div>
       </section>
 
       <section class="container promise-grid">
         <article class="promise">
-          <h3>Secure Card Checkout</h3>
-          <p>Payments run through Stripe, so card data is handled by trusted infrastructure.</p>
+          <h3 id="promise-1-title">Secure Card Checkout</h3>
+          <p id="promise-1-copy">Payments run through Stripe, so card data is handled by trusted infrastructure.</p>
         </article>
         <article class="promise">
-          <h3>Receipt Emails</h3>
-          <p>Customers get a receipt. You get full order details with shipping info by email.</p>
+          <h3 id="promise-2-title">Receipt Emails</h3>
+          <p id="promise-2-copy">Customers get a receipt. You get full order details with shipping info by email.</p>
         </article>
         <article class="promise">
-          <h3>Ready To Launch</h3>
-          <p>This store is free to host and easy to customize as your catalog grows.</p>
+          <h3 id="promise-3-title">Ready To Launch</h3>
+          <p id="promise-3-copy">This store is free to host and easy to customize as your catalog grows.</p>
         </article>
       </section>
     </main>
@@ -92,8 +96,8 @@
 
     <footer class="site-footer">
       <div class="container row-between">
-        <span>PublisHearts</span>
-        <span>Books that stay with you</span>
+        <span id="footer-left">PublisHearts</span>
+        <span id="footer-right">Books that stay with you</span>
       </div>
     </footer>
 

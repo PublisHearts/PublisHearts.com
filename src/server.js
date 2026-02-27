@@ -16,6 +16,12 @@ import {
   updateProduct
 } from "./data/productStore.js";
 import { sendCustomerReceipt, sendOwnerNotification } from "./lib/email.js";
+import {
+  SiteSettingsValidationError,
+  ensureSiteSettingsStore,
+  getSiteSettings,
+  updateSiteSettings
+} from "./data/siteSettingsStore.js";
 
 dotenv.config();
 
@@ -155,6 +161,56 @@ function imageUrlFromRequest(req, { allowUnset = false } = {}) {
   return allowUnset ? undefined : "";
 }
 
+function extractSiteSettingsChanges(req) {
+  const removeLogo = String(req.body?.removeLogo || "").toLowerCase() === "true";
+  let logoImageUrl = req.file?.filename ? `/uploads/${req.file.filename}` : undefined;
+  if (removeLogo) {
+    logoImageUrl = "";
+  } else {
+    const typedLogoUrl = String(req.body?.logoImageUrl || "").trim();
+    if (typedLogoUrl) {
+      logoImageUrl = typedLogoUrl;
+    }
+  }
+
+  const fields = [
+    "brandName",
+    "brandMark",
+    "pageTitle",
+    "pageDescription",
+    "heroEyebrow",
+    "heroTitle",
+    "heroCopy",
+    "heroCtaLabel",
+    "featuredTitle",
+    "featuredCopy",
+    "promise1Title",
+    "promise1Copy",
+    "promise2Title",
+    "promise2Copy",
+    "promise3Title",
+    "promise3Copy",
+    "footerLeft",
+    "footerRight",
+    "themeAccent",
+    "themeAccentStrong",
+    "themeBackground",
+    "themeInk"
+  ];
+
+  const changes = {};
+  for (const key of fields) {
+    if (req.body?.[key] !== undefined) {
+      changes[key] = req.body[key];
+    }
+  }
+  if (logoImageUrl !== undefined) {
+    changes.logoImageUrl = logoImageUrl;
+  }
+
+  return changes;
+}
+
 app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), async (req, res) => {
   if (!stripe) {
     return res.status(500).send("Stripe not configured");
@@ -234,6 +290,11 @@ if (path.resolve(uploadsDir) !== path.resolve(path.join(publicDir, "uploads"))) 
   app.use("/uploads", express.static(uploadsDir));
 }
 
+app.get("/api/site-settings", async (req, res) => {
+  const settings = await getSiteSettings();
+  res.json(settings);
+});
+
 app.get("/api/products", async (req, res) => {
   const products = await listProducts();
   res.json(products);
@@ -257,6 +318,27 @@ app.post("/api/admin/login", (req, res) => {
 app.get("/api/admin/products", requireAdmin, async (req, res) => {
   const products = await listProducts();
   res.json(products);
+});
+
+app.get("/api/admin/site-settings", requireAdmin, async (req, res) => {
+  const settings = await getSiteSettings();
+  res.json(settings);
+});
+
+app.put("/api/admin/site-settings", requireAdmin, upload.single("logoImage"), async (req, res) => {
+  try {
+    const updated = await updateSiteSettings(extractSiteSettingsChanges(req));
+    return res.json(updated);
+  } catch (error) {
+    await removeUploadedFile(req.file);
+    if (error instanceof SiteSettingsValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error?.message) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(500).json({ error: "Could not update site settings." });
+  }
 });
 
 app.post("/api/admin/products", requireAdmin, upload.single("image"), async (req, res) => {
@@ -461,6 +543,7 @@ app.get("*", (req, res) => {
 
 async function start() {
   await ensureProductStore();
+  await ensureSiteSettingsStore();
   await fs.mkdir(uploadsDir, { recursive: true });
 
   app.listen(port, () => {

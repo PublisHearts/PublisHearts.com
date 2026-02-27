@@ -7,11 +7,30 @@ const checkoutBtn = document.getElementById("checkout-btn");
 const checkoutMessage = document.getElementById("checkout-message");
 const openCartBtn = document.getElementById("open-cart");
 const closeCartBtn = document.getElementById("close-cart");
+const siteMetaDescription = document.getElementById("site-meta-description");
+const brandNameHeader = document.getElementById("brand-name-header");
+const brandMarkText = document.getElementById("brand-mark-text");
+const brandMarkImage = document.getElementById("brand-mark-image");
+const heroEyebrow = document.getElementById("hero-eyebrow");
+const heroTitle = document.getElementById("hero-title");
+const heroCopy = document.getElementById("hero-copy");
+const heroCta = document.getElementById("hero-cta");
+const featuredTitle = document.getElementById("featured-title");
+const featuredCopy = document.getElementById("featured-copy");
+const promise1Title = document.getElementById("promise-1-title");
+const promise1Copy = document.getElementById("promise-1-copy");
+const promise2Title = document.getElementById("promise-2-title");
+const promise2Copy = document.getElementById("promise-2-copy");
+const promise3Title = document.getElementById("promise-3-title");
+const promise3Copy = document.getElementById("promise-3-copy");
+const footerLeft = document.getElementById("footer-left");
+const footerRight = document.getElementById("footer-right");
 
 const state = {
   products: [],
   cart: new Map(),
-  checkingOut: false
+  checkingOut: false,
+  siteSettings: null
 };
 
 const CART_KEY = "publishearts_cart_v1";
@@ -21,6 +40,75 @@ function formatMoney(amountCents = 0) {
     style: "currency",
     currency: "USD"
   }).format(amountCents / 100);
+}
+
+function setText(el, value) {
+  const text = String(value || "").trim();
+  if (!el || !text) {
+    return;
+  }
+  el.textContent = text;
+}
+
+function setHexVar(name, value) {
+  const hex = String(value || "").trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) {
+    return;
+  }
+  document.documentElement.style.setProperty(name, hex);
+}
+
+function applySiteSettings(settings) {
+  state.siteSettings = settings || null;
+  if (!settings || typeof settings !== "object") {
+    return;
+  }
+
+  setText(brandNameHeader, settings.brandName);
+  setText(brandMarkText, settings.brandMark);
+  setText(heroEyebrow, settings.heroEyebrow);
+  setText(heroTitle, settings.heroTitle);
+  setText(heroCopy, settings.heroCopy);
+  setText(heroCta, settings.heroCtaLabel);
+  setText(featuredTitle, settings.featuredTitle);
+  setText(featuredCopy, settings.featuredCopy);
+  setText(promise1Title, settings.promise1Title);
+  setText(promise1Copy, settings.promise1Copy);
+  setText(promise2Title, settings.promise2Title);
+  setText(promise2Copy, settings.promise2Copy);
+  setText(promise3Title, settings.promise3Title);
+  setText(promise3Copy, settings.promise3Copy);
+  setText(footerLeft, settings.footerLeft);
+  setText(footerRight, settings.footerRight);
+  setHexVar("--accent", settings.themeAccent);
+  setHexVar("--accent-strong", settings.themeAccentStrong);
+  setHexVar("--bg", settings.themeBackground);
+  setHexVar("--ink", settings.themeInk);
+
+  const pageTitle = String(settings.pageTitle || "").trim();
+  if (pageTitle) {
+    document.title = pageTitle;
+  }
+
+  const description = String(settings.pageDescription || "").trim();
+  if (siteMetaDescription && description) {
+    siteMetaDescription.setAttribute("content", description);
+  }
+
+  const logoUrl = String(settings.logoImageUrl || "").trim();
+  if (!brandMarkImage || !brandMarkText) {
+    return;
+  }
+
+  if (logoUrl) {
+    brandMarkImage.src = logoUrl;
+    brandMarkImage.classList.remove("hidden");
+    brandMarkText.classList.add("hidden");
+  } else {
+    brandMarkImage.removeAttribute("src");
+    brandMarkImage.classList.add("hidden");
+    brandMarkText.classList.remove("hidden");
+  }
 }
 
 function saveCart() {
@@ -181,6 +269,15 @@ async function loadProducts() {
   updateCartUi();
 }
 
+async function loadSiteSettings() {
+  const response = await fetch("/api/site-settings");
+  if (!response.ok) {
+    throw new Error("Could not load site settings");
+  }
+  const settings = await response.json();
+  applySiteSettings(settings);
+}
+
 async function checkout() {
   if (state.checkingOut) {
     return;
@@ -260,6 +357,7 @@ cartPanel.addEventListener("click", (event) => {
 });
 
 loadCart();
+loadSiteSettings().catch(() => {});
 loadProducts().catch(() => {
   productsGrid.innerHTML = `<p>Could not load books. Refresh and try again.</p>`;
 });

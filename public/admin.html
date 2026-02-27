@@ -27,19 +27,20 @@
     <main class="container admin-shell">
       <section id="login-card" class="admin-login-card">
         <h1>Admin Login</h1>
-        <p>Use your admin password to manage books, covers, pricing, and descriptions.</p>
+        <p>Use your admin password to manage books, storefront text, logo, and colors.</p>
         <form id="login-form" class="admin-login-form">
           <label for="admin-password">Password</label>
           <input id="admin-password" name="password" type="password" autocomplete="current-password" required />
           <button class="primary-btn block" type="submit">Sign in</button>
         </form>
+        <p id="login-message" class="checkout-message"></p>
       </section>
 
       <section id="admin-panel" class="admin-panel hidden">
         <div class="admin-toolbar">
           <div>
-            <h1>Product Manager</h1>
-            <p>Add new books, upload cover images, and update prices instantly.</p>
+            <h1>Store Manager</h1>
+            <p>Edit storefront design and product catalog in one place.</p>
           </div>
           <div class="admin-toolbar-actions">
             <button id="new-product-btn" class="ghost-btn" type="button">Add New Book</button>
@@ -47,9 +48,156 @@
           </div>
         </div>
 
-        <form id="product-form" class="admin-form" enctype="multipart/form-data">
-          <input id="product-id" name="productId" type="hidden" />
-          <div class="admin-form-grid">
+        <section class="admin-section">
+          <div class="admin-section-head">
+            <h2>Storefront Design</h2>
+            <p>Control brand/logo, all customer-facing text, and colors.</p>
+          </div>
+          <form id="site-settings-form" class="admin-form" enctype="multipart/form-data">
+            <div class="admin-form-grid">
+              <label>
+                Brand Name
+                <input id="site-brand-name" name="brandName" type="text" maxlength="80" required />
+              </label>
+              <label>
+                Brand Mark (fallback letter)
+                <input id="site-brand-mark" name="brandMark" type="text" maxlength="4" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Upload Logo Image
+                <input id="site-logo-file" name="logoImage" type="file" accept="image/*" />
+              </label>
+              <label>
+                Or Logo Image URL
+                <input
+                  id="site-logo-url"
+                  name="logoImageUrl"
+                  type="url"
+                  placeholder="https://example.com/logo.png"
+                />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="site-remove-logo" name="removeLogo" type="checkbox" />
+              Remove logo image (show brand mark letter instead)
+            </label>
+
+            <div class="admin-form-grid">
+              <label>
+                Browser Tab Title
+                <input id="site-page-title" name="pageTitle" type="text" maxlength="100" required />
+              </label>
+              <label>
+                Hero Button Label
+                <input id="site-hero-cta-label" name="heroCtaLabel" type="text" maxlength="60" required />
+              </label>
+            </div>
+            <label>
+              Page Description
+              <textarea id="site-page-description" name="pageDescription" rows="2" maxlength="220" required></textarea>
+            </label>
+            <div class="admin-form-grid">
+              <label>
+                Hero Eyebrow
+                <input id="site-hero-eyebrow" name="heroEyebrow" type="text" maxlength="80" required />
+              </label>
+              <label>
+                Hero Title
+                <input id="site-hero-title" name="heroTitle" type="text" maxlength="180" required />
+              </label>
+            </div>
+            <label>
+              Hero Copy
+              <textarea id="site-hero-copy" name="heroCopy" rows="3" maxlength="600" required></textarea>
+            </label>
+            <div class="admin-form-grid">
+              <label>
+                Featured Section Title
+                <input id="site-featured-title" name="featuredTitle" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Featured Section Copy
+                <input id="site-featured-copy" name="featuredCopy" type="text" maxlength="400" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Promise 1 Title
+                <input id="site-promise-1-title" name="promise1Title" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Promise 1 Copy
+                <input id="site-promise-1-copy" name="promise1Copy" type="text" maxlength="400" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Promise 2 Title
+                <input id="site-promise-2-title" name="promise2Title" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Promise 2 Copy
+                <input id="site-promise-2-copy" name="promise2Copy" type="text" maxlength="400" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Promise 3 Title
+                <input id="site-promise-3-title" name="promise3Title" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Promise 3 Copy
+                <input id="site-promise-3-copy" name="promise3Copy" type="text" maxlength="400" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Footer Left Text
+                <input id="site-footer-left" name="footerLeft" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Footer Right Text
+                <input id="site-footer-right" name="footerRight" type="text" maxlength="120" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Accent Color
+                <input id="site-theme-accent" name="themeAccent" type="color" required />
+              </label>
+              <label>
+                Accent Strong Color
+                <input id="site-theme-accent-strong" name="themeAccentStrong" type="color" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Background Color
+                <input id="site-theme-background" name="themeBackground" type="color" required />
+              </label>
+              <label>
+                Text Color
+                <input id="site-theme-ink" name="themeInk" type="color" required />
+              </label>
+            </div>
+            <div class="admin-form-actions">
+              <button id="save-site-settings-btn" class="primary-btn" type="submit">Save Storefront Design</button>
+              <button id="reset-site-settings-btn" class="ghost-btn" type="button">Reset Unsaved Changes</button>
+            </div>
+          </form>
+          <p id="design-message" class="checkout-message"></p>
+        </section>
+
+        <section class="admin-section">
+          <div class="admin-section-head">
+            <h2>Products</h2>
+            <p>Add new books, upload cover images, and update prices instantly.</p>
+          </div>
+          <form id="product-form" class="admin-form" enctype="multipart/form-data">
+            <input id="product-id" name="productId" type="hidden" />
+            <div class="admin-form-grid">
             <label>
               Title
               <input id="product-title" name="title" type="text" maxlength="140" required />
@@ -86,10 +234,11 @@
             <button id="save-product-btn" class="primary-btn" type="submit">Save Product</button>
             <button id="cancel-edit-btn" class="ghost-btn" type="button">Cancel Edit</button>
           </div>
-        </form>
+          </form>
 
-        <p id="admin-message" class="checkout-message"></p>
-        <div id="admin-products" class="admin-products"></div>
+          <p id="admin-message" class="checkout-message"></p>
+          <div id="admin-products" class="admin-products"></div>
+        </section>
       </section>
     </main>
 
