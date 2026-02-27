@@ -328,6 +328,45 @@ h1 {
   font-size: 0.92rem;
 }
 
+.footer-link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  padding: 0.36rem 0.9rem;
+  background: #fff;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.delivery-wrap {
+  padding: 2.2rem 0 3.8rem;
+}
+
+.delivery-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: #fffefb;
+  box-shadow: var(--shadow);
+  padding: 1.4rem;
+}
+
+.delivery-card h1 {
+  margin-bottom: 0.9rem;
+}
+
+.delivery-card p {
+  margin: 0 0 0.95rem;
+  color: var(--ink-soft);
+}
+
+.delivery-link {
+  color: var(--accent-strong);
+  word-break: break-word;
+}
+
 .cart-panel {
   position: fixed;
   inset: 0;
