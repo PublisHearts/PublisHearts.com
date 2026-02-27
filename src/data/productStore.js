@@ -9,6 +9,11 @@ dotenv.config();
 const fallbackImageUrl = "https://placehold.co/600x800/f2ece1/35211f?text=Book+Cover";
 const productsFilePath =
   (process.env.PRODUCTS_FILE || "").trim() || path.join(process.cwd(), "data", "products.json");
+const parsedDefaultShippingFee = Number.parseFloat(String(process.env.DEFAULT_SHIPPING_FEE || "5"));
+const defaultShippingFeeCents =
+  Number.isFinite(parsedDefaultShippingFee) && parsedDefaultShippingFee >= 0
+    ? Math.round(parsedDefaultShippingFee * 100)
+    : 500;
 
 let loaded = false;
 let products = [];
@@ -24,6 +29,10 @@ function cloneProduct(product) {
     included: product.included,
     priceCents: product.priceCents,
     imageUrl: product.imageUrl,
+    shippingEnabled: Boolean(product.shippingEnabled),
+    shippingFeeCents: Number.isFinite(product.shippingFeeCents)
+      ? product.shippingFeeCents
+      : defaultShippingFeeCents,
     inStock: Boolean(product.inStock),
     sortOrder: Number.isFinite(product.sortOrder) ? product.sortOrder : 0
   };
@@ -94,6 +103,43 @@ function cleanInStock(value, defaultValue = true) {
   throw new ProductValidationError("In-stock flag must be true or false.");
 }
 
+function cleanShippingEnabled(value, defaultValue = true) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const text = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(text)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(text)) {
+    return false;
+  }
+
+  throw new ProductValidationError("Shipping toggle must be true or false.");
+}
+
+function cleanShippingFeeCents(value, defaultValue = defaultShippingFeeCents) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new ProductValidationError("Shipping fee is invalid.");
+  }
+
+  const rounded = Math.round(parsed);
+  if (rounded < 0 || rounded > 100000) {
+    throw new ProductValidationError("Shipping fee must be between $0.00 and $1,000.00.");
+  }
+  return rounded;
+}
+
 function cleanSortOrder(value, fallbackSortOrder = 0) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -125,6 +171,8 @@ function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
   const included = cleanOptionalText(raw.included, 800, "What's included");
   const priceCents = cleanPriceCents(raw.priceCents);
   const imageUrl = cleanImageUrl(raw.imageUrl);
+  const shippingEnabled = cleanShippingEnabled(raw.shippingEnabled, true);
+  const shippingFeeCents = cleanShippingFeeCents(raw.shippingFeeCents, defaultShippingFeeCents);
   const inStock = cleanInStock(raw.inStock, true);
   const sortOrder = cleanSortOrder(raw.sortOrder, fallbackSortOrder);
   const idCandidate = slugify(raw.id) || buildIdFromTitle(title, new Set());
@@ -136,6 +184,8 @@ function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
     included,
     priceCents,
     imageUrl,
+    shippingEnabled,
+    shippingFeeCents,
     inStock,
     sortOrder
   };
@@ -226,7 +276,16 @@ export async function findProductById(productId) {
   return found ? cloneProduct(found) : null;
 }
 
-export async function createProduct({ title, subtitle, included, priceCents, imageUrl, inStock }) {
+export async function createProduct({
+  title,
+  subtitle,
+  included,
+  priceCents,
+  imageUrl,
+  inStock,
+  shippingEnabled,
+  shippingFeeCents
+}) {
   await ensureLoaded();
 
   const cleanTitle = cleanText(title, 140, "Title");
@@ -235,6 +294,8 @@ export async function createProduct({ title, subtitle, included, priceCents, ima
   const cleanPrice = cleanPriceCents(priceCents);
   const cleanImage = cleanImageUrl(imageUrl);
   const cleanAvailability = cleanInStock(inStock, true);
+  const cleanShippingToggle = cleanShippingEnabled(shippingEnabled, true);
+  const cleanShippingFee = cleanShippingFeeCents(shippingFeeCents, defaultShippingFeeCents);
   const usedIds = new Set(products.map((product) => product.id));
   const id = buildIdFromTitle(cleanTitle, usedIds);
 
@@ -245,6 +306,8 @@ export async function createProduct({ title, subtitle, included, priceCents, ima
     included: cleanIncluded,
     priceCents: cleanPrice,
     imageUrl: cleanImage,
+    shippingEnabled: cleanShippingToggle,
+    shippingFeeCents: cleanShippingFee,
     inStock: cleanAvailability,
     sortOrder: products.length
   };
@@ -277,6 +340,14 @@ export async function updateProduct(productId, changes) {
     priceCents:
       changes.priceCents !== undefined ? cleanPriceCents(changes.priceCents) : current.priceCents,
     imageUrl: changes.imageUrl !== undefined ? cleanImageUrl(changes.imageUrl) : current.imageUrl,
+    shippingEnabled:
+      changes.shippingEnabled !== undefined
+        ? cleanShippingEnabled(changes.shippingEnabled, current.shippingEnabled)
+        : current.shippingEnabled,
+    shippingFeeCents:
+      changes.shippingFeeCents !== undefined
+        ? cleanShippingFeeCents(changes.shippingFeeCents, current.shippingFeeCents)
+        : current.shippingFeeCents,
     inStock:
       changes.inStock !== undefined ? cleanInStock(changes.inStock, current.inStock) : current.inStock,
     sortOrder: current.sortOrder

@@ -1,5 +1,7 @@
 const receiptCopy = document.getElementById("receipt-copy");
 const orderItems = document.getElementById("order-items");
+const orderItemsSubtotal = document.getElementById("order-items-subtotal");
+const orderShipping = document.getElementById("order-shipping");
 const orderTotal = document.getElementById("order-total");
 const shippingName = document.getElementById("shipping-name");
 const shippingAddress = document.getElementById("shipping-address");
@@ -22,6 +24,11 @@ function formatAddress(address) {
     .join(", ");
 }
 
+function isShippingLineItem(item) {
+  const name = String(item?.name || "").trim().toLowerCase();
+  return name === "shipping";
+}
+
 async function loadOrder() {
   const sessionId = new URLSearchParams(window.location.search).get("session_id");
   if (!sessionId) {
@@ -39,13 +46,26 @@ async function loadOrder() {
 
     receiptCopy.textContent =
       "A receipt email has been sent. Your shipping details and order summary are below.";
-    orderItems.innerHTML = order.lineItems
+    const shippingTotal = (order.lineItems || [])
+      .filter((item) => isShippingLineItem(item))
+      .reduce((sum, item) => sum + (Number(item.amountTotal) || 0), 0);
+
+    const productLineItems = (order.lineItems || []).filter((item) => !isShippingLineItem(item));
+
+    orderItems.innerHTML = productLineItems
       .map(
         (item) =>
           `<li><span>${item.name} x${item.quantity}</span><strong>${formatMoney(item.amountTotal, order.currency)}</strong></li>`
       )
       .join("");
 
+    if (productLineItems.length === 0) {
+      orderItems.innerHTML = `<li><span>No product lines available.</span><strong>-</strong></li>`;
+    }
+
+    const itemsSubtotalCents = Math.max(0, (Number(order.amountTotal) || 0) - shippingTotal);
+    orderItemsSubtotal.textContent = formatMoney(itemsSubtotalCents, order.currency);
+    orderShipping.textContent = formatMoney(shippingTotal, order.currency);
     orderTotal.textContent = formatMoney(order.amountTotal, order.currency);
     shippingName.textContent = order.shippingDetails?.name || "Name not provided";
     shippingAddress.textContent = formatAddress(order.shippingDetails?.address);

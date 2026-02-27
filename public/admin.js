@@ -10,6 +10,8 @@ const titleInput = document.getElementById("product-title");
 const subtitleInput = document.getElementById("product-subtitle");
 const includedInput = document.getElementById("product-included");
 const priceInput = document.getElementById("product-price");
+const shippingEnabledInput = document.getElementById("product-shipping-enabled");
+const shippingFeeInput = document.getElementById("product-shipping-fee");
 const imageFileInput = document.getElementById("product-image-file");
 const imageUrlInput = document.getElementById("product-image-url");
 const inStockInput = document.getElementById("product-in-stock");
@@ -67,6 +69,8 @@ const state = {
   dropTargetId: null,
   dropAfter: false
 };
+
+const DEFAULT_SHIPPING_FEE = 5;
 
 function setMessage(targetEl, message, isError = false) {
   if (!targetEl) {
@@ -138,11 +142,14 @@ function resetForm() {
   subtitleInput.value = "";
   includedInput.value = "";
   priceInput.value = "";
+  shippingEnabledInput.checked = true;
+  shippingFeeInput.value = DEFAULT_SHIPPING_FEE.toFixed(2);
   imageFileInput.value = "";
   imageUrlInput.value = "";
   inStockInput.checked = true;
   removeImageInput.checked = false;
   saveProductBtn.textContent = "Save Product";
+  syncShippingInputs();
 }
 
 function resetSiteSettingsDraftFields() {
@@ -200,11 +207,17 @@ function beginEdit(productId) {
   subtitleInput.value = product.subtitle || "";
   includedInput.value = product.included || "";
   priceInput.value = (product.priceCents / 100).toFixed(2);
+  shippingEnabledInput.checked = product.shippingEnabled !== false;
+  const shippingFeeCents = Number.isFinite(product.shippingFeeCents)
+    ? product.shippingFeeCents
+    : DEFAULT_SHIPPING_FEE * 100;
+  shippingFeeInput.value = (shippingFeeCents / 100).toFixed(2);
   imageUrlInput.value = "";
   imageFileInput.value = "";
   inStockInput.checked = product.inStock !== false;
   removeImageInput.checked = false;
   saveProductBtn.textContent = "Update Product";
+  syncShippingInputs();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -236,6 +249,13 @@ function renderProducts() {
             <span class="admin-stock-badge ${product.inStock === false ? "sold-out" : "in-stock"}">
               ${product.inStock === false ? "Sold Out" : "In Stock"}
             </span>
+            <span class="admin-stock-badge ${product.shippingEnabled === false ? "sold-out" : "in-stock"}">
+              ${
+                product.shippingEnabled === false
+                  ? "No Shipping Fee"
+                  : `Shipping ${formatMoney(product.shippingFeeCents || DEFAULT_SHIPPING_FEE * 100)}`
+              }
+            </span>
             <span class="admin-drag-hint">Drag to reorder</span>
           </div>
           <p class="admin-id">ID: ${product.id}</p>
@@ -253,6 +273,13 @@ async function loadProducts() {
   const products = await adminRequest("/api/admin/products");
   state.products = products;
   renderProducts();
+}
+
+function syncShippingInputs() {
+  if (!shippingEnabledInput || !shippingFeeInput) {
+    return;
+  }
+  shippingFeeInput.disabled = !shippingEnabledInput.checked;
 }
 
 async function loadSiteSettings() {
@@ -526,6 +553,10 @@ productForm.addEventListener("submit", async (event) => {
   formData.append("subtitle", subtitleInput.value);
   formData.append("included", includedInput.value);
   formData.append("price", priceInput.value);
+  formData.append("shippingEnabled", String(shippingEnabledInput.checked));
+  if (shippingEnabledInput.checked) {
+    formData.append("shippingFee", shippingFeeInput.value);
+  }
   formData.append("inStock", String(inStockInput.checked));
 
   const file = imageFileInput.files?.[0];
@@ -563,6 +594,10 @@ productForm.addEventListener("submit", async (event) => {
   } finally {
     setProductBusy(false);
   }
+});
+
+shippingEnabledInput.addEventListener("change", () => {
+  syncShippingInputs();
 });
 
 resetSiteSettingsBtn.addEventListener("click", () => {
@@ -633,3 +668,5 @@ siteSettingsForm.addEventListener("submit", async (event) => {
 ensureAuthenticated().catch(() => {
   showLogin();
 });
+
+syncShippingInputs();

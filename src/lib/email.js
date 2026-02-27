@@ -81,8 +81,17 @@ function normalizeLineItems(lineItems) {
     .filter((item) => Boolean(item.name));
 }
 
+function isShippingLineItem(item) {
+  return String(item?.name || "").trim().toLowerCase() === "shipping";
+}
+
 function getUnitsTotal(lineItems) {
-  return lineItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
+  return lineItems.reduce((sum, item) => {
+    if (isShippingLineItem(item)) {
+      return sum;
+    }
+    return sum + (item.quantity || 1);
+  }, 0);
 }
 
 function orderLineItemsHtml(lineItems, currency) {

@@ -11,6 +11,7 @@ Bookstore web app with:
 - product stock control (in stock / sold out)
 - drag-and-drop product ordering
 - homepage hero banner uploader
+- per-product shipping toggle + shipping fee
 
 ## Run local
 
@@ -40,6 +41,7 @@ Optional:
 - `PRODUCTS_FILE` (defaults to `data/products.json`)
 - `SITE_SETTINGS_FILE` (defaults to `data/site-settings.json`)
 - `UPLOADS_DIR` (defaults to `public/uploads`)
+- `DEFAULT_SHIPPING_FEE` (defaults to `5.00`, in USD)
 
 ## Admin dashboard (products + storefront design)
 
@@ -56,7 +58,7 @@ From the dashboard you can:
 - upload or remove a homepage hero banner image
 - add books
 - upload cover image files (`jpg`, `png`, `webp`, `gif`, max `6MB`)
-- set title, description, what's included, price, and in-stock status
+- set title, description, what's included, price, in-stock status, and shipping fee toggle
 - drag product cards to reorder storefront display
 - edit/delete existing products
 

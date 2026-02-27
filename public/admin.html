@@ -226,6 +226,23 @@
                 <input id="product-price" name="price" type="number" step="0.01" min="0.50" required />
               </label>
             </div>
+            <div class="admin-form-grid">
+              <label class="checkbox-row">
+                <input id="product-shipping-enabled" name="shippingEnabled" type="checkbox" checked />
+                Apply shipping fee
+              </label>
+              <label>
+                Shipping Fee (USD)
+                <input
+                  id="product-shipping-fee"
+                  name="shippingFee"
+                  type="number"
+                  step="0.01"
+                  min="0.00"
+                  value="5.00"
+                />
+              </label>
+            </div>
             <label>
               Description
               <textarea id="product-subtitle" name="subtitle" rows="3" maxlength="600"></textarea>

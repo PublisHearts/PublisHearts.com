@@ -179,6 +179,14 @@ function priceToCents(priceInput) {
   return Math.round(parsed * 100);
 }
 
+function optionalPriceToCents(priceInput) {
+  const raw = String(priceInput ?? "").trim();
+  if (!raw) {
+    return undefined;
+  }
+  return priceToCents(raw);
+}
+
 function imageUrlFromRequest(req, { allowUnset = false } = {}) {
   const typedUrl = String(req.body?.imageUrl || "").trim();
   if (req.file?.filename) {
@@ -405,7 +413,9 @@ app.post("/api/admin/products", requireAdmin, upload.single("image"), async (req
       included: req.body?.included,
       priceCents: priceToCents(req.body?.price),
       imageUrl: imageUrlFromRequest(req),
-      inStock: parseBooleanFlag(req.body?.inStock, true)
+      inStock: parseBooleanFlag(req.body?.inStock, true),
+      shippingEnabled: parseBooleanFlag(req.body?.shippingEnabled, true),
+      shippingFeeCents: optionalPriceToCents(req.body?.shippingFee)
     });
     return res.status(201).json(created);
   } catch (error) {
@@ -425,6 +435,8 @@ app.put("/api/admin/products/:id", requireAdmin, upload.single("image"), async (
   const imageUrl = removeImage ? "" : imageUrlFromRequest(req, { allowUnset: true });
   const nextPriceRaw = String(req.body?.price || "").trim();
   const nextPrice = nextPriceRaw ? priceToCents(nextPriceRaw) : undefined;
+  const shippingFeeRaw = String(req.body?.shippingFee || "").trim();
+  const nextShippingFee = shippingFeeRaw ? priceToCents(shippingFeeRaw) : undefined;
 
   try {
     const updated = await updateProduct(req.params.id, {
@@ -433,6 +445,8 @@ app.put("/api/admin/products/:id", requireAdmin, upload.single("image"), async (
       included: req.body?.included !== undefined ? req.body.included : undefined,
       priceCents: nextPriceRaw ? nextPrice : undefined,
       imageUrl,
+      shippingEnabled: parseBooleanFlag(req.body?.shippingEnabled, undefined),
+      shippingFeeCents: shippingFeeRaw ? nextShippingFee : undefined,
       inStock: parseBooleanFlag(req.body?.inStock, undefined)
     });
 
@@ -491,6 +505,8 @@ app.post("/api/create-checkout-session", async (req, res) => {
   const lineItems = [];
   const cartSummaryParts = [];
   let unitsTotal = 0;
+  let itemsSubtotal = 0;
+  let shippingTotal = 0;
   for (const item of cart) {
     const product = await findProductById(item.id);
     if (!product) {
@@ -502,6 +518,10 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
     const quantity = Math.max(1, Math.min(10, Number.parseInt(item.quantity, 10) || 1));
     unitsTotal += quantity;
+    itemsSubtotal += product.priceCents * quantity;
+    if (product.shippingEnabled) {
+      shippingTotal += (product.shippingFeeCents || 0) * quantity;
+    }
     cartSummaryParts.push(`${product.title} x${quantity}`);
     lineItems.push({
       price_data: {
@@ -514,6 +534,21 @@ app.post("/api/create-checkout-session", async (req, res) => {
       },
       quantity
     });
+  }
+
+  if (shippingTotal > 0) {
+    lineItems.push({
+      price_data: {
+        currency,
+        unit_amount: shippingTotal,
+        product_data: {
+          name: "Shipping",
+          description: "Standard shipping"
+        }
+      },
+      quantity: 1
+    });
+    cartSummaryParts.push("Shipping x1");
   }
 
   try {
@@ -536,6 +571,8 @@ app.post("/api/create-checkout-session", async (req, res) => {
       metadata: {
         storefront: "publishearts.com",
         units_total: String(unitsTotal),
+        items_subtotal_cents: String(itemsSubtotal),
+        shipping_total_cents: String(shippingTotal),
         cart_summary: cartSummaryParts.join(" | ").slice(0, 500)
       }
     });

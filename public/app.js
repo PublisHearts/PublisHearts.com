@@ -3,6 +3,8 @@ const cartPanel = document.getElementById("cart-panel");
 const cartItems = document.getElementById("cart-items");
 const cartCount = document.getElementById("cart-count");
 const cartSubtotal = document.getElementById("cart-subtotal");
+const cartShipping = document.getElementById("cart-shipping");
+const cartTotal = document.getElementById("cart-total");
 const checkoutBtn = document.getElementById("checkout-btn");
 const checkoutMessage = document.getElementById("checkout-message");
 const openCartBtn = document.getElementById("open-cart");
@@ -62,11 +64,11 @@ function setStripeLinkedText(el, value) {
   const securityToken = "[[SECURITY_LINK]]";
   const decoratedText = text
     .replace(
-      /Privacy Policy\s*[—-]\s*https:\/\/stripe\.com\/privacy/gi,
+      /Privacy Policy\s*[\u2014-]\s*https:\/\/stripe\.com\/privacy/gi,
       privacyToken
     )
     .replace(
-      /Security Overview\s*[—-]\s*https:\/\/stripe\.com\/docs\/security/gi,
+      /Security Overview\s*[\u2014-]\s*https:\/\/stripe\.com\/docs\/security/gi,
       securityToken
     );
 
@@ -251,6 +253,20 @@ function getSubtotal() {
   return getCartRows().reduce((sum, item) => sum + item.priceCents * item.quantity, 0);
 }
 
+function getShippingTotal() {
+  return getCartRows().reduce((sum, item) => {
+    if (!item.shippingEnabled) {
+      return sum;
+    }
+    const fee = Number.isFinite(item.shippingFeeCents) ? item.shippingFeeCents : 500;
+    return sum + fee * item.quantity;
+  }, 0);
+}
+
+function getOrderTotal() {
+  return getSubtotal() + getShippingTotal();
+}
+
 function setCheckoutMessage(message, isError = false) {
   checkoutMessage.textContent = message || "";
   checkoutMessage.classList.toggle("error", Boolean(isError));
@@ -259,8 +275,18 @@ function setCheckoutMessage(message, isError = false) {
 function updateCartUi() {
   const rows = getCartRows();
   const itemCount = rows.reduce((sum, item) => sum + item.quantity, 0);
+  const subtotal = getSubtotal();
+  const shippingTotal = getShippingTotal();
   cartCount.textContent = String(itemCount);
-  cartSubtotal.textContent = formatMoney(getSubtotal());
+  if (cartSubtotal) {
+    cartSubtotal.textContent = formatMoney(subtotal);
+  }
+  if (cartShipping) {
+    cartShipping.textContent = formatMoney(shippingTotal);
+  }
+  if (cartTotal) {
+    cartTotal.textContent = formatMoney(subtotal + shippingTotal);
+  }
   checkoutBtn.disabled = rows.length === 0 || state.checkingOut;
 
   if (rows.length === 0) {
@@ -301,6 +327,11 @@ function renderProducts() {
             <div>
               <h3 class="product-title">${product.title}</h3>
               <p class="product-subtitle">${product.subtitle}</p>
+              ${
+                product.shippingEnabled
+                  ? `<p class="product-stock">+ ${formatMoney(product.shippingFeeCents || 500)} shipping</p>`
+                  : ""
+              }
               ${product.inStock === false ? '<p class="product-stock sold-out-text">Currently sold out</p>' : ""}
             </div>
             <details class="included-tab">
@@ -487,3 +518,4 @@ loadSiteSettings().catch(() => {});
 loadProducts().catch(() => {
   productsGrid.innerHTML = `<p>Could not load books. Refresh and try again.</p>`;
 });
+
