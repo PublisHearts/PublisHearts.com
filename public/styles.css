@@ -305,6 +305,25 @@ h1 {
   gap: 0.8rem;
 }
 
+.included-tab {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.5rem 0.65rem;
+  background: #fffaf4;
+}
+
+.included-tab summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #5a4736;
+}
+
+.included-tab p {
+  margin: 0.45rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
 .price {
   font-weight: 700;
 }

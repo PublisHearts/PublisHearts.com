@@ -8,6 +8,7 @@ const productForm = document.getElementById("product-form");
 const productIdInput = document.getElementById("product-id");
 const titleInput = document.getElementById("product-title");
 const subtitleInput = document.getElementById("product-subtitle");
+const includedInput = document.getElementById("product-included");
 const priceInput = document.getElementById("product-price");
 const imageFileInput = document.getElementById("product-image-file");
 const imageUrlInput = document.getElementById("product-image-url");
@@ -135,6 +136,7 @@ function resetForm() {
   productIdInput.value = "";
   titleInput.value = "";
   subtitleInput.value = "";
+  includedInput.value = "";
   priceInput.value = "";
   imageFileInput.value = "";
   imageUrlInput.value = "";
@@ -196,6 +198,7 @@ function beginEdit(productId) {
   productIdInput.value = product.id;
   titleInput.value = product.title;
   subtitleInput.value = product.subtitle || "";
+  includedInput.value = product.included || "";
   priceInput.value = (product.priceCents / 100).toFixed(2);
   imageUrlInput.value = "";
   imageFileInput.value = "";
@@ -228,6 +231,7 @@ function renderProducts() {
             <strong>${formatMoney(product.priceCents)}</strong>
           </div>
           <p>${product.subtitle || "No description"}</p>
+          ${product.included ? `<p><strong>What's included:</strong> ${product.included}</p>` : ""}
           <div class="admin-badges">
             <span class="admin-stock-badge ${product.inStock === false ? "sold-out" : "in-stock"}">
               ${product.inStock === false ? "Sold Out" : "In Stock"}
@@ -520,6 +524,7 @@ productForm.addEventListener("submit", async (event) => {
   const formData = new FormData();
   formData.append("title", titleInput.value);
   formData.append("subtitle", subtitleInput.value);
+  formData.append("included", includedInput.value);
   formData.append("price", priceInput.value);
   formData.append("inStock", String(inStockInput.checked));
 

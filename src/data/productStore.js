@@ -21,6 +21,7 @@ function cloneProduct(product) {
     id: product.id,
     title: product.title,
     subtitle: product.subtitle,
+    included: product.included,
     priceCents: product.priceCents,
     imageUrl: product.imageUrl,
     inStock: Boolean(product.inStock),
@@ -39,10 +40,10 @@ function cleanText(value, maxLength, fieldName) {
   return text;
 }
 
-function cleanOptionalText(value, maxLength) {
+function cleanOptionalText(value, maxLength, fieldName = "Description") {
   const text = String(value || "").trim();
   if (text.length > maxLength) {
-    throw new ProductValidationError(`Description must be ${maxLength} characters or less.`);
+    throw new ProductValidationError(`${fieldName} must be ${maxLength} characters or less.`);
   }
   return text;
 }
@@ -120,7 +121,8 @@ function buildIdFromTitle(title, existingIds) {
 
 function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
   const title = cleanText(raw.title, 140, "Title");
-  const subtitle = cleanOptionalText(raw.subtitle, 600);
+  const subtitle = cleanOptionalText(raw.subtitle, 600, "Description");
+  const included = cleanOptionalText(raw.included, 800, "What's included");
   const priceCents = cleanPriceCents(raw.priceCents);
   const imageUrl = cleanImageUrl(raw.imageUrl);
   const inStock = cleanInStock(raw.inStock, true);
@@ -131,6 +133,7 @@ function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
     id: idCandidate,
     title,
     subtitle,
+    included,
     priceCents,
     imageUrl,
     inStock,
@@ -223,11 +226,12 @@ export async function findProductById(productId) {
   return found ? cloneProduct(found) : null;
 }
 
-export async function createProduct({ title, subtitle, priceCents, imageUrl, inStock }) {
+export async function createProduct({ title, subtitle, included, priceCents, imageUrl, inStock }) {
   await ensureLoaded();
 
   const cleanTitle = cleanText(title, 140, "Title");
-  const cleanSubtitle = cleanOptionalText(subtitle, 600);
+  const cleanSubtitle = cleanOptionalText(subtitle, 600, "Description");
+  const cleanIncluded = cleanOptionalText(included, 800, "What's included");
   const cleanPrice = cleanPriceCents(priceCents);
   const cleanImage = cleanImageUrl(imageUrl);
   const cleanAvailability = cleanInStock(inStock, true);
@@ -238,6 +242,7 @@ export async function createProduct({ title, subtitle, priceCents, imageUrl, inS
     id,
     title: cleanTitle,
     subtitle: cleanSubtitle,
+    included: cleanIncluded,
     priceCents: cleanPrice,
     imageUrl: cleanImage,
     inStock: cleanAvailability,
@@ -262,7 +267,13 @@ export async function updateProduct(productId, changes) {
     ...current,
     title: changes.title !== undefined ? cleanText(changes.title, 140, "Title") : current.title,
     subtitle:
-      changes.subtitle !== undefined ? cleanOptionalText(changes.subtitle, 600) : current.subtitle,
+      changes.subtitle !== undefined
+        ? cleanOptionalText(changes.subtitle, 600, "Description")
+        : current.subtitle,
+    included:
+      changes.included !== undefined
+        ? cleanOptionalText(changes.included, 800, "What's included")
+        : current.included,
     priceCents:
       changes.priceCents !== undefined ? cleanPriceCents(changes.priceCents) : current.priceCents,
     imageUrl: changes.imageUrl !== undefined ? cleanImageUrl(changes.imageUrl) : current.imageUrl,

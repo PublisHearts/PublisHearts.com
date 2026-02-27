@@ -56,7 +56,7 @@ From the dashboard you can:
 - upload or remove a homepage hero banner image
 - add books
 - upload cover image files (`jpg`, `png`, `webp`, `gif`, max `6MB`)
-- set title, description, price, and in-stock status
+- set title, description, what's included, price, and in-stock status
 - drag product cards to reorder storefront display
 - edit/delete existing products
 

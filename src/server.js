@@ -402,6 +402,7 @@ app.post("/api/admin/products", requireAdmin, upload.single("image"), async (req
     const created = await createProduct({
       title: req.body?.title,
       subtitle: req.body?.subtitle,
+      included: req.body?.included,
       priceCents: priceToCents(req.body?.price),
       imageUrl: imageUrlFromRequest(req),
       inStock: parseBooleanFlag(req.body?.inStock, true)
@@ -429,6 +430,7 @@ app.put("/api/admin/products/:id", requireAdmin, upload.single("image"), async (
     const updated = await updateProduct(req.params.id, {
       title: req.body?.title !== undefined ? req.body.title : undefined,
       subtitle: req.body?.subtitle !== undefined ? req.body.subtitle : undefined,
+      included: req.body?.included !== undefined ? req.body.included : undefined,
       priceCents: nextPriceRaw ? nextPrice : undefined,
       imageUrl,
       inStock: parseBooleanFlag(req.body?.inStock, undefined)

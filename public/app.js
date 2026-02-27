@@ -303,6 +303,10 @@ function renderProducts() {
               <p class="product-subtitle">${product.subtitle}</p>
               ${product.inStock === false ? '<p class="product-stock sold-out-text">Currently sold out</p>' : ""}
             </div>
+            <details class="included-tab">
+              <summary>What's Included</summary>
+              <p>${product.included || "No extras listed for this title yet."}</p>
+            </details>
             <div class="product-row">
               <span class="price">${formatMoney(product.priceCents)}</span>
               <button
