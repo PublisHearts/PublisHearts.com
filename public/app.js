@@ -46,6 +46,29 @@ function formatMoney(amountCents = 0) {
   }).format(amountCents / 100);
 }
 
+function isShippingEnabled(product) {
+  if (!product) {
+    return false;
+  }
+  if (product.shippingEnabled === true) {
+    return true;
+  }
+  if (product.shippingEnabled === false) {
+    return false;
+  }
+
+  const text = String(product.shippingEnabled || "")
+    .trim()
+    .toLowerCase();
+  if (["false", "0", "no", "off"].includes(text)) {
+    return false;
+  }
+  if (["true", "1", "yes", "on"].includes(text)) {
+    return true;
+  }
+  return true;
+}
+
 function setText(el, value) {
   const text = String(value || "").trim();
   if (!el || !text) {
@@ -255,7 +278,7 @@ function getSubtotal() {
 
 function getShippingTotal() {
   return getCartRows().reduce((sum, item) => {
-    if (!item.shippingEnabled) {
+    if (!isShippingEnabled(item)) {
       return sum;
     }
     const fee = Number.isFinite(item.shippingFeeCents) ? item.shippingFeeCents : 500;
@@ -328,7 +351,7 @@ function renderProducts() {
               <h3 class="product-title">${product.title}</h3>
               <p class="product-subtitle">${product.subtitle}</p>
               ${
-                product.shippingEnabled
+                isShippingEnabled(product)
                   ? `<p class="product-stock">+ ${formatMoney(product.shippingFeeCents || 500)} shipping</p>`
                   : ""
               }

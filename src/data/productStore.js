@@ -21,6 +21,25 @@ let writeQueue = Promise.resolve();
 
 export class ProductValidationError extends Error {}
 
+function parseStoredBoolean(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const text = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "on", "instock", "in-stock", "available"].includes(text)) {
+    return true;
+  }
+  if (["false", "0", "no", "off", "soldout", "sold-out", "outofstock", "out-of-stock"].includes(text)) {
+    return false;
+  }
+
+  return fallback;
+}
+
 function cloneProduct(product) {
   return {
     id: product.id,
@@ -29,11 +48,11 @@ function cloneProduct(product) {
     included: product.included,
     priceCents: product.priceCents,
     imageUrl: product.imageUrl,
-    shippingEnabled: Boolean(product.shippingEnabled),
+    shippingEnabled: parseStoredBoolean(product.shippingEnabled, true),
     shippingFeeCents: Number.isFinite(product.shippingFeeCents)
       ? product.shippingFeeCents
       : defaultShippingFeeCents,
-    inStock: Boolean(product.inStock),
+    inStock: parseStoredBoolean(product.inStock, true),
     sortOrder: Number.isFinite(product.sortOrder) ? product.sortOrder : 0
   };
 }

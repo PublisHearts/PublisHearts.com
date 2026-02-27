@@ -207,7 +207,7 @@ function beginEdit(productId) {
   subtitleInput.value = product.subtitle || "";
   includedInput.value = product.included || "";
   priceInput.value = (product.priceCents / 100).toFixed(2);
-  shippingEnabledInput.checked = product.shippingEnabled !== false;
+  shippingEnabledInput.checked = isShippingEnabled(product);
   const shippingFeeCents = Number.isFinite(product.shippingFeeCents)
     ? product.shippingFeeCents
     : DEFAULT_SHIPPING_FEE * 100;
@@ -228,6 +228,29 @@ function formatMoney(cents) {
   }).format((Number(cents) || 0) / 100);
 }
 
+function isShippingEnabled(product) {
+  if (!product) {
+    return false;
+  }
+  if (product.shippingEnabled === true) {
+    return true;
+  }
+  if (product.shippingEnabled === false) {
+    return false;
+  }
+
+  const text = String(product.shippingEnabled || "")
+    .trim()
+    .toLowerCase();
+  if (["false", "0", "no", "off"].includes(text)) {
+    return false;
+  }
+  if (["true", "1", "yes", "on"].includes(text)) {
+    return true;
+  }
+  return true;
+}
+
 function renderProducts() {
   if (state.products.length === 0) {
     productsEl.innerHTML = `<p class="cart-item-sub">No products yet. Add your first book above.</p>`;
@@ -236,7 +259,13 @@ function renderProducts() {
 
   productsEl.innerHTML = state.products
     .map(
-      (product) => `<article class="admin-product-card" draggable="true" data-id="${product.id}">
+      (product) => {
+        const shippingEnabled = isShippingEnabled(product);
+        const shippingFee = Number.isFinite(product.shippingFeeCents)
+          ? product.shippingFeeCents
+          : DEFAULT_SHIPPING_FEE * 100;
+
+        return `<article class="admin-product-card" draggable="true" data-id="${product.id}">
         <img class="admin-product-image" src="${product.imageUrl}" alt="${product.title} cover" />
         <div class="admin-product-body">
           <div class="row-between">
@@ -249,11 +278,11 @@ function renderProducts() {
             <span class="admin-stock-badge ${product.inStock === false ? "sold-out" : "in-stock"}">
               ${product.inStock === false ? "Sold Out" : "In Stock"}
             </span>
-            <span class="admin-stock-badge ${product.shippingEnabled === false ? "sold-out" : "in-stock"}">
+            <span class="admin-stock-badge ${shippingEnabled ? "in-stock" : "sold-out"}">
               ${
-                product.shippingEnabled === false
+                !shippingEnabled
                   ? "No Shipping Fee"
-                  : `Shipping ${formatMoney(product.shippingFeeCents || DEFAULT_SHIPPING_FEE * 100)}`
+                  : `Shipping ${formatMoney(shippingFee)}`
               }
             </span>
             <span class="admin-drag-hint">Drag to reorder</span>
@@ -261,10 +290,14 @@ function renderProducts() {
           <p class="admin-id">ID: ${product.id}</p>
           <div class="admin-card-actions">
             <button class="ghost-btn" type="button" data-action="edit" data-id="${product.id}">Edit</button>
+            <button class="ghost-btn" type="button" data-action="toggle-shipping" data-id="${product.id}">
+              ${shippingEnabled ? "Turn Shipping Off" : "Turn Shipping On"}
+            </button>
             <button class="danger-btn" type="button" data-action="delete" data-id="${product.id}">Delete</button>
           </div>
         </div>
-      </article>`
+      </article>`;
+      }
     )
     .join("");
 }
@@ -438,6 +471,42 @@ productsEl.addEventListener("click", async (event) => {
 
   if (action === "edit") {
     beginEdit(productId);
+    return;
+  }
+
+  if (action === "toggle-shipping") {
+    const product = state.products.find((item) => item.id === productId);
+    if (!product) {
+      return;
+    }
+
+    const nextShippingEnabled = !isShippingEnabled(product);
+    try {
+      setProductMessage(
+        nextShippingEnabled ? "Turning shipping on..." : "Turning shipping off..."
+      );
+      await adminRequest(`/api/admin/products/${encodeURIComponent(productId)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          shippingEnabled: nextShippingEnabled
+        })
+      });
+      await loadProducts();
+      setProductMessage(
+        nextShippingEnabled
+          ? `Shipping enabled for "${product.title}".`
+          : `Shipping disabled for "${product.title}".`
+      );
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setProductMessage(error.message || "Could not update shipping setting.", true);
+    }
     return;
   }
 

@@ -519,7 +519,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
     const quantity = Math.max(1, Math.min(10, Number.parseInt(item.quantity, 10) || 1));
     unitsTotal += quantity;
     itemsSubtotal += product.priceCents * quantity;
-    if (product.shippingEnabled) {
+    if (product.shippingEnabled === true) {
       shippingTotal += (product.shippingFeeCents || 0) * quantity;
     }
     cartSummaryParts.push(`${product.title} x${quantity}`);
