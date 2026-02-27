@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PublisHearts Admin</title>
+    <meta name="description" content="PublisHearts product manager" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="admin-page">
+    <header class="site-header">
+      <div class="container row-between">
+        <a class="brand" href="/">
+          <span class="brand-mark">P</span>
+          <span>PublisHearts</span>
+        </a>
+        <a class="ghost-btn" href="/">Back to Store</a>
+      </div>
+    </header>
+
+    <main class="container admin-shell">
+      <section id="login-card" class="admin-login-card">
+        <h1>Admin Login</h1>
+        <p>Use your admin password to manage books, covers, pricing, and descriptions.</p>
+        <form id="login-form" class="admin-login-form">
+          <label for="admin-password">Password</label>
+          <input id="admin-password" name="password" type="password" autocomplete="current-password" required />
+          <button class="primary-btn block" type="submit">Sign in</button>
+        </form>
+      </section>
+
+      <section id="admin-panel" class="admin-panel hidden">
+        <div class="admin-toolbar">
+          <div>
+            <h1>Product Manager</h1>
+            <p>Add new books, upload cover images, and update prices instantly.</p>
+          </div>
+          <div class="admin-toolbar-actions">
+            <button id="new-product-btn" class="ghost-btn" type="button">Add New Book</button>
+            <button id="logout-btn" class="ghost-btn" type="button">Log out</button>
+          </div>
+        </div>
+
+        <form id="product-form" class="admin-form" enctype="multipart/form-data">
+          <input id="product-id" name="productId" type="hidden" />
+          <div class="admin-form-grid">
+            <label>
+              Title
+              <input id="product-title" name="title" type="text" maxlength="140" required />
+            </label>
+            <label>
+              Price (USD)
+              <input id="product-price" name="price" type="number" step="0.01" min="0.50" required />
+            </label>
+          </div>
+          <label>
+            Description
+            <textarea id="product-subtitle" name="subtitle" rows="3" maxlength="600"></textarea>
+          </label>
+          <div class="admin-form-grid">
+            <label>
+              Upload cover image
+              <input id="product-image-file" name="image" type="file" accept="image/*" />
+            </label>
+            <label>
+              Or image URL
+              <input
+                id="product-image-url"
+                name="imageUrl"
+                type="url"
+                placeholder="https://example.com/book-cover.jpg"
+              />
+            </label>
+          </div>
+          <label class="checkbox-row">
+            <input id="remove-image" name="removeImage" type="checkbox" />
+            Remove current image (use default cover)
+          </label>
+          <div class="admin-form-actions">
+            <button id="save-product-btn" class="primary-btn" type="submit">Save Product</button>
+            <button id="cancel-edit-btn" class="ghost-btn" type="button">Cancel Edit</button>
+          </div>
+        </form>
+
+        <p id="admin-message" class="checkout-message"></p>
+        <div id="admin-products" class="admin-products"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/admin.js"></script>
+  </body>
+</html>

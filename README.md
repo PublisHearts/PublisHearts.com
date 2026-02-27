@@ -1,74 +1,74 @@
 # PublisHearts Store
 
-A free, production-style bookstore storefront with:
+Bookstore web app with:
 
-- polished frontend storefront
-- card payments through Stripe Checkout
-- customer receipt email after purchase
-- owner notification email with customer + shipping details
+- storefront + cart
+- Stripe card checkout
+- customer receipt email
+- owner order email with customer/shipping info
+- admin dashboard for product CRUD + cover image uploads
 
-## 1. Install
+## Run local
 
 ```bash
 npm install
+cp .env.example .env
+npm run dev
 ```
 
-## 2. Configure environment
+Default URL: `http://localhost:4242`
 
-Create a `.env` file from `.env.example` and fill in:
+## Environment variables
+
+Required:
 
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `OWNER_EMAIL`
-- SMTP settings (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `FROM_EMAIL`)
+- `SMTP_HOST`
+- `SMTP_USER`
+- `SMTP_PASS`
+- `FROM_EMAIL`
+- `ADMIN_PASSWORD`
 
-## 3. Run locally
+Optional:
 
-```bash
-npm run dev
-```
+- `PRODUCTS_FILE` (defaults to `data/products.json`)
+- `UPLOADS_DIR` (defaults to `public/uploads`)
 
-App runs on `http://localhost:4242` by default.
+## Admin dashboard (product uploader)
 
-## 4. Connect Stripe webhook (required for emails)
+Open:
 
-Install Stripe CLI, then run:
+- `http://localhost:4242/admin.html`
 
-```bash
-stripe listen --forward-to localhost:4242/api/webhooks/stripe
-```
+Login using `ADMIN_PASSWORD`.
 
-Copy the printed `whsec_...` value into `STRIPE_WEBHOOK_SECRET`.
+From the dashboard you can:
 
-## 5. Test card payment
+- add books
+- upload cover image files (`jpg`, `png`, `webp`, `gif`, max `6MB`)
+- set title, description, and price
+- edit/delete existing products
 
-Use Stripe test card:
+## Product storage
 
-- `4242 4242 4242 4242`
-- any future date
-- any CVC
-- any ZIP
+- Product data is saved to `data/products.json` by default.
+- Uploaded files are saved to `public/uploads` by default.
 
-## Customize books
+For production, use persistent storage paths if your host supports disks:
 
-Edit product catalog in:
+- `PRODUCTS_FILE=/var/data/products.json`
+- `UPLOADS_DIR=/var/data/uploads`
 
-- `src/data/products.js`
+## Stripe webhook
 
-Each product has:
+Set endpoint to:
 
-- `id`
-- `title`
-- `subtitle`
-- `priceCents`
-- `imageUrl`
+- `https://your-domain.com/api/webhooks/stripe`
 
-## Deploy for free
+Subscribe to event:
 
-You can deploy this app on free tiers such as:
+- `checkout.session.completed`
 
-- Render (Web Service)
-- Railway
-- Fly.io
-
-Set the same environment variables in your hosting dashboard and set `APP_URL` to your live domain.
+Then set returned signing secret as `STRIPE_WEBHOOK_SECRET`.
