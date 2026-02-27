@@ -13,6 +13,7 @@ import {
   ensureProductStore,
   findProductById,
   listProducts,
+  reorderProducts,
   updateProduct
 } from "./data/productStore.js";
 import { sendCustomerReceipt, sendOwnerNotification } from "./lib/email.js";
@@ -142,6 +143,34 @@ async function removeUploadedFile(file) {
   await fs.unlink(file.path).catch(() => {});
 }
 
+async function removeUploadedFiles(files, fieldNames = []) {
+  if (!files || typeof files !== "object") {
+    return;
+  }
+
+  const namesToDelete = fieldNames.length > 0 ? fieldNames : Object.keys(files);
+  const fileList = namesToDelete.flatMap((name) => (Array.isArray(files[name]) ? files[name] : []));
+  await Promise.all(fileList.map((file) => removeUploadedFile(file)));
+}
+
+function parseBooleanFlag(value, defaultValue = undefined) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const text = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(text)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(text)) {
+    return false;
+  }
+  return defaultValue;
+}
+
 function priceToCents(priceInput) {
   const parsed = Number.parseFloat(String(priceInput || ""));
   if (!Number.isFinite(parsed)) {
@@ -161,9 +190,19 @@ function imageUrlFromRequest(req, { allowUnset = false } = {}) {
   return allowUnset ? undefined : "";
 }
 
+function uploadedImageUrl(files, fieldName) {
+  const file = Array.isArray(files?.[fieldName]) ? files[fieldName][0] : null;
+  if (!file?.filename) {
+    return undefined;
+  }
+  return `/uploads/${file.filename}`;
+}
+
 function extractSiteSettingsChanges(req) {
   const removeLogo = String(req.body?.removeLogo || "").toLowerCase() === "true";
-  let logoImageUrl = req.file?.filename ? `/uploads/${req.file.filename}` : undefined;
+  const removeBanner = String(req.body?.removeBanner || "").toLowerCase() === "true";
+  let logoImageUrl = uploadedImageUrl(req.files, "logoImage");
+  let heroBannerImageUrl = uploadedImageUrl(req.files, "heroBannerImage");
   if (removeLogo) {
     logoImageUrl = "";
   } else {
@@ -172,10 +211,19 @@ function extractSiteSettingsChanges(req) {
       logoImageUrl = typedLogoUrl;
     }
   }
+  if (removeBanner) {
+    heroBannerImageUrl = "";
+  } else {
+    const typedBannerUrl = String(req.body?.heroBannerImageUrl || "").trim();
+    if (typedBannerUrl) {
+      heroBannerImageUrl = typedBannerUrl;
+    }
+  }
 
   const fields = [
     "brandName",
     "brandMark",
+    "heroBannerImageUrl",
     "pageTitle",
     "pageDescription",
     "heroEyebrow",
@@ -206,6 +254,9 @@ function extractSiteSettingsChanges(req) {
   }
   if (logoImageUrl !== undefined) {
     changes.logoImageUrl = logoImageUrl;
+  }
+  if (heroBannerImageUrl !== undefined) {
+    changes.heroBannerImageUrl = heroBannerImageUrl;
   }
 
   return changes;
@@ -325,12 +376,17 @@ app.get("/api/admin/site-settings", requireAdmin, async (req, res) => {
   res.json(settings);
 });
 
-app.put("/api/admin/site-settings", requireAdmin, upload.single("logoImage"), async (req, res) => {
+const siteSettingsUpload = upload.fields([
+  { name: "logoImage", maxCount: 1 },
+  { name: "heroBannerImage", maxCount: 1 }
+]);
+
+app.put("/api/admin/site-settings", requireAdmin, siteSettingsUpload, async (req, res) => {
   try {
     const updated = await updateSiteSettings(extractSiteSettingsChanges(req));
     return res.json(updated);
   } catch (error) {
-    await removeUploadedFile(req.file);
+    await removeUploadedFiles(req.files);
     if (error instanceof SiteSettingsValidationError) {
       return res.status(400).json({ error: error.message });
     }
@@ -347,7 +403,8 @@ app.post("/api/admin/products", requireAdmin, upload.single("image"), async (req
       title: req.body?.title,
       subtitle: req.body?.subtitle,
       priceCents: priceToCents(req.body?.price),
-      imageUrl: imageUrlFromRequest(req)
+      imageUrl: imageUrlFromRequest(req),
+      inStock: parseBooleanFlag(req.body?.inStock, true)
     });
     return res.status(201).json(created);
   } catch (error) {
@@ -373,7 +430,8 @@ app.put("/api/admin/products/:id", requireAdmin, upload.single("image"), async (
       title: req.body?.title !== undefined ? req.body.title : undefined,
       subtitle: req.body?.subtitle !== undefined ? req.body.subtitle : undefined,
       priceCents: nextPriceRaw ? nextPrice : undefined,
-      imageUrl
+      imageUrl,
+      inStock: parseBooleanFlag(req.body?.inStock, undefined)
     });
 
     if (!updated) {
@@ -391,6 +449,22 @@ app.put("/api/admin/products/:id", requireAdmin, upload.single("image"), async (
       return res.status(400).json({ error: error.message });
     }
     return res.status(500).json({ error: "Could not update product." });
+  }
+});
+
+app.post("/api/admin/products/reorder", requireAdmin, async (req, res) => {
+  try {
+    const productIds = Array.isArray(req.body?.productIds) ? req.body.productIds : [];
+    const reordered = await reorderProducts(productIds);
+    return res.json(reordered);
+  } catch (error) {
+    if (error instanceof ProductValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error?.message) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(500).json({ error: "Could not reorder products." });
   }
 });
 
@@ -419,6 +493,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
     const product = await findProductById(item.id);
     if (!product) {
       return res.status(400).json({ error: `Unknown product id: ${item.id}` });
+    }
+    if (!product.inStock) {
+      return res.status(400).json({ error: `${product.title} is sold out right now.` });
     }
 
     const quantity = Math.max(1, Math.min(10, Number.parseInt(item.quantity, 10) || 1));

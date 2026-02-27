@@ -83,6 +83,25 @@
               <input id="site-remove-logo" name="removeLogo" type="checkbox" />
               Remove logo image (show brand mark letter instead)
             </label>
+            <div class="admin-form-grid">
+              <label>
+                Upload Hero Banner Image
+                <input id="site-banner-file" name="heroBannerImage" type="file" accept="image/*" />
+              </label>
+              <label>
+                Or Hero Banner URL
+                <input
+                  id="site-banner-url"
+                  name="heroBannerImageUrl"
+                  type="url"
+                  placeholder="https://example.com/banner.jpg"
+                />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="site-remove-banner" name="removeBanner" type="checkbox" />
+              Remove hero banner image
+            </label>
 
             <div class="admin-form-grid">
               <label>
@@ -198,45 +217,50 @@
           <form id="product-form" class="admin-form" enctype="multipart/form-data">
             <input id="product-id" name="productId" type="hidden" />
             <div class="admin-form-grid">
+              <label>
+                Title
+                <input id="product-title" name="title" type="text" maxlength="140" required />
+              </label>
+              <label>
+                Price (USD)
+                <input id="product-price" name="price" type="number" step="0.01" min="0.50" required />
+              </label>
+            </div>
             <label>
-              Title
-              <input id="product-title" name="title" type="text" maxlength="140" required />
+              Description
+              <textarea id="product-subtitle" name="subtitle" rows="3" maxlength="600"></textarea>
             </label>
-            <label>
-              Price (USD)
-              <input id="product-price" name="price" type="number" step="0.01" min="0.50" required />
+            <div class="admin-form-grid">
+              <label>
+                Upload cover image
+                <input id="product-image-file" name="image" type="file" accept="image/*" />
+              </label>
+              <label>
+                Or image URL
+                <input
+                  id="product-image-url"
+                  name="imageUrl"
+                  type="url"
+                  placeholder="https://example.com/book-cover.jpg"
+                />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="product-in-stock" name="inStock" type="checkbox" checked />
+              In stock (customers can buy this)
             </label>
-          </div>
-          <label>
-            Description
-            <textarea id="product-subtitle" name="subtitle" rows="3" maxlength="600"></textarea>
-          </label>
-          <div class="admin-form-grid">
-            <label>
-              Upload cover image
-              <input id="product-image-file" name="image" type="file" accept="image/*" />
+            <label class="checkbox-row">
+              <input id="remove-image" name="removeImage" type="checkbox" />
+              Remove current image (use default cover)
             </label>
-            <label>
-              Or image URL
-              <input
-                id="product-image-url"
-                name="imageUrl"
-                type="url"
-                placeholder="https://example.com/book-cover.jpg"
-              />
-            </label>
-          </div>
-          <label class="checkbox-row">
-            <input id="remove-image" name="removeImage" type="checkbox" />
-            Remove current image (use default cover)
-          </label>
-          <div class="admin-form-actions">
-            <button id="save-product-btn" class="primary-btn" type="submit">Save Product</button>
-            <button id="cancel-edit-btn" class="ghost-btn" type="button">Cancel Edit</button>
-          </div>
+            <div class="admin-form-actions">
+              <button id="save-product-btn" class="primary-btn" type="submit">Save Product</button>
+              <button id="cancel-edit-btn" class="ghost-btn" type="button">Cancel Edit</button>
+            </div>
           </form>
 
           <p id="admin-message" class="checkout-message"></p>
+          <p class="admin-help">Tip: drag product cards to reorder your storefront.</p>
           <div id="admin-products" class="admin-products"></div>
         </section>
       </section>

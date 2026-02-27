@@ -8,6 +8,9 @@ Bookstore web app with:
 - owner order email with customer/shipping info
 - admin dashboard for product CRUD + cover image uploads
 - admin storefront design editor (logo, customer text, colors)
+- product stock control (in stock / sold out)
+- drag-and-drop product ordering
+- homepage hero banner uploader
 
 ## Run local
 
@@ -50,9 +53,11 @@ From the dashboard you can:
 
 - edit storefront design text and colors
 - upload a logo or set a logo URL
+- upload or remove a homepage hero banner image
 - add books
 - upload cover image files (`jpg`, `png`, `webp`, `gif`, max `6MB`)
-- set title, description, and price
+- set title, description, price, and in-stock status
+- drag product cards to reorder storefront display
 - edit/delete existing products
 
 ## Data storage

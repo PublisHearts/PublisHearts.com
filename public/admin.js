@@ -11,6 +11,7 @@ const subtitleInput = document.getElementById("product-subtitle");
 const priceInput = document.getElementById("product-price");
 const imageFileInput = document.getElementById("product-image-file");
 const imageUrlInput = document.getElementById("product-image-url");
+const inStockInput = document.getElementById("product-in-stock");
 const removeImageInput = document.getElementById("remove-image");
 const saveProductBtn = document.getElementById("save-product-btn");
 const cancelEditBtn = document.getElementById("cancel-edit-btn");
@@ -25,6 +26,9 @@ const resetSiteSettingsBtn = document.getElementById("reset-site-settings-btn");
 const siteLogoFileInput = document.getElementById("site-logo-file");
 const siteLogoUrlInput = document.getElementById("site-logo-url");
 const siteRemoveLogoInput = document.getElementById("site-remove-logo");
+const siteBannerFileInput = document.getElementById("site-banner-file");
+const siteBannerUrlInput = document.getElementById("site-banner-url");
+const siteRemoveBannerInput = document.getElementById("site-remove-banner");
 const siteInputs = {
   brandName: document.getElementById("site-brand-name"),
   brandMark: document.getElementById("site-brand-mark"),
@@ -57,7 +61,10 @@ const state = {
   products: [],
   siteSettings: null,
   productBusy: false,
-  designBusy: false
+  designBusy: false,
+  dragProductId: null,
+  dropTargetId: null,
+  dropAfter: false
 };
 
 function setMessage(targetEl, message, isError = false) {
@@ -131,6 +138,7 @@ function resetForm() {
   priceInput.value = "";
   imageFileInput.value = "";
   imageUrlInput.value = "";
+  inStockInput.checked = true;
   removeImageInput.checked = false;
   saveProductBtn.textContent = "Save Product";
 }
@@ -144,6 +152,15 @@ function resetSiteSettingsDraftFields() {
   }
   if (siteRemoveLogoInput) {
     siteRemoveLogoInput.checked = false;
+  }
+  if (siteBannerFileInput) {
+    siteBannerFileInput.value = "";
+  }
+  if (siteBannerUrlInput) {
+    siteBannerUrlInput.value = "";
+  }
+  if (siteRemoveBannerInput) {
+    siteRemoveBannerInput.checked = false;
   }
 }
 
@@ -162,6 +179,9 @@ function fillSiteSettingsForm(settings) {
   if (siteLogoUrlInput) {
     siteLogoUrlInput.placeholder = settings.logoImageUrl || "https://example.com/logo.png";
   }
+  if (siteBannerUrlInput) {
+    siteBannerUrlInput.placeholder = settings.heroBannerImageUrl || "https://example.com/banner.jpg";
+  }
 
   state.siteSettings = settings;
   resetSiteSettingsDraftFields();
@@ -179,6 +199,7 @@ function beginEdit(productId) {
   priceInput.value = (product.priceCents / 100).toFixed(2);
   imageUrlInput.value = "";
   imageFileInput.value = "";
+  inStockInput.checked = product.inStock !== false;
   removeImageInput.checked = false;
   saveProductBtn.textContent = "Update Product";
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -199,7 +220,7 @@ function renderProducts() {
 
   productsEl.innerHTML = state.products
     .map(
-      (product) => `<article class="admin-product-card">
+      (product) => `<article class="admin-product-card" draggable="true" data-id="${product.id}">
         <img class="admin-product-image" src="${product.imageUrl}" alt="${product.title} cover" />
         <div class="admin-product-body">
           <div class="row-between">
@@ -207,6 +228,12 @@ function renderProducts() {
             <strong>${formatMoney(product.priceCents)}</strong>
           </div>
           <p>${product.subtitle || "No description"}</p>
+          <div class="admin-badges">
+            <span class="admin-stock-badge ${product.inStock === false ? "sold-out" : "in-stock"}">
+              ${product.inStock === false ? "Sold Out" : "In Stock"}
+            </span>
+            <span class="admin-drag-hint">Drag to reorder</span>
+          </div>
           <p class="admin-id">ID: ${product.id}</p>
           <div class="admin-card-actions">
             <button class="ghost-btn" type="button" data-action="edit" data-id="${product.id}">Edit</button>
@@ -227,6 +254,56 @@ async function loadProducts() {
 async function loadSiteSettings() {
   const settings = await adminRequest("/api/admin/site-settings");
   fillSiteSettingsForm(settings);
+}
+
+function moveProductInState(movedId, targetId, placeAfter = false) {
+  const sourceIndex = state.products.findIndex((item) => item.id === movedId);
+  const targetIndex = state.products.findIndex((item) => item.id === targetId);
+  if (sourceIndex === -1 || targetIndex === -1 || sourceIndex === targetIndex) {
+    return false;
+  }
+
+  const next = [...state.products];
+  const [moved] = next.splice(sourceIndex, 1);
+  let insertionIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  if (placeAfter) {
+    insertionIndex += 1;
+  }
+  if (insertionIndex > next.length) {
+    insertionIndex = next.length;
+  }
+  next.splice(insertionIndex, 0, moved);
+  state.products = next;
+  return true;
+}
+
+async function persistCurrentProductOrder() {
+  const productIds = state.products.map((product) => product.id);
+  const reordered = await adminRequest("/api/admin/products/reorder", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ productIds })
+  });
+  state.products = reordered;
+  renderProducts();
+}
+
+function clearDropClasses() {
+  productsEl.querySelectorAll(".admin-product-card.drop-target").forEach((card) => {
+    card.classList.remove("drop-target");
+  });
+  productsEl.querySelectorAll(".admin-product-card.drop-after").forEach((card) => {
+    card.classList.remove("drop-after");
+  });
+}
+
+function clearDragClasses() {
+  productsEl.querySelectorAll(".admin-product-card.dragging").forEach((card) => {
+    card.classList.remove("dragging");
+  });
+  clearDropClasses();
 }
 
 function showLogin() {
@@ -355,6 +432,82 @@ productsEl.addEventListener("click", async (event) => {
   }
 });
 
+productsEl.addEventListener("dragstart", (event) => {
+  const card = event.target.closest(".admin-product-card");
+  if (!card || state.productBusy) {
+    event.preventDefault();
+    return;
+  }
+  state.dragProductId = card.dataset.id || null;
+  state.dropTargetId = null;
+  state.dropAfter = false;
+  card.classList.add("dragging");
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", state.dragProductId || "");
+  }
+});
+
+productsEl.addEventListener("dragover", (event) => {
+  if (!state.dragProductId) {
+    return;
+  }
+  const card = event.target.closest(".admin-product-card");
+  if (!card || card.dataset.id === state.dragProductId) {
+    return;
+  }
+  event.preventDefault();
+  clearDropClasses();
+  const bounds = card.getBoundingClientRect();
+  state.dropAfter = event.clientY > bounds.top + bounds.height / 2;
+  state.dropTargetId = card.dataset.id || null;
+  card.classList.add(state.dropAfter ? "drop-after" : "drop-target");
+});
+
+productsEl.addEventListener("drop", async (event) => {
+  if (!state.dragProductId) {
+    return;
+  }
+  event.preventDefault();
+  const draggedId = state.dragProductId;
+  const targetId = state.dropTargetId;
+  const placeAfter = state.dropAfter;
+  state.dragProductId = null;
+  state.dropTargetId = null;
+  state.dropAfter = false;
+  clearDragClasses();
+
+  if (!targetId || !draggedId) {
+    return;
+  }
+
+  const moved = moveProductInState(draggedId, targetId, placeAfter);
+  if (!moved) {
+    return;
+  }
+
+  renderProducts();
+  setProductMessage("Saving product order...");
+  try {
+    await persistCurrentProductOrder();
+    setProductMessage("Product order updated.");
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    await loadProducts();
+    setProductMessage(error.message || "Could not reorder products.", true);
+  }
+});
+
+productsEl.addEventListener("dragend", () => {
+  state.dragProductId = null;
+  state.dropTargetId = null;
+  state.dropAfter = false;
+  clearDragClasses();
+});
+
 productForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (state.productBusy) {
@@ -368,6 +521,7 @@ productForm.addEventListener("submit", async (event) => {
   formData.append("title", titleInput.value);
   formData.append("subtitle", subtitleInput.value);
   formData.append("price", priceInput.value);
+  formData.append("inStock", String(inStockInput.checked));
 
   const file = imageFileInput.files?.[0];
   if (file) {
@@ -433,12 +587,24 @@ siteSettingsForm.addEventListener("submit", async (event) => {
     formData.append("logoImage", logoFile);
   }
 
+  const bannerFile = siteBannerFileInput.files?.[0];
+  if (bannerFile) {
+    formData.append("heroBannerImage", bannerFile);
+  }
+
   const logoImageUrl = siteLogoUrlInput.value.trim();
   if (logoImageUrl) {
     formData.append("logoImageUrl", logoImageUrl);
   }
+  const heroBannerImageUrl = siteBannerUrlInput.value.trim();
+  if (heroBannerImageUrl) {
+    formData.append("heroBannerImageUrl", heroBannerImageUrl);
+  }
   if (siteRemoveLogoInput.checked) {
     formData.append("removeLogo", "true");
+  }
+  if (siteRemoveBannerInput.checked) {
+    formData.append("removeBanner", "true");
   }
 
   try {

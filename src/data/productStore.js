@@ -22,7 +22,9 @@ function cloneProduct(product) {
     title: product.title,
     subtitle: product.subtitle,
     priceCents: product.priceCents,
-    imageUrl: product.imageUrl
+    imageUrl: product.imageUrl,
+    inStock: Boolean(product.inStock),
+    sortOrder: Number.isFinite(product.sortOrder) ? product.sortOrder : 0
   };
 }
 
@@ -71,6 +73,34 @@ function cleanImageUrl(value) {
   throw new ProductValidationError("Image URL must start with https://, http://, or /uploads/.");
 }
 
+function cleanInStock(value, defaultValue = true) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const text = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "on", "instock", "in-stock", "available"].includes(text)) {
+    return true;
+  }
+  if (["false", "0", "no", "off", "soldout", "sold-out", "outofstock", "out-of-stock"].includes(text)) {
+    return false;
+  }
+
+  throw new ProductValidationError("In-stock flag must be true or false.");
+}
+
+function cleanSortOrder(value, fallbackSortOrder = 0) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallbackSortOrder;
+  }
+  return parsed;
+}
+
 function slugify(value) {
   return String(value || "")
     .toLowerCase()
@@ -88,11 +118,13 @@ function buildIdFromTitle(title, existingIds) {
   return candidate;
 }
 
-function normalizeStoredProduct(raw) {
+function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
   const title = cleanText(raw.title, 140, "Title");
   const subtitle = cleanOptionalText(raw.subtitle, 600);
   const priceCents = cleanPriceCents(raw.priceCents);
   const imageUrl = cleanImageUrl(raw.imageUrl);
+  const inStock = cleanInStock(raw.inStock, true);
+  const sortOrder = cleanSortOrder(raw.sortOrder, fallbackSortOrder);
   const idCandidate = slugify(raw.id) || buildIdFromTitle(title, new Set());
 
   return {
@@ -100,8 +132,24 @@ function normalizeStoredProduct(raw) {
     title,
     subtitle,
     priceCents,
-    imageUrl
+    imageUrl,
+    inStock,
+    sortOrder
   };
+}
+
+function sortAndReindexInPlace(items) {
+  items.sort((left, right) => {
+    if (left.sortOrder !== right.sortOrder) {
+      return left.sortOrder - right.sortOrder;
+    }
+    return left.title.localeCompare(right.title);
+  });
+
+  for (let index = 0; index < items.length; index += 1) {
+    items[index].sortOrder = index;
+  }
+  return items;
 }
 
 async function persistProducts() {
@@ -123,29 +171,31 @@ async function loadFromDisk() {
 
     const seenIds = new Set();
     const normalized = [];
-    for (const entry of parsed) {
-      const product = normalizeStoredProduct(entry);
+    for (let index = 0; index < parsed.length; index += 1) {
+      const entry = parsed[index];
+      const product = normalizeStoredProduct(entry, index);
       if (seenIds.has(product.id)) {
         throw new ProductValidationError(`Duplicate product id found: ${product.id}`);
       }
       seenIds.add(product.id);
       normalized.push(product);
     }
-    products = normalized;
+    products = sortAndReindexInPlace(normalized);
   } catch (error) {
     if (error.code !== "ENOENT") {
       throw error;
     }
 
     const seenIds = new Set();
-    products = seededProducts.map((entry) => {
-      const normalized = normalizeStoredProduct(entry);
+    products = seededProducts.map((entry, index) => {
+      const normalized = normalizeStoredProduct(entry, index);
       if (seenIds.has(normalized.id)) {
         normalized.id = buildIdFromTitle(normalized.title, seenIds);
       }
       seenIds.add(normalized.id);
       return normalized;
     });
+    sortAndReindexInPlace(products);
     await persistProducts();
   }
 
@@ -173,13 +223,14 @@ export async function findProductById(productId) {
   return found ? cloneProduct(found) : null;
 }
 
-export async function createProduct({ title, subtitle, priceCents, imageUrl }) {
+export async function createProduct({ title, subtitle, priceCents, imageUrl, inStock }) {
   await ensureLoaded();
 
   const cleanTitle = cleanText(title, 140, "Title");
   const cleanSubtitle = cleanOptionalText(subtitle, 600);
   const cleanPrice = cleanPriceCents(priceCents);
   const cleanImage = cleanImageUrl(imageUrl);
+  const cleanAvailability = cleanInStock(inStock, true);
   const usedIds = new Set(products.map((product) => product.id));
   const id = buildIdFromTitle(cleanTitle, usedIds);
 
@@ -188,10 +239,13 @@ export async function createProduct({ title, subtitle, priceCents, imageUrl }) {
     title: cleanTitle,
     subtitle: cleanSubtitle,
     priceCents: cleanPrice,
-    imageUrl: cleanImage
+    imageUrl: cleanImage,
+    inStock: cleanAvailability,
+    sortOrder: products.length
   };
 
   products.push(created);
+  sortAndReindexInPlace(products);
   await persistProducts();
   return cloneProduct(created);
 }
@@ -211,10 +265,14 @@ export async function updateProduct(productId, changes) {
       changes.subtitle !== undefined ? cleanOptionalText(changes.subtitle, 600) : current.subtitle,
     priceCents:
       changes.priceCents !== undefined ? cleanPriceCents(changes.priceCents) : current.priceCents,
-    imageUrl: changes.imageUrl !== undefined ? cleanImageUrl(changes.imageUrl) : current.imageUrl
+    imageUrl: changes.imageUrl !== undefined ? cleanImageUrl(changes.imageUrl) : current.imageUrl,
+    inStock:
+      changes.inStock !== undefined ? cleanInStock(changes.inStock, current.inStock) : current.inStock,
+    sortOrder: current.sortOrder
   };
 
   products[index] = updated;
+  sortAndReindexInPlace(products);
   await persistProducts();
   return cloneProduct(updated);
 }
@@ -227,6 +285,34 @@ export async function deleteProduct(productId) {
   }
 
   products.splice(index, 1);
+  sortAndReindexInPlace(products);
   await persistProducts();
   return true;
+}
+
+export async function reorderProducts(productIds) {
+  await ensureLoaded();
+
+  if (!Array.isArray(productIds) || productIds.length !== products.length) {
+    throw new ProductValidationError("Product order update must include every product exactly once.");
+  }
+
+  const byId = new Map(products.map((product) => [product.id, product]));
+  const seenIds = new Set();
+
+  const reordered = productIds.map((rawId, index) => {
+    const productId = String(rawId || "").trim();
+    if (!productId || !byId.has(productId) || seenIds.has(productId)) {
+      throw new ProductValidationError("Product order update contains invalid or duplicate product IDs.");
+    }
+    seenIds.add(productId);
+    return {
+      ...byId.get(productId),
+      sortOrder: index
+    };
+  });
+
+  products = reordered;
+  await persistProducts();
+  return products.map(cloneProduct);
 }

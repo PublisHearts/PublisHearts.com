@@ -11,6 +11,8 @@ const siteMetaDescription = document.getElementById("site-meta-description");
 const brandNameHeader = document.getElementById("brand-name-header");
 const brandMarkText = document.getElementById("brand-mark-text");
 const brandMarkImage = document.getElementById("brand-mark-image");
+const heroBannerWrap = document.getElementById("hero-banner-wrap");
+const heroBannerImage = document.getElementById("hero-banner-image");
 const heroEyebrow = document.getElementById("hero-eyebrow");
 const heroTitle = document.getElementById("hero-title");
 const heroCopy = document.getElementById("hero-copy");
@@ -96,18 +98,29 @@ function applySiteSettings(settings) {
   }
 
   const logoUrl = String(settings.logoImageUrl || "").trim();
-  if (!brandMarkImage || !brandMarkText) {
-    return;
+  if (brandMarkImage && brandMarkText) {
+    if (logoUrl) {
+      brandMarkImage.src = logoUrl;
+      brandMarkImage.classList.remove("hidden");
+      brandMarkText.classList.add("hidden");
+    } else {
+      brandMarkImage.removeAttribute("src");
+      brandMarkImage.classList.add("hidden");
+      brandMarkText.classList.remove("hidden");
+    }
   }
 
-  if (logoUrl) {
-    brandMarkImage.src = logoUrl;
-    brandMarkImage.classList.remove("hidden");
-    brandMarkText.classList.add("hidden");
-  } else {
-    brandMarkImage.removeAttribute("src");
-    brandMarkImage.classList.add("hidden");
-    brandMarkText.classList.remove("hidden");
+  const bannerUrl = String(settings.heroBannerImageUrl || "").trim();
+  if (heroBannerWrap && heroBannerImage) {
+    if (bannerUrl) {
+      heroBannerImage.src = bannerUrl;
+      heroBannerImage.alt = `${settings.brandName || "Store"} banner`;
+      heroBannerWrap.classList.remove("hidden");
+    } else {
+      heroBannerImage.removeAttribute("src");
+      heroBannerImage.alt = "";
+      heroBannerWrap.classList.add("hidden");
+    }
   }
 }
 
@@ -143,7 +156,7 @@ function getCartRows() {
   return Array.from(state.cart.values())
     .map((cartItem) => {
       const product = state.products.find((entry) => entry.id === cartItem.id);
-      if (!product) {
+      if (!product || product.inStock === false) {
         return null;
       }
       return {
@@ -208,10 +221,19 @@ function renderProducts() {
             <div>
               <h3 class="product-title">${product.title}</h3>
               <p class="product-subtitle">${product.subtitle}</p>
+              ${product.inStock === false ? '<p class="product-stock sold-out-text">Currently sold out</p>' : ""}
             </div>
             <div class="product-row">
               <span class="price">${formatMoney(product.priceCents)}</span>
-              <button class="primary-btn" type="button" data-action="add" data-id="${product.id}">Add to cart</button>
+              <button
+                class="primary-btn ${product.inStock === false ? "sold-out-btn" : ""}"
+                type="button"
+                data-action="add"
+                data-id="${product.id}"
+                ${product.inStock === false ? "disabled" : ""}
+              >
+                ${product.inStock === false ? "Sold Out" : "Add to cart"}
+              </button>
             </div>
           </div>
         </article>`
@@ -230,6 +252,11 @@ function closeCart() {
 }
 
 function addToCart(productId) {
+  const product = state.products.find((entry) => entry.id === productId);
+  if (!product || product.inStock === false) {
+    return;
+  }
+
   const current = state.cart.get(productId);
   if (!current) {
     state.cart.set(productId, { id: productId, quantity: 1 });
@@ -259,12 +286,27 @@ function removeFromCart(productId) {
   updateCartUi();
 }
 
+function sanitizeCartAgainstCatalog() {
+  let changed = false;
+  Array.from(state.cart.keys()).forEach((productId) => {
+    const product = state.products.find((entry) => entry.id === productId);
+    if (!product || product.inStock === false) {
+      state.cart.delete(productId);
+      changed = true;
+    }
+  });
+  if (changed) {
+    saveCart();
+  }
+}
+
 async function loadProducts() {
   const response = await fetch("/api/products");
   if (!response.ok) {
     throw new Error("Could not load products");
   }
   state.products = await response.json();
+  sanitizeCartAgainstCatalog();
   renderProducts();
   updateCartUi();
 }
@@ -283,7 +325,7 @@ async function checkout() {
     return;
   }
 
-  const cart = Array.from(state.cart.values());
+  const cart = getCartRows().map((item) => ({ id: item.id, quantity: item.quantity }));
   if (cart.length === 0) {
     setCheckoutMessage("Add at least one book to continue.", true);
     return;

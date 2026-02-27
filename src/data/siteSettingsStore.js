@@ -12,6 +12,7 @@ const defaults = {
   brandName: "PublisHearts",
   brandMark: "P",
   logoImageUrl: "",
+  heroBannerImageUrl: "",
   pageTitle: "PublisHearts Books",
   pageDescription:
     "PublisHearts bookstore. Shop featured books, pay securely by card, and get your receipt by email.",
@@ -40,6 +41,7 @@ const textLimits = {
   brandName: 80,
   brandMark: 4,
   logoImageUrl: 600,
+  heroBannerImageUrl: 600,
   pageTitle: 100,
   pageDescription: 220,
   heroEyebrow: 80,
@@ -79,20 +81,18 @@ function cleanText(value, maxLength, fieldName) {
   return text;
 }
 
-function cleanOptionalLogoUrl(value) {
+function cleanOptionalAssetUrl(value, maxLength, label) {
   const text = String(value || "").trim();
   if (!text) {
     return "";
   }
   if (/^https?:\/\//i.test(text) || text.startsWith("/uploads/")) {
-    if (text.length > textLimits.logoImageUrl) {
-      throw new SiteSettingsValidationError(
-        `Logo image URL must be ${textLimits.logoImageUrl} characters or less.`
-      );
+    if (text.length > maxLength) {
+      throw new SiteSettingsValidationError(`${label} must be ${maxLength} characters or less.`);
     }
     return text;
   }
-  throw new SiteSettingsValidationError("Logo image URL must start with https://, http://, or /uploads/.");
+  throw new SiteSettingsValidationError(`${label} must start with https://, http://, or /uploads/.`);
 }
 
 function cleanColor(value, fieldName) {
@@ -108,7 +108,12 @@ function normalize(raw = {}) {
   return {
     brandName: cleanText(merged.brandName, textLimits.brandName, "Brand name"),
     brandMark: cleanText(merged.brandMark, textLimits.brandMark, "Brand mark"),
-    logoImageUrl: cleanOptionalLogoUrl(merged.logoImageUrl),
+    logoImageUrl: cleanOptionalAssetUrl(merged.logoImageUrl, textLimits.logoImageUrl, "Logo image URL"),
+    heroBannerImageUrl: cleanOptionalAssetUrl(
+      merged.heroBannerImageUrl,
+      textLimits.heroBannerImageUrl,
+      "Hero banner image URL"
+    ),
     pageTitle: cleanText(merged.pageTitle, textLimits.pageTitle, "Page title"),
     pageDescription: cleanText(merged.pageDescription, textLimits.pageDescription, "Page description"),
     heroEyebrow: cleanText(merged.heroEyebrow, textLimits.heroEyebrow, "Hero eyebrow"),

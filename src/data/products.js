@@ -4,21 +4,27 @@ export const products = [
     title: "The Heart Ledger",
     subtitle: "A literary romance about second chances and inherited letters.",
     priceCents: 1899,
-    imageUrl: "https://placehold.co/600x800/f8f1de/2f2a23?text=The+Heart+Ledger"
+    imageUrl: "https://placehold.co/600x800/f8f1de/2f2a23?text=The+Heart+Ledger",
+    inStock: true,
+    sortOrder: 0
   },
   {
     id: "ink-after-midnight",
     title: "Ink After Midnight",
     subtitle: "A fast-paced mystery set inside an old publishing house.",
     priceCents: 2199,
-    imageUrl: "https://placehold.co/600x800/e1ecf2/1b2a38?text=Ink+After+Midnight"
+    imageUrl: "https://placehold.co/600x800/e1ecf2/1b2a38?text=Ink+After+Midnight",
+    inStock: true,
+    sortOrder: 1
   },
   {
     id: "the-map-of-soft-stars",
     title: "The Map of Soft Stars",
     subtitle: "A reflective coming-of-age novel filled with poetic storytelling.",
     priceCents: 2499,
-    imageUrl: "https://placehold.co/600x800/eee2e2/35211f?text=The+Map+of+Soft+Stars"
+    imageUrl: "https://placehold.co/600x800/eee2e2/35211f?text=The+Map+of+Soft+Stars",
+    inStock: true,
+    sortOrder: 2
   }
 ];
 
