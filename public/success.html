@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Order confirmed | PublisHearts</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container row-between">
+        <a class="brand" href="/">
+          <span class="brand-mark">P</span>
+          <span>PublisHearts</span>
+        </a>
+      </div>
+    </header>
+
+    <main class="status-wrap">
+      <section class="status-card">
+        <div class="status-head">
+          <p class="eyebrow status-ok">Payment received</p>
+          <h1 style="font-size:2rem;">Thanks for your order</h1>
+          <p id="receipt-copy">Loading your order details...</p>
+        </div>
+        <div class="order-grid">
+          <article class="order-panel">
+            <h3>Items</h3>
+            <ul id="order-items" class="order-list"></ul>
+            <hr />
+            <div class="row-between">
+              <span>Total</span>
+              <strong id="order-total">$0.00</strong>
+            </div>
+          </article>
+          <article class="order-panel">
+            <h3>Shipping</h3>
+            <p id="shipping-name">-</p>
+            <p id="shipping-address">-</p>
+            <p id="order-email"></p>
+          </article>
+        </div>
+        <p style="margin-top:1rem;">
+          <a class="primary-btn" href="/">Back to storefront</a>
+        </p>
+      </section>
+    </main>
+
+    <script type="module" src="/success.js"></script>
+  </body>
+</html>
