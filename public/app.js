@@ -58,31 +58,53 @@ function setStripeLinkedText(el, value) {
     return;
   }
 
-  el.replaceChildren();
-  const urlMatches = Array.from(text.matchAll(/https?:\/\/[^\s]+/gi));
+  const privacyToken = "[[PRIVACY_LINK]]";
+  const securityToken = "[[SECURITY_LINK]]";
+  const decoratedText = text
+    .replace(
+      /Privacy Policy\s*[—-]\s*https:\/\/stripe\.com\/privacy/gi,
+      privacyToken
+    )
+    .replace(
+      /Security Overview\s*[—-]\s*https:\/\/stripe\.com\/docs\/security/gi,
+      securityToken
+    );
 
-  if (urlMatches.length > 0) {
+  el.replaceChildren();
+  const tokenOrUrlMatches = Array.from(
+    decoratedText.matchAll(/\[\[PRIVACY_LINK\]\]|\[\[SECURITY_LINK\]\]|https?:\/\/[^\s]+/gi)
+  );
+
+  if (tokenOrUrlMatches.length > 0) {
     let cursor = 0;
-    urlMatches.forEach((match) => {
+    tokenOrUrlMatches.forEach((match) => {
       const start = match.index ?? 0;
       const end = start + match[0].length;
       if (start > cursor) {
-        el.append(document.createTextNode(text.slice(cursor, start)));
+        el.append(document.createTextNode(decoratedText.slice(cursor, start)));
       }
 
       const link = document.createElement("a");
-      link.href = match[0];
+      if (match[0] === privacyToken) {
+        link.href = "https://stripe.com/privacy";
+        link.textContent = "Privacy Policy";
+      } else if (match[0] === securityToken) {
+        link.href = "https://stripe.com/docs/security";
+        link.textContent = "Security Overview";
+      } else {
+        link.href = match[0];
+        link.textContent = match[0];
+      }
       link.target = "_blank";
       link.rel = "noopener noreferrer";
       link.className = "inline-link";
-      link.textContent = match[0];
       el.append(link);
 
       cursor = end;
     });
 
-    if (cursor < text.length) {
-      el.append(document.createTextNode(text.slice(cursor)));
+    if (cursor < decoratedText.length) {
+      el.append(document.createTextNode(decoratedText.slice(cursor)));
     }
     return;
   }
