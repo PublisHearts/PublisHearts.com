@@ -65,10 +65,37 @@ function formatAddress(address) {
     .join(", ");
 }
 
-function orderLineItemsHtml(lineItems, currency) {
+function normalizeLineItems(lineItems) {
+  if (!Array.isArray(lineItems)) {
+    return [];
+  }
+
   return lineItems
     .map((item) => {
-      const rowTotal = formatMoney(item.amountTotal || 0, currency);
+      const name = item?.name ? String(item.name) : "Book";
+      const quantity = Math.max(1, Number.parseInt(item?.quantity, 10) || 1);
+      const parsedAmount = Number(item?.amountTotal);
+      const amountTotal = Number.isFinite(parsedAmount) ? parsedAmount : null;
+      return { name, quantity, amountTotal };
+    })
+    .filter((item) => Boolean(item.name));
+}
+
+function getUnitsTotal(lineItems) {
+  return lineItems.reduce((sum, item) => sum + (item.quantity || 1), 0);
+}
+
+function orderLineItemsHtml(lineItems, currency) {
+  const items = normalizeLineItems(lineItems);
+  if (items.length === 0) {
+    return `<tr>
+      <td colspan="3" style="padding:10px 0; color:#6b7280;">No line items captured.</td>
+    </tr>`;
+  }
+
+  return items
+    .map((item) => {
+      const rowTotal = Number.isFinite(item.amountTotal) ? formatMoney(item.amountTotal, currency) : "-";
       return `<tr>
         <td style="padding:8px 0;">${escapeHtml(item.name)}</td>
         <td style="padding:8px 0; text-align:center;">${item.quantity || 1}</td>
@@ -79,10 +106,17 @@ function orderLineItemsHtml(lineItems, currency) {
 }
 
 function orderLineItemsText(lineItems, currency) {
-  return lineItems
+  const items = normalizeLineItems(lineItems);
+  if (items.length === 0) {
+    return "- No line items captured";
+  }
+
+  return items
     .map((item) => {
-      const rowTotal = formatMoney(item.amountTotal || 0, currency);
-      return `- ${item.name} x${item.quantity || 1} (${rowTotal})`;
+      const rowTotal = Number.isFinite(item.amountTotal) ? formatMoney(item.amountTotal, currency) : null;
+      return rowTotal
+        ? `- ${item.name} x${item.quantity || 1} (${rowTotal})`
+        : `- ${item.name} x${item.quantity || 1}`;
     })
     .join("\n");
 }
@@ -99,9 +133,11 @@ export async function sendCustomerReceipt({
     return;
   }
 
+  const normalizedItems = normalizeLineItems(lineItems);
+  const unitsTotal = getUnitsTotal(normalizedItems);
   const total = formatMoney(amountTotal || 0, currency);
-  const textItems = orderLineItemsText(lineItems, currency);
-  const htmlItems = orderLineItemsHtml(lineItems, currency);
+  const textItems = orderLineItemsText(normalizedItems, currency);
+  const htmlItems = orderLineItemsHtml(normalizedItems, currency);
   const shippingName = shippingDetails?.name || "Not provided";
   const shippingAddress = formatAddress(shippingDetails?.address);
 
@@ -113,6 +149,7 @@ export async function sendCustomerReceipt({
 
 Order ID: ${orderId}
 Total: ${total}
+Units ordered: ${unitsTotal}
 
 Shipping:
 Name: ${shippingName}
@@ -126,6 +163,7 @@ If you have any questions, reply to this email.`,
       <h2 style="margin:0 0 12px;">Thank you for your order.</h2>
       <p style="margin:0 0 8px;">Order ID: <strong>${escapeHtml(orderId)}</strong></p>
       <p style="margin:0 0 16px;">Total: <strong>${escapeHtml(total)}</strong></p>
+      <p style="margin:0 0 16px;">Units ordered: <strong>${unitsTotal}</strong></p>
       <h3 style="margin:0 0 8px;">Shipping</h3>
       <p style="margin:0 0 4px;">Name: ${escapeHtml(shippingName)}</p>
       <p style="margin:0 0 16px;">Address: ${escapeHtml(shippingAddress)}</p>
@@ -157,14 +195,16 @@ export async function sendOwnerNotification({ orderId, amountTotal, currency, li
     return;
   }
 
+  const normalizedItems = normalizeLineItems(lineItems);
+  const unitsTotal = getUnitsTotal(normalizedItems);
   const total = formatMoney(amountTotal || 0, currency);
   const customerName = customerDetails?.name || "Unknown";
   const customerEmail = customerDetails?.email || "Unknown";
   const customerPhone = customerDetails?.phone || "Not provided";
   const shippingName = shippingDetails?.name || "Not provided";
   const shippingAddress = formatAddress(shippingDetails?.address);
-  const textItems = orderLineItemsText(lineItems, currency);
-  const htmlItems = orderLineItemsHtml(lineItems, currency);
+  const textItems = orderLineItemsText(normalizedItems, currency);
+  const htmlItems = orderLineItemsHtml(normalizedItems, currency);
 
   await transporter.sendMail({
     from: fromEmail,
@@ -174,6 +214,7 @@ export async function sendOwnerNotification({ orderId, amountTotal, currency, li
 
 Order ID: ${orderId}
 Total: ${total}
+Units ordered: ${unitsTotal}
 
 Customer:
 Name: ${customerName}
@@ -190,6 +231,7 @@ ${textItems}`,
       <h2 style="margin:0 0 12px;">New order received</h2>
       <p style="margin:0 0 4px;">Order ID: <strong>${escapeHtml(orderId)}</strong></p>
       <p style="margin:0 0 16px;">Total: <strong>${escapeHtml(total)}</strong></p>
+      <p style="margin:0 0 16px;">Units ordered: <strong>${unitsTotal}</strong></p>
       <h3 style="margin:0 0 8px;">Customer</h3>
       <p style="margin:0 0 4px;">Name: ${escapeHtml(customerName)}</p>
       <p style="margin:0 0 4px;">Email: ${escapeHtml(customerEmail)}</p>

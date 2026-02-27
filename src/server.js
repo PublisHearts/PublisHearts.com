@@ -24,6 +24,34 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "../public");
 
+function parseLineItemsFromMetadata(metadata = {}) {
+  const summary = String(metadata.cart_summary || "").trim();
+  if (!summary) {
+    return [];
+  }
+
+  return summary
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const match = entry.match(/^(.*)\s+x(\d+)$/i);
+      if (!match) {
+        return {
+          name: entry,
+          quantity: 1,
+          amountTotal: null
+        };
+      }
+
+      return {
+        name: match[1].trim() || "Book",
+        quantity: Math.max(1, Number.parseInt(match[2], 10) || 1),
+        amountTotal: null
+      };
+    });
+}
+
 function getAppUrl(req) {
   const configured = (process.env.APP_URL || "").trim();
   if (configured) {
@@ -70,11 +98,17 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), asyn
       const lineItemsResponse = await stripe.checkout.sessions.listLineItems(session.id, {
         limit: 100
       });
-      const lineItems = lineItemsResponse.data.map((item) => ({
+      let lineItems = lineItemsResponse.data.map((item) => ({
         name: item.description || "Book",
         quantity: item.quantity || 1,
         amountTotal: item.amount_total || 0
       }));
+      if (lineItems.length === 0) {
+        lineItems = parseLineItemsFromMetadata(session.metadata);
+        if (lineItems.length > 0) {
+          console.warn(`Using metadata fallback for line items on session ${session.id}`);
+        }
+      }
       const customerEmail = session.customer_details?.email || session.customer_email || "";
 
       if (!customerEmail) {
@@ -126,6 +160,8 @@ app.post("/api/create-checkout-session", async (req, res) => {
   }
 
   const lineItems = [];
+  const cartSummaryParts = [];
+  let unitsTotal = 0;
   for (const item of cart) {
     const product = getProductById(item.id);
     if (!product) {
@@ -133,6 +169,8 @@ app.post("/api/create-checkout-session", async (req, res) => {
     }
 
     const quantity = Math.max(1, Math.min(10, Number.parseInt(item.quantity, 10) || 1));
+    unitsTotal += quantity;
+    cartSummaryParts.push(`${product.title} x${quantity}`);
     lineItems.push({
       price_data: {
         currency,
@@ -164,7 +202,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
       success_url: `${appUrl}/success.html?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/cancel.html`,
       metadata: {
-        storefront: "publishearts.com"
+        storefront: "publishearts.com",
+        units_total: String(unitsTotal),
+        cart_summary: cartSummaryParts.join(" | ").slice(0, 500)
       }
     });
 
@@ -189,11 +229,14 @@ app.get("/api/order/:sessionId", async (req, res) => {
     const lineItemsResponse = await stripe.checkout.sessions.listLineItems(session.id, {
       limit: 100
     });
-    const lineItems = lineItemsResponse.data.map((item) => ({
+    let lineItems = lineItemsResponse.data.map((item) => ({
       name: item.description || "Book",
       quantity: item.quantity || 1,
       amountTotal: item.amount_total || 0
     }));
+    if (lineItems.length === 0) {
+      lineItems = parseLineItemsFromMetadata(session.metadata);
+    }
 
     return res.json({
       id: session.id,
