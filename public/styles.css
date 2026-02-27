@@ -291,6 +291,13 @@ h1 {
   color: #8f261f;
 }
 
+.inline-link {
+  color: var(--accent-strong);
+  font-weight: 700;
+  text-decoration: underline;
+  word-break: break-word;
+}
+
 .product-row {
   display: flex;
   justify-content: space-between;

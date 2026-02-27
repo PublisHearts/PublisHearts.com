@@ -52,6 +52,64 @@ function setText(el, value) {
   el.textContent = text;
 }
 
+function setStripeLinkedText(el, value) {
+  const text = String(value || "").trim();
+  if (!el || !text) {
+    return;
+  }
+
+  el.replaceChildren();
+  const urlMatches = Array.from(text.matchAll(/https?:\/\/[^\s]+/gi));
+
+  if (urlMatches.length > 0) {
+    let cursor = 0;
+    urlMatches.forEach((match) => {
+      const start = match.index ?? 0;
+      const end = start + match[0].length;
+      if (start > cursor) {
+        el.append(document.createTextNode(text.slice(cursor, start)));
+      }
+
+      const link = document.createElement("a");
+      link.href = match[0];
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.className = "inline-link";
+      link.textContent = match[0];
+      el.append(link);
+
+      cursor = end;
+    });
+
+    if (cursor < text.length) {
+      el.append(document.createTextNode(text.slice(cursor)));
+    }
+    return;
+  }
+
+  const wordMatch = text.match(/stripe/i);
+  if (!wordMatch || typeof wordMatch.index !== "number") {
+    el.textContent = text;
+    return;
+  }
+
+  const start = wordMatch.index;
+  const end = start + wordMatch[0].length;
+  if (start > 0) {
+    el.append(document.createTextNode(text.slice(0, start)));
+  }
+  const stripeLink = document.createElement("a");
+  stripeLink.href = "https://stripe.com";
+  stripeLink.target = "_blank";
+  stripeLink.rel = "noopener noreferrer";
+  stripeLink.className = "inline-link";
+  stripeLink.textContent = text.slice(start, end);
+  el.append(stripeLink);
+  if (end < text.length) {
+    el.append(document.createTextNode(text.slice(end)));
+  }
+}
+
 function setHexVar(name, value) {
   const hex = String(value || "").trim();
   if (!/^#[0-9a-fA-F]{6}$/.test(hex)) {
@@ -75,7 +133,7 @@ function applySiteSettings(settings) {
   setText(featuredTitle, settings.featuredTitle);
   setText(featuredCopy, settings.featuredCopy);
   setText(promise1Title, settings.promise1Title);
-  setText(promise1Copy, settings.promise1Copy);
+  setStripeLinkedText(promise1Copy, settings.promise1Copy);
   setText(promise2Title, settings.promise2Title);
   setText(promise2Copy, settings.promise2Copy);
   setText(promise3Title, settings.promise3Title);
