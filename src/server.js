@@ -11,10 +11,11 @@ dotenv.config();
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const currency = (process.env.STRIPE_CURRENCY || "usd").toLowerCase();
 const port = Number(process.env.PORT || 4242);
-const allowedShippingCountries = (process.env.ALLOWED_SHIPPING_COUNTRIES || "US")
+const parsedShippingCountries = (process.env.ALLOWED_SHIPPING_COUNTRIES || "US")
   .split(",")
   .map((country) => country.trim().toUpperCase())
-  .filter(Boolean);
+  .filter((country) => /^[A-Z]{2}$/.test(country));
+const allowedShippingCountries = parsedShippingCountries.length > 0 ? parsedShippingCountries : ["US"];
 
 const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : null;
 const app = express();
@@ -211,7 +212,10 @@ app.post("/api/create-checkout-session", async (req, res) => {
     return res.json({ url: session.url });
   } catch (error) {
     console.error("Failed creating checkout session:", error);
-    return res.status(500).json({ error: "Could not start checkout right now." });
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not start checkout: ${details}` : "Could not start checkout right now."
+    });
   }
 });
 
