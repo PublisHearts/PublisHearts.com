@@ -7,7 +7,7 @@
     "priceCents": 1499,
     "imageUrl": "/uploads/1772232287471-4a3b3355.jpg",
     "shippingEnabled": true,
-    "shippingFeeCents": 500,
+    "shippingFeeCents": 1000,
     "inStock": true,
     "sortOrder": 0
   },
@@ -19,7 +19,7 @@
     "priceCents": 1099,
     "imageUrl": "/uploads/1772231656386-a088d811.png",
     "shippingEnabled": true,
-    "shippingFeeCents": 500,
+    "shippingFeeCents": 1000,
     "inStock": true,
     "sortOrder": 1
   },
@@ -31,7 +31,7 @@
     "priceCents": 1199,
     "imageUrl": "/uploads/1772231706614-38720041.jpg",
     "shippingEnabled": true,
-    "shippingFeeCents": 500,
+    "shippingFeeCents": 1000,
     "inStock": true,
     "sortOrder": 2
   },
@@ -43,7 +43,7 @@
     "priceCents": 999,
     "imageUrl": "/uploads/1772232010505-f4ec50be.jpg",
     "shippingEnabled": true,
-    "shippingFeeCents": 500,
+    "shippingFeeCents": 1000,
     "inStock": true,
     "sortOrder": 3
   }
