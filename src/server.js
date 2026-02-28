@@ -417,7 +417,8 @@ app.post("/api/admin/products", requireAdmin, upload.single("image"), async (req
       inStock: parseBooleanFlag(req.body?.inStock, true),
       shippingEnabled: parseBooleanFlag(req.body?.shippingEnabled, true),
       shippingFeeCents: optionalPriceToCents(req.body?.shippingFee),
-      isVisible: parseBooleanFlag(req.body?.isVisible, true)
+      isVisible: parseBooleanFlag(req.body?.isVisible, true),
+      isComingSoon: parseBooleanFlag(req.body?.isComingSoon, false)
     });
     return res.status(201).json(created);
   } catch (error) {
@@ -450,6 +451,7 @@ app.put("/api/admin/products/:id", requireAdmin, upload.single("image"), async (
       shippingEnabled: parseBooleanFlag(req.body?.shippingEnabled, undefined),
       shippingFeeCents: shippingFeeRaw ? nextShippingFee : undefined,
       isVisible: parseBooleanFlag(req.body?.isVisible, undefined),
+      isComingSoon: parseBooleanFlag(req.body?.isComingSoon, undefined),
       inStock: parseBooleanFlag(req.body?.inStock, undefined)
     });
 
@@ -517,6 +519,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
     }
     if (product.isVisible === false) {
       return res.status(400).json({ error: `${product.title} is currently unavailable.` });
+    }
+    if (product.isComingSoon === true) {
+      return res.status(400).json({ error: `${product.title} is coming soon and not orderable yet.` });
     }
     if (!product.inStock) {
       return res.status(400).json({ error: `${product.title} is sold out right now.` });

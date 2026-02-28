@@ -53,6 +53,7 @@ function cloneProduct(product) {
       ? product.shippingFeeCents
       : defaultShippingFeeCents,
     isVisible: parseStoredBoolean(product.isVisible, true),
+    isComingSoon: parseStoredBoolean(product.isComingSoon, false),
     inStock: parseStoredBoolean(product.inStock, true),
     sortOrder: Number.isFinite(product.sortOrder) ? product.sortOrder : 0
   };
@@ -180,6 +181,26 @@ function cleanVisibility(value, defaultValue = true) {
   throw new ProductValidationError("Visibility must be true or false.");
 }
 
+function cleanComingSoon(value, defaultValue = false) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const text = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "on", "comingsoon", "coming-soon"].includes(text)) {
+    return true;
+  }
+  if (["false", "0", "no", "off", "live", "orderable"].includes(text)) {
+    return false;
+  }
+
+  throw new ProductValidationError("Coming soon flag must be true or false.");
+}
+
 function cleanSortOrder(value, fallbackSortOrder = 0) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -214,6 +235,7 @@ function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
   const shippingEnabled = cleanShippingEnabled(raw.shippingEnabled, true);
   const shippingFeeCents = cleanShippingFeeCents(raw.shippingFeeCents, defaultShippingFeeCents);
   const isVisible = cleanVisibility(raw.isVisible, true);
+  const isComingSoon = cleanComingSoon(raw.isComingSoon, false);
   const inStock = cleanInStock(raw.inStock, true);
   const sortOrder = cleanSortOrder(raw.sortOrder, fallbackSortOrder);
   const idCandidate = slugify(raw.id) || buildIdFromTitle(title, new Set());
@@ -228,6 +250,7 @@ function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
     shippingEnabled,
     shippingFeeCents,
     isVisible,
+    isComingSoon,
     inStock,
     sortOrder
   };
@@ -327,7 +350,8 @@ export async function createProduct({
   inStock,
   shippingEnabled,
   shippingFeeCents,
-  isVisible
+  isVisible,
+  isComingSoon
 }) {
   await ensureLoaded();
 
@@ -340,6 +364,7 @@ export async function createProduct({
   const cleanShippingToggle = cleanShippingEnabled(shippingEnabled, true);
   const cleanShippingFee = cleanShippingFeeCents(shippingFeeCents, defaultShippingFeeCents);
   const cleanVisibilityValue = cleanVisibility(isVisible, true);
+  const cleanComingSoonValue = cleanComingSoon(isComingSoon, false);
   const usedIds = new Set(products.map((product) => product.id));
   const id = buildIdFromTitle(cleanTitle, usedIds);
 
@@ -353,6 +378,7 @@ export async function createProduct({
     shippingEnabled: cleanShippingToggle,
     shippingFeeCents: cleanShippingFee,
     isVisible: cleanVisibilityValue,
+    isComingSoon: cleanComingSoonValue,
     inStock: cleanAvailability,
     sortOrder: products.length
   };
@@ -397,6 +423,10 @@ export async function updateProduct(productId, changes) {
       changes.isVisible !== undefined
         ? cleanVisibility(changes.isVisible, current.isVisible)
         : cleanVisibility(current.isVisible, true),
+    isComingSoon:
+      changes.isComingSoon !== undefined
+        ? cleanComingSoon(changes.isComingSoon, current.isComingSoon)
+        : cleanComingSoon(current.isComingSoon, false),
     inStock:
       changes.inStock !== undefined ? cleanInStock(changes.inStock, current.inStock) : current.inStock,
     sortOrder: current.sortOrder

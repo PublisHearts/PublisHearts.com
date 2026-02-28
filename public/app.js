@@ -69,6 +69,26 @@ function isShippingEnabled(product) {
   return true;
 }
 
+function isComingSoon(product) {
+  if (!product) {
+    return false;
+  }
+  if (product.isComingSoon === true) {
+    return true;
+  }
+  if (product.isComingSoon === false) {
+    return false;
+  }
+
+  const text = String(product.isComingSoon || "")
+    .trim()
+    .toLowerCase();
+  if (["true", "1", "yes", "on", "comingsoon", "coming-soon"].includes(text)) {
+    return true;
+  }
+  return false;
+}
+
 function setText(el, value) {
   const text = String(value || "").trim();
   if (!el || !text) {
@@ -261,7 +281,7 @@ function getCartRows() {
   return Array.from(state.cart.values())
     .map((cartItem) => {
       const product = state.products.find((entry) => entry.id === cartItem.id);
-      if (!product || product.inStock === false) {
+      if (!product || product.inStock === false || isComingSoon(product)) {
         return null;
       }
       return {
@@ -355,6 +375,7 @@ function renderProducts() {
                   ? `<p class="product-stock">+ ${formatMoney(product.shippingFeeCents || 500)} shipping</p>`
                   : ""
               }
+              ${isComingSoon(product) ? '<p class="product-stock sold-out-text">Coming soon</p>' : ""}
               ${product.inStock === false ? '<p class="product-stock sold-out-text">Currently sold out</p>' : ""}
             </div>
             <details class="included-tab">
@@ -364,13 +385,13 @@ function renderProducts() {
             <div class="product-row">
               <span class="price">${formatMoney(product.priceCents)}</span>
               <button
-                class="primary-btn ${product.inStock === false ? "sold-out-btn" : ""}"
+                class="primary-btn ${product.inStock === false || isComingSoon(product) ? "sold-out-btn" : ""}"
                 type="button"
                 data-action="add"
                 data-id="${product.id}"
-                ${product.inStock === false ? "disabled" : ""}
+                ${product.inStock === false || isComingSoon(product) ? "disabled" : ""}
               >
-                ${product.inStock === false ? "Sold Out" : "Add to cart"}
+                ${isComingSoon(product) ? "Coming Soon" : product.inStock === false ? "Sold Out" : "Add to cart"}
               </button>
             </div>
           </div>
@@ -391,7 +412,7 @@ function closeCart() {
 
 function addToCart(productId) {
   const product = state.products.find((entry) => entry.id === productId);
-  if (!product || product.inStock === false) {
+  if (!product || product.inStock === false || isComingSoon(product)) {
     return;
   }
 
@@ -428,7 +449,7 @@ function sanitizeCartAgainstCatalog() {
   let changed = false;
   Array.from(state.cart.keys()).forEach((productId) => {
     const product = state.products.find((entry) => entry.id === productId);
-    if (!product || product.inStock === false) {
+    if (!product || product.inStock === false || isComingSoon(product)) {
       state.cart.delete(productId);
       changed = true;
     }
