@@ -35,7 +35,8 @@ const currency = (process.env.STRIPE_CURRENCY || "usd").toLowerCase();
 const port = Number(process.env.PORT || 4242);
 const adminPassword = (process.env.ADMIN_PASSWORD || "").trim();
 const githubPushToken = (process.env.GITHUB_PUSH_TOKEN || "").trim();
-const githubRepo = (process.env.GITHUB_REPO || "").trim();
+const githubRepoRaw = (process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY || "").trim();
+const githubRepoOwner = (process.env.GITHUB_REPO_OWNER || "PublisHearts").trim() || "PublisHearts";
 const githubBranch = (process.env.GITHUB_BRANCH || "main").trim() || "main";
 const githubAuthorName = (process.env.GITHUB_AUTHOR_NAME || "PublisHearts Admin Bot").trim();
 const githubAuthorEmail = (process.env.GITHUB_AUTHOR_EMAIL || "admin@publishearts.com").trim();
@@ -330,17 +331,57 @@ function extractSiteSettingsChanges(req) {
   return changes;
 }
 
-function buildAuthenticatedGithubRemoteUrl() {
-  if (!githubPushToken || !githubRepo) {
-    return null;
+function normalizeGithubRepo(input) {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return "";
   }
 
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(githubRepo)) {
-    return null;
+  let cleaned = raw
+    .replace(/^https?:\/\/github\.com\//i, "")
+    .replace(/^github\.com\//i, "")
+    .replace(/\.git$/i, "")
+    .replace(/^\/+|\/+$/g, "");
+
+  if (!cleaned) {
+    return "";
+  }
+
+  if (!cleaned.includes("/")) {
+    cleaned = `${githubRepoOwner}/${cleaned}`;
+  } else {
+    const parts = cleaned.split("/").filter(Boolean);
+    if (parts.length >= 2) {
+      cleaned = `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+    }
+  }
+
+  return cleaned;
+}
+
+function buildAuthenticatedGithubRemoteUrl() {
+  if (!githubPushToken) {
+    return {
+      remoteUrl: null,
+      error: "GITHUB_PUSH_TOKEN is empty."
+    };
+  }
+
+  const normalizedRepo =
+    normalizeGithubRepo(githubRepoRaw) || "PublisHearts/PublisHearts.com";
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalizedRepo)) {
+    return {
+      remoteUrl: null,
+      error: `GITHUB_REPO is invalid. Use owner/repo (current: "${githubRepoRaw || "(empty)"}").`
+    };
   }
 
   const safeToken = encodeURIComponent(githubPushToken);
-  return `https://x-access-token:${safeToken}@github.com/${githubRepo}.git`;
+  return {
+    remoteUrl: `https://x-access-token:${safeToken}@github.com/${normalizedRepo}.git`,
+    repo: normalizedRepo,
+    error: ""
+  };
 }
 
 function maskSecrets(text) {
@@ -412,10 +453,11 @@ async function syncPublishContent(targetRoot) {
 }
 
 async function publishAdminSnapshot(commitMessageInput = "") {
-  const remoteUrl = buildAuthenticatedGithubRemoteUrl();
-  if (!remoteUrl) {
-    throw new Error("GitHub publishing is not configured. Add GITHUB_PUSH_TOKEN and GITHUB_REPO env vars.");
+  const remoteConfig = buildAuthenticatedGithubRemoteUrl();
+  if (!remoteConfig.remoteUrl) {
+    throw new Error(`GitHub publish config error: ${remoteConfig.error}`);
   }
+  const remoteUrl = remoteConfig.remoteUrl;
 
   const cleanMessage = String(commitMessageInput || "")
     .trim()
@@ -770,7 +812,7 @@ app.post("/api/admin/publish", requireAdmin, async (req, res) => {
     return res.json(result);
   } catch (error) {
     const text = String(error?.message || "");
-    if (text.includes("not configured")) {
+    if (text.includes("GitHub publish config error")) {
       return res.status(503).json({ error: text });
     }
     return res.status(500).json({ error: maskSecrets(text || "Could not publish changes.") });
