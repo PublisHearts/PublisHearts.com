@@ -40,6 +40,22 @@ const githubRepoOwner = (process.env.GITHUB_REPO_OWNER || "PublisHearts").trim()
 const githubBranch = (process.env.GITHUB_BRANCH || "main").trim() || "main";
 const githubAuthorName = (process.env.GITHUB_AUTHOR_NAME || "PublisHearts Admin Bot").trim();
 const githubAuthorEmail = (process.env.GITHUB_AUTHOR_EMAIL || "admin@publishearts.com").trim();
+const parsedShippingWeightPerUnitLbs = Number.parseFloat(String(process.env.SHIPPING_WEIGHT_PER_UNIT_LBS || "1.5"));
+const shippingWeightPerUnitLbs =
+  Number.isFinite(parsedShippingWeightPerUnitLbs) && parsedShippingWeightPerUnitLbs > 0
+    ? parsedShippingWeightPerUnitLbs
+    : 1.5;
+const parsedShippingMinimumDollars = Number.parseFloat(String(process.env.SHIPPING_MIN_FEE || "10"));
+const shippingMinimumCents =
+  Number.isFinite(parsedShippingMinimumDollars) && parsedShippingMinimumDollars >= 0
+    ? Math.round(parsedShippingMinimumDollars * 100)
+    : 1000;
+const uspsGroundAdvantageZone1Cents = [
+  885, 1000, 1045, 1090, 1135, 1180, 1225, 1270, 1315, 1360, 1405, 1450, 1495, 1540, 1585, 1630, 1675, 1720, 1765,
+  1810, 2220, 2280, 2340, 2400, 2460, 2520, 2580, 2640, 2700, 2760, 2820, 2880, 2940, 3000, 3060, 3120, 3180, 3240,
+  3300, 3360, 3420, 3475, 3530, 3585, 3640, 3695, 3750, 3805, 3860, 3915, 3970, 4025, 4080, 4135, 4190, 4245, 4300,
+  4355, 4410, 4465, 4520, 4575, 5620, 5660, 5700, 5740, 5780, 5820, 5875, 5935
+];
 const parsedShippingCountries = (process.env.ALLOWED_SHIPPING_COUNTRIES || "US")
   .split(",")
   .map((country) => country.trim().toUpperCase())
@@ -105,6 +121,27 @@ function parseLineItemsFromMetadata(metadata = {}) {
         amountTotal: null
       };
     });
+}
+
+function getUspsGroundAdvantageRetailCents(weightLbs) {
+  const billableLbs = Math.max(1, Math.ceil(Number(weightLbs) || 0));
+  if (billableLbs <= uspsGroundAdvantageZone1Cents.length) {
+    return uspsGroundAdvantageZone1Cents[billableLbs - 1];
+  }
+
+  const lastRate = uspsGroundAdvantageZone1Cents[uspsGroundAdvantageZone1Cents.length - 1];
+  const extraLbs = billableLbs - uspsGroundAdvantageZone1Cents.length;
+  return lastRate + extraLbs * 60;
+}
+
+function calculateShippingFromUnits(shippableUnits) {
+  const units = Math.max(0, Number(shippableUnits) || 0);
+  if (units <= 0) {
+    return 0;
+  }
+  const totalWeightLbs = units * shippingWeightPerUnitLbs;
+  const weightBasedCents = getUspsGroundAdvantageRetailCents(totalWeightLbs);
+  return Math.max(shippingMinimumCents, weightBasedCents);
 }
 
 function getAppUrl(req) {
@@ -832,8 +869,8 @@ app.post("/api/create-checkout-session", async (req, res) => {
   const lineItems = [];
   const cartSummaryParts = [];
   let unitsTotal = 0;
+  let shippableUnits = 0;
   let itemsSubtotal = 0;
-  let shippingTotal = 0;
   for (const item of cart) {
     const product = await findProductById(item.id);
     if (!product) {
@@ -853,7 +890,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
     unitsTotal += quantity;
     itemsSubtotal += product.priceCents * quantity;
     if (product.shippingEnabled === true) {
-      shippingTotal += (product.shippingFeeCents || 0) * quantity;
+      shippableUnits += quantity;
     }
     cartSummaryParts.push(`${product.title} x${quantity}`);
     lineItems.push({
@@ -869,6 +906,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
     });
   }
 
+  const shippingTotal = calculateShippingFromUnits(shippableUnits);
+  const shippingWeightLbs = Number((shippableUnits * shippingWeightPerUnitLbs).toFixed(2));
+
   if (shippingTotal > 0) {
     lineItems.push({
       price_data: {
@@ -876,7 +916,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
         unit_amount: shippingTotal,
         product_data: {
           name: "Shipping",
-          description: "Standard shipping"
+          description: `USPS Ground Advantage (est.) - ${shippingWeightLbs} lb`
         }
       },
       quantity: 1
@@ -904,6 +944,8 @@ app.post("/api/create-checkout-session", async (req, res) => {
       metadata: {
         storefront: "publishearts.com",
         units_total: String(unitsTotal),
+        shippable_units: String(shippableUnits),
+        shipping_weight_lbs: String(shippingWeightLbs),
         items_subtotal_cents: String(itemsSubtotal),
         shipping_total_cents: String(shippingTotal),
         cart_summary: cartSummaryParts.join(" | ").slice(0, 500)

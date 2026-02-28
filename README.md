@@ -11,7 +11,7 @@ Bookstore web app with:
 - product stock control (in stock / sold out)
 - drag-and-drop product ordering
 - homepage hero banner uploader
-- per-product shipping toggle + shipping fee
+- per-product shipping toggle + USPS Ground Advantage weight-based shipping estimate
 
 ## Run local
 
@@ -42,6 +42,8 @@ Optional:
 - `SITE_SETTINGS_FILE` (defaults to `data/site-settings.json`)
 - `UPLOADS_DIR` (defaults to `public/uploads`)
 - `DEFAULT_SHIPPING_FEE` (defaults to `5.00`, in USD)
+- `SHIPPING_MIN_FEE` (defaults to `10.00`, checkout minimum)
+- `SHIPPING_WEIGHT_PER_UNIT_LBS` (defaults to `1.5`)
 - `GITHUB_PUSH_TOKEN` (enables Admin -> Publish Live Changes)
 - `GITHUB_REPO` (format: `owner/repo`, for Admin publish)
 - `GITHUB_BRANCH` (defaults to `main`)
@@ -64,6 +66,7 @@ From the dashboard you can:
 - add books
 - upload cover image files (`jpg`, `png`, `webp`, `gif`, max `6MB`)
 - set title, description, what's included, price, in-stock status, and shipping fee toggle
+- shipping is calculated at checkout/cart from USPS Ground Advantage retail guide using total shippable weight
 - drag product cards to reorder storefront display
 - edit/delete existing products
 - publish current live admin content back to GitHub with one button

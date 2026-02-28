@@ -38,6 +38,14 @@ const state = {
 };
 
 const CART_KEY = "publishearts_cart_v1";
+const SHIPPING_WEIGHT_PER_UNIT_LBS = 1.5;
+const SHIPPING_MINIMUM_CENTS = 1000;
+const USPS_GROUND_ADVANTAGE_ZONE1_CENTS = [
+  885, 1000, 1045, 1090, 1135, 1180, 1225, 1270, 1315, 1360, 1405, 1450, 1495, 1540, 1585, 1630, 1675, 1720, 1765,
+  1810, 2220, 2280, 2340, 2400, 2460, 2520, 2580, 2640, 2700, 2760, 2820, 2880, 2940, 3000, 3060, 3120, 3180, 3240,
+  3300, 3360, 3420, 3475, 3530, 3585, 3640, 3695, 3750, 3805, 3860, 3915, 3970, 4025, 4080, 4135, 4190, 4245, 4300,
+  4355, 4410, 4465, 4520, 4575, 5620, 5660, 5700, 5740, 5780, 5820, 5875, 5935
+];
 
 function formatMoney(amountCents = 0) {
   return new Intl.NumberFormat("en-US", {
@@ -326,14 +334,33 @@ function getSubtotal() {
   return getCartRows().reduce((sum, item) => sum + item.priceCents * item.quantity, 0);
 }
 
-function getShippingTotal() {
+function getUspsGroundAdvantageRetailCents(weightLbs) {
+  const billableLbs = Math.max(1, Math.ceil(Number(weightLbs) || 0));
+  if (billableLbs <= USPS_GROUND_ADVANTAGE_ZONE1_CENTS.length) {
+    return USPS_GROUND_ADVANTAGE_ZONE1_CENTS[billableLbs - 1];
+  }
+  const lastRate = USPS_GROUND_ADVANTAGE_ZONE1_CENTS[USPS_GROUND_ADVANTAGE_ZONE1_CENTS.length - 1];
+  const extraLbs = billableLbs - USPS_GROUND_ADVANTAGE_ZONE1_CENTS.length;
+  return lastRate + extraLbs * 60;
+}
+
+function getShippableUnits() {
   return getCartRows().reduce((sum, item) => {
     if (!isShippingEnabled(item)) {
       return sum;
     }
-    const fee = Number.isFinite(item.shippingFeeCents) ? item.shippingFeeCents : 500;
-    return sum + fee * item.quantity;
+    return sum + item.quantity;
   }, 0);
+}
+
+function getShippingTotal() {
+  const shippableUnits = getShippableUnits();
+  if (shippableUnits <= 0) {
+    return 0;
+  }
+  const totalWeightLbs = shippableUnits * SHIPPING_WEIGHT_PER_UNIT_LBS;
+  const weightBasedCents = getUspsGroundAdvantageRetailCents(totalWeightLbs);
+  return Math.max(SHIPPING_MINIMUM_CENTS, weightBasedCents);
 }
 
 function getOrderTotal() {
@@ -431,7 +458,7 @@ function renderProducts() {
               <p class="product-subtitle">${product.subtitle}</p>
               ${
                 isShippingEnabled(product)
-                  ? `<p class="product-stock">+ ${formatMoney(product.shippingFeeCents || 500)} shipping</p>`
+                  ? `<p class="product-stock">USPS Ground Advantage shipping (starts at ${formatMoney(SHIPPING_MINIMUM_CENTS)})</p>`
                   : ""
               }
               ${isComingSoon(product) ? '<p class="product-stock sold-out-text">Coming soon</p>' : ""}
