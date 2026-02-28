@@ -43,10 +43,12 @@
             <p>Edit storefront design and product catalog in one place.</p>
           </div>
           <div class="admin-toolbar-actions">
+            <button id="publish-btn" class="primary-btn" type="button">Publish Live Changes</button>
             <button id="new-product-btn" class="ghost-btn" type="button">Add New Book</button>
             <button id="logout-btn" class="ghost-btn" type="button">Log out</button>
           </div>
         </div>
+        <p id="publish-message" class="checkout-message"></p>
 
         <section class="admin-section">
           <div class="admin-section-head">
@@ -270,6 +272,38 @@
                   type="url"
                   placeholder="https://example.com/book-cover.jpg"
                 />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Upload Additional Product Images
+                <input id="product-gallery-files" name="productImages" type="file" accept="image/*" multiple />
+              </label>
+              <label>
+                Additional Product Image URLs (one per line)
+                <textarea
+                  id="product-gallery-urls"
+                  name="productImageUrls"
+                  rows="4"
+                  maxlength="4000"
+                  placeholder="https://example.com/product-angle-1.jpg&#10;https://example.com/product-angle-2.jpg"
+                ></textarea>
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Upload What's Included Images
+                <input id="included-gallery-files" name="includedImages" type="file" accept="image/*" multiple />
+              </label>
+              <label>
+                What's Included Image URLs (one per line)
+                <textarea
+                  id="included-gallery-urls"
+                  name="includedImageUrls"
+                  rows="4"
+                  maxlength="4000"
+                  placeholder="https://example.com/stickers.jpg&#10;https://example.com/packaging.jpg"
+                ></textarea>
               </label>
             </div>
             <label class="checkbox-row">

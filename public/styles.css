@@ -248,8 +248,9 @@ h1 {
 
 .coming-soon-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(170px, 220px));
   gap: 1rem;
+  justify-content: flex-start;
 }
 
 .coming-soon-card {
@@ -260,15 +261,17 @@ h1 {
   background: var(--surface);
   box-shadow: var(--shadow);
   overflow: hidden;
+  width: 100%;
+  max-width: 220px;
 }
 
 .coming-soon-cover-wrap {
   width: 100%;
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 3 / 4;
   background: #f8f5ef;
   display: grid;
   place-items: center;
-  padding: 0.75rem;
+  padding: 0.55rem;
 }
 
 .coming-soon-cover {
@@ -307,6 +310,22 @@ h1 {
   width: 100%;
   aspect-ratio: 4 / 5;
   object-fit: cover;
+  background: #f8f5ef;
+}
+
+.product-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
+  gap: 0.45rem;
+  padding: 0.55rem 0.8rem 0;
+}
+
+.product-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 9px;
+  border: 1px solid var(--line);
   background: #f8f5ef;
 }
 
@@ -368,6 +387,22 @@ h1 {
   margin: 0.45rem 0 0;
   color: var(--ink-soft);
   font-size: 0.9rem;
+}
+
+.included-gallery {
+  margin-top: 0.6rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 0.45rem;
+}
+
+.included-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: #f8f5ef;
 }
 
 .price {
@@ -631,6 +666,9 @@ h1 {
 .admin-toolbar-actions {
   display: inline-flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
 }
 
 .admin-form {

@@ -89,6 +89,36 @@ function isComingSoon(product) {
   return false;
 }
 
+function collectImageUrls(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean);
+}
+
+function getProductGalleryImages(product) {
+  const unique = [];
+  const seen = new Set();
+  const addUrl = (raw) => {
+    const url = String(raw || "").trim();
+    if (!url || seen.has(url)) {
+      return;
+    }
+    seen.add(url);
+    unique.push(url);
+  };
+
+  addUrl(product?.imageUrl);
+  collectImageUrls(product?.productImageUrls).forEach(addUrl);
+  return unique;
+}
+
+function getIncludedGalleryImages(product) {
+  return collectImageUrls(product?.includedImageUrls);
+}
+
 function setText(el, value) {
   const text = String(value || "").trim();
   if (!el || !text) {
@@ -363,9 +393,38 @@ function renderProducts() {
   }
 
   productsGrid.innerHTML = state.products
-    .map(
-      (product, index) => `<article class="product-card" style="animation-delay:${index * 60}ms">
-          <img class="product-cover" src="${product.imageUrl}" alt="${product.title} cover" loading="lazy" />
+    .map((product, index) => {
+      const galleryImages = getProductGalleryImages(product);
+      const primaryImage = galleryImages[0] || product.imageUrl;
+      const productGalleryHtml =
+        galleryImages.length > 1
+          ? `<div class="product-gallery">
+              ${galleryImages
+                .slice(1)
+                .map(
+                  (imageUrl, imageIndex) =>
+                    `<img class="product-thumb" src="${imageUrl}" alt="${product.title} gallery image ${imageIndex + 2}" loading="lazy" />`
+                )
+                .join("")}
+            </div>`
+          : "";
+
+      const includedImages = getIncludedGalleryImages(product);
+      const includedGalleryHtml =
+        includedImages.length > 0
+          ? `<div class="included-gallery">
+              ${includedImages
+                .map(
+                  (imageUrl, imageIndex) =>
+                    `<img class="included-image" src="${imageUrl}" alt="${product.title} included item ${imageIndex + 1}" loading="lazy" />`
+                )
+                .join("")}
+            </div>`
+          : "";
+
+      return `<article class="product-card" style="animation-delay:${index * 60}ms">
+          <img class="product-cover" src="${primaryImage}" alt="${product.title} cover" loading="lazy" />
+          ${productGalleryHtml}
           <div class="product-body">
             <div>
               <h3 class="product-title">${product.title}</h3>
@@ -381,6 +440,7 @@ function renderProducts() {
             <details class="included-tab">
               <summary>What's Included</summary>
               <p>${product.included || "No extras listed for this title yet."}</p>
+              ${includedGalleryHtml}
             </details>
             <div class="product-row">
               <span class="price">${formatMoney(product.priceCents)}</span>
@@ -395,8 +455,8 @@ function renderProducts() {
               </button>
             </div>
           </div>
-        </article>`
-    )
+        </article>`;
+    })
     .join("");
 }
 

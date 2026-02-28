@@ -14,6 +14,10 @@ const shippingEnabledInput = document.getElementById("product-shipping-enabled")
 const shippingFeeInput = document.getElementById("product-shipping-fee");
 const imageFileInput = document.getElementById("product-image-file");
 const imageUrlInput = document.getElementById("product-image-url");
+const productGalleryFilesInput = document.getElementById("product-gallery-files");
+const productGalleryUrlsInput = document.getElementById("product-gallery-urls");
+const includedGalleryFilesInput = document.getElementById("included-gallery-files");
+const includedGalleryUrlsInput = document.getElementById("included-gallery-urls");
 const inStockInput = document.getElementById("product-in-stock");
 const isComingSoonInput = document.getElementById("product-is-coming-soon");
 const isVisibleInput = document.getElementById("product-is-visible");
@@ -22,7 +26,9 @@ const saveProductBtn = document.getElementById("save-product-btn");
 const cancelEditBtn = document.getElementById("cancel-edit-btn");
 const newProductBtn = document.getElementById("new-product-btn");
 const logoutBtn = document.getElementById("logout-btn");
+const publishBtn = document.getElementById("publish-btn");
 const productMessageEl = document.getElementById("admin-message");
+const publishMessageEl = document.getElementById("publish-message");
 
 const siteSettingsForm = document.getElementById("site-settings-form");
 const designMessageEl = document.getElementById("design-message");
@@ -67,6 +73,7 @@ const state = {
   siteSettings: null,
   productBusy: false,
   designBusy: false,
+  publishBusy: false,
   dragProductId: null,
   dropTargetId: null,
   dropAfter: false
@@ -90,6 +97,10 @@ function setDesignMessage(message, isError = false) {
   setMessage(designMessageEl, message, isError);
 }
 
+function setPublishMessage(message, isError = false) {
+  setMessage(publishMessageEl, message, isError);
+}
+
 function setLoginMessage(message, isError = false) {
   setMessage(loginMessageEl, message, isError);
 }
@@ -103,6 +114,13 @@ function setDesignBusy(isBusy) {
   state.designBusy = isBusy;
   saveSiteSettingsBtn.disabled = isBusy;
   resetSiteSettingsBtn.disabled = isBusy;
+}
+
+function setPublishBusy(isBusy) {
+  state.publishBusy = isBusy;
+  if (publishBtn) {
+    publishBtn.disabled = isBusy;
+  }
 }
 
 function requireAuthHeader() {
@@ -148,6 +166,10 @@ function resetForm() {
   shippingFeeInput.value = DEFAULT_SHIPPING_FEE.toFixed(2);
   imageFileInput.value = "";
   imageUrlInput.value = "";
+  productGalleryFilesInput.value = "";
+  productGalleryUrlsInput.value = "";
+  includedGalleryFilesInput.value = "";
+  includedGalleryUrlsInput.value = "";
   inStockInput.checked = true;
   isComingSoonInput.checked = false;
   isVisibleInput.checked = true;
@@ -218,6 +240,10 @@ function beginEdit(productId) {
   shippingFeeInput.value = (shippingFeeCents / 100).toFixed(2);
   imageUrlInput.value = "";
   imageFileInput.value = "";
+  productGalleryFilesInput.value = "";
+  includedGalleryFilesInput.value = "";
+  productGalleryUrlsInput.value = normalizeImageList(product.productImageUrls).join("\n");
+  includedGalleryUrlsInput.value = normalizeImageList(product.includedImageUrls).join("\n");
   inStockInput.checked = product.inStock !== false;
   isComingSoonInput.checked = product.isComingSoon === true;
   isVisibleInput.checked = product.isVisible !== false;
@@ -232,6 +258,15 @@ function formatMoney(cents) {
     style: "currency",
     currency: "USD"
   }).format((Number(cents) || 0) / 100);
+}
+
+function normalizeImageList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean);
 }
 
 function isShippingEnabled(product) {
@@ -272,6 +307,8 @@ function renderProducts() {
           : DEFAULT_SHIPPING_FEE * 100;
         const isVisible = product.isVisible !== false;
         const isComingSoon = product.isComingSoon === true;
+        const productGalleryCount = normalizeImageList(product.productImageUrls).length;
+        const includedGalleryCount = normalizeImageList(product.includedImageUrls).length;
 
         return `<article class="admin-product-card" draggable="true" data-id="${product.id}">
         <img class="admin-product-image" src="${product.imageUrl}" alt="${product.title} cover" />
@@ -282,6 +319,8 @@ function renderProducts() {
           </div>
           <p>${product.subtitle || "No description"}</p>
           ${product.included ? `<p><strong>What's included:</strong> ${product.included}</p>` : ""}
+          <p>Product gallery images: <strong>${productGalleryCount}</strong></p>
+          <p>Included images: <strong>${includedGalleryCount}</strong></p>
           <div class="admin-badges">
             <span class="admin-stock-badge ${product.inStock === false ? "sold-out" : "in-stock"}">
               ${product.inStock === false ? "Sold Out" : "In Stock"}
@@ -450,6 +489,7 @@ loginForm.addEventListener("submit", async (event) => {
     await Promise.all([loadProducts(), loadSiteSettings()]);
     setProductMessage("Signed in.");
     setDesignMessage("");
+    setPublishMessage("");
     setLoginMessage("");
   } catch (error) {
     setLoginMessage(error.message || "Could not sign in.", true);
@@ -464,7 +504,49 @@ logoutBtn.addEventListener("click", () => {
   showLogin();
   setProductMessage("");
   setDesignMessage("");
+  setPublishMessage("");
   setLoginMessage("");
+});
+
+publishBtn.addEventListener("click", async () => {
+  if (state.publishBusy || state.productBusy || state.designBusy) {
+    return;
+  }
+
+  const message = window.prompt("Optional commit message for GitHub publish:", "");
+  if (message === null) {
+    return;
+  }
+
+  setPublishBusy(true);
+  setPublishMessage("Publishing live admin changes to GitHub...");
+  try {
+    const result = await adminRequest("/api/admin/publish", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        message
+      })
+    });
+
+    if (!result.published) {
+      setPublishMessage(result.message || "No new changes to publish.");
+      return;
+    }
+
+    const shortCommit = result.commit ? ` (${result.commit})` : "";
+    setPublishMessage(`Published to ${result.branch || "main"}${shortCommit}.`);
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setPublishMessage(error.message || "Could not publish changes.", true);
+  } finally {
+    setPublishBusy(false);
+  }
 });
 
 newProductBtn.addEventListener("click", () => {
@@ -726,6 +808,19 @@ productForm.addEventListener("submit", async (event) => {
   if (imageUrl) {
     formData.append("imageUrl", imageUrl);
   }
+  formData.append("productImageUrls", productGalleryUrlsInput.value);
+  formData.append("includedImageUrls", includedGalleryUrlsInput.value);
+
+  const productGalleryFiles = Array.from(productGalleryFilesInput.files || []);
+  productGalleryFiles.forEach((file) => {
+    formData.append("productImages", file);
+  });
+
+  const includedGalleryFiles = Array.from(includedGalleryFilesInput.files || []);
+  includedGalleryFiles.forEach((file) => {
+    formData.append("includedImages", file);
+  });
+
   if (removeImageInput.checked) {
     formData.append("removeImage", "true");
   }

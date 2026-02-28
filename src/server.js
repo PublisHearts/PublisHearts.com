@@ -3,8 +3,11 @@ import express from "express";
 import { createHash, randomUUID, timingSafeEqual } from "crypto";
 import fs from "fs/promises";
 import multer from "multer";
+import os from "os";
 import path from "path";
 import Stripe from "stripe";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { fileURLToPath } from "url";
 import {
   ProductValidationError,
@@ -25,11 +28,17 @@ import {
 } from "./data/siteSettingsStore.js";
 
 dotenv.config();
+const execFileAsync = promisify(execFile);
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const currency = (process.env.STRIPE_CURRENCY || "usd").toLowerCase();
 const port = Number(process.env.PORT || 4242);
 const adminPassword = (process.env.ADMIN_PASSWORD || "").trim();
+const githubPushToken = (process.env.GITHUB_PUSH_TOKEN || "").trim();
+const githubRepo = (process.env.GITHUB_REPO || "").trim();
+const githubBranch = (process.env.GITHUB_BRANCH || "main").trim() || "main";
+const githubAuthorName = (process.env.GITHUB_AUTHOR_NAME || "PublisHearts Admin Bot").trim();
+const githubAuthorEmail = (process.env.GITHUB_AUTHOR_EMAIL || "admin@publishearts.com").trim();
 const parsedShippingCountries = (process.env.ALLOWED_SHIPPING_COUNTRIES || "US")
   .split(",")
   .map((country) => country.trim().toUpperCase())
@@ -189,6 +198,10 @@ function optionalPriceToCents(priceInput) {
 
 function imageUrlFromRequest(req, { allowUnset = false } = {}) {
   const typedUrl = String(req.body?.imageUrl || "").trim();
+  const uploadedPrimary = uploadedImageUrl(req.files, "image");
+  if (uploadedPrimary) {
+    return uploadedPrimary;
+  }
   if (req.file?.filename) {
     return `/uploads/${req.file.filename}`;
   }
@@ -204,6 +217,53 @@ function uploadedImageUrl(files, fieldName) {
     return undefined;
   }
   return `/uploads/${file.filename}`;
+}
+
+function uploadedImageUrls(files, fieldName) {
+  const list = Array.isArray(files?.[fieldName]) ? files[fieldName] : [];
+  return list
+    .map((file) => {
+      if (!file?.filename) {
+        return "";
+      }
+      return `/uploads/${file.filename}`;
+    })
+    .filter(Boolean);
+}
+
+function parseImageUrlList(raw, { defaultEmpty = false } = {}) {
+  if (raw === undefined || raw === null) {
+    return defaultEmpty ? [] : undefined;
+  }
+
+  if (Array.isArray(raw)) {
+    return raw
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean);
+  }
+
+  const text = String(raw).trim();
+  if (!text) {
+    return [];
+  }
+
+  if (text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((entry) => String(entry || "").trim())
+          .filter(Boolean);
+      }
+    } catch {
+      // Fall back to newline/comma parsing.
+    }
+  }
+
+  return text
+    .split(/\r?\n|,/g)
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean);
 }
 
 function extractSiteSettingsChanges(req) {
@@ -268,6 +328,184 @@ function extractSiteSettingsChanges(req) {
   }
 
   return changes;
+}
+
+function buildAuthenticatedGithubRemoteUrl() {
+  if (!githubPushToken || !githubRepo) {
+    return null;
+  }
+
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(githubRepo)) {
+    return null;
+  }
+
+  const safeToken = encodeURIComponent(githubPushToken);
+  return `https://x-access-token:${safeToken}@github.com/${githubRepo}.git`;
+}
+
+function maskSecrets(text) {
+  let output = String(text || "");
+  if (githubPushToken) {
+    output = output.split(githubPushToken).join("***");
+    output = output.split(encodeURIComponent(githubPushToken)).join("***");
+  }
+  return output;
+}
+
+async function runGit(args, { allowNonZero = false, cwd = process.cwd() } = {}) {
+  try {
+    const result = await execFileAsync("git", args, {
+      cwd,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024 * 8
+    });
+    return {
+      code: 0,
+      stdout: String(result.stdout || ""),
+      stderr: String(result.stderr || "")
+    };
+  } catch (error) {
+    const code = typeof error?.code === "number" ? error.code : 1;
+    const stdout = String(error?.stdout || "");
+    const stderr = String(error?.stderr || error?.message || "Git command failed.");
+    if (allowNonZero) {
+      return {
+        code,
+        stdout,
+        stderr
+      };
+    }
+    throw new Error(maskSecrets(stderr || stdout || "Git command failed."));
+  }
+}
+
+async function pathExists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function syncPublishContent(targetRoot) {
+  const sourceProducts = path.join(process.cwd(), "data/products.json");
+  const sourceSettings = path.join(process.cwd(), "data/site-settings.json");
+  const sourceUploads = path.join(process.cwd(), "public/uploads");
+
+  const targetProducts = path.join(targetRoot, "data/products.json");
+  const targetSettings = path.join(targetRoot, "data/site-settings.json");
+  const targetUploads = path.join(targetRoot, "public/uploads");
+
+  await fs.mkdir(path.dirname(targetProducts), { recursive: true });
+  await fs.mkdir(path.dirname(targetSettings), { recursive: true });
+  await fs.copyFile(sourceProducts, targetProducts);
+  await fs.copyFile(sourceSettings, targetSettings);
+
+  await fs.rm(targetUploads, { recursive: true, force: true });
+  await fs.mkdir(path.dirname(targetUploads), { recursive: true });
+  if (await pathExists(sourceUploads)) {
+    await fs.cp(sourceUploads, targetUploads, { recursive: true });
+  } else {
+    await fs.mkdir(targetUploads, { recursive: true });
+  }
+}
+
+async function publishAdminSnapshot(commitMessageInput = "") {
+  const remoteUrl = buildAuthenticatedGithubRemoteUrl();
+  if (!remoteUrl) {
+    throw new Error("GitHub publishing is not configured. Add GITHUB_PUSH_TOKEN and GITHUB_REPO env vars.");
+  }
+
+  const cleanMessage = String(commitMessageInput || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+  const finalMessage =
+    cleanMessage || `Admin content snapshot ${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}`;
+
+  const localGitDir = path.join(process.cwd(), ".git");
+  const hasLocalGit = await pathExists(localGitDir);
+
+  if (hasLocalGit) {
+    await runGit(["add", "-A", "--", "data/products.json", "data/site-settings.json", "public/uploads"]);
+
+    const stagedCheck = await runGit(["diff", "--cached", "--quiet", "--"], { allowNonZero: true });
+    if (stagedCheck.code === 0) {
+      return {
+        published: false,
+        message: "No new changes to publish."
+      };
+    }
+
+    await runGit([
+      "-c",
+      `user.name=${githubAuthorName}`,
+      "-c",
+      `user.email=${githubAuthorEmail}`,
+      "commit",
+      "-m",
+      finalMessage
+    ]);
+
+    await runGit(["push", remoteUrl, `HEAD:${githubBranch}`]);
+    const head = await runGit(["rev-parse", "--short", "HEAD"]);
+
+    return {
+      published: true,
+      branch: githubBranch,
+      commit: String(head.stdout || "").trim(),
+      message: "Published to GitHub."
+    };
+  }
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "publishearts-publish-"));
+  try {
+    await runGit(["init"], { cwd: tempDir });
+    await runGit(["remote", "add", "origin", remoteUrl], { cwd: tempDir });
+    await runGit(["fetch", "--depth", "1", "origin", githubBranch], { cwd: tempDir });
+    await runGit(["checkout", "-B", githubBranch, "FETCH_HEAD"], { cwd: tempDir });
+
+    await syncPublishContent(tempDir);
+    await runGit(["add", "-A", "--", "data/products.json", "data/site-settings.json", "public/uploads"], {
+      cwd: tempDir
+    });
+
+    const stagedCheck = await runGit(["diff", "--cached", "--quiet", "--"], {
+      allowNonZero: true,
+      cwd: tempDir
+    });
+    if (stagedCheck.code === 0) {
+      return {
+        published: false,
+        message: "No new changes to publish."
+      };
+    }
+
+    await runGit(
+      [
+        "-c",
+        `user.name=${githubAuthorName}`,
+        "-c",
+        `user.email=${githubAuthorEmail}`,
+        "commit",
+        "-m",
+        finalMessage
+      ],
+      { cwd: tempDir }
+    );
+    await runGit(["push", "origin", `HEAD:${githubBranch}`], { cwd: tempDir });
+    const head = await runGit(["rev-parse", "--short", "HEAD"], { cwd: tempDir });
+
+    return {
+      published: true,
+      branch: githubBranch,
+      commit: String(head.stdout || "").trim(),
+      message: "Published to GitHub."
+    };
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), async (req, res) => {
@@ -390,6 +628,12 @@ const siteSettingsUpload = upload.fields([
   { name: "heroBannerImage", maxCount: 1 }
 ]);
 
+const productUpload = upload.fields([
+  { name: "image", maxCount: 1 },
+  { name: "productImages", maxCount: 16 },
+  { name: "includedImages", maxCount: 16 }
+]);
+
 app.put("/api/admin/site-settings", requireAdmin, siteSettingsUpload, async (req, res) => {
   try {
     const updated = await updateSiteSettings(extractSiteSettingsChanges(req));
@@ -406,7 +650,16 @@ app.put("/api/admin/site-settings", requireAdmin, siteSettingsUpload, async (req
   }
 });
 
-app.post("/api/admin/products", requireAdmin, upload.single("image"), async (req, res) => {
+app.post("/api/admin/products", requireAdmin, productUpload, async (req, res) => {
+  const productImageUrls = [
+    ...parseImageUrlList(req.body?.productImageUrls, { defaultEmpty: true }),
+    ...uploadedImageUrls(req.files, "productImages")
+  ];
+  const includedImageUrls = [
+    ...parseImageUrlList(req.body?.includedImageUrls, { defaultEmpty: true }),
+    ...uploadedImageUrls(req.files, "includedImages")
+  ];
+
   try {
     const created = await createProduct({
       title: req.body?.title,
@@ -414,6 +667,8 @@ app.post("/api/admin/products", requireAdmin, upload.single("image"), async (req
       included: req.body?.included,
       priceCents: priceToCents(req.body?.price),
       imageUrl: imageUrlFromRequest(req),
+      productImageUrls,
+      includedImageUrls,
       inStock: parseBooleanFlag(req.body?.inStock, true),
       shippingEnabled: parseBooleanFlag(req.body?.shippingEnabled, true),
       shippingFeeCents: optionalPriceToCents(req.body?.shippingFee),
@@ -422,7 +677,7 @@ app.post("/api/admin/products", requireAdmin, upload.single("image"), async (req
     });
     return res.status(201).json(created);
   } catch (error) {
-    await removeUploadedFile(req.file);
+    await removeUploadedFiles(req.files, ["image", "productImages", "includedImages"]);
     if (error instanceof ProductValidationError) {
       return res.status(400).json({ error: error.message });
     }
@@ -433,13 +688,23 @@ app.post("/api/admin/products", requireAdmin, upload.single("image"), async (req
   }
 });
 
-app.put("/api/admin/products/:id", requireAdmin, upload.single("image"), async (req, res) => {
+app.put("/api/admin/products/:id", requireAdmin, productUpload, async (req, res) => {
   const removeImage = String(req.body?.removeImage || "").toLowerCase() === "true";
   const imageUrl = removeImage ? "" : imageUrlFromRequest(req, { allowUnset: true });
   const nextPriceRaw = String(req.body?.price || "").trim();
   const nextPrice = nextPriceRaw ? priceToCents(nextPriceRaw) : undefined;
   const shippingFeeRaw = String(req.body?.shippingFee || "").trim();
   const nextShippingFee = shippingFeeRaw ? priceToCents(shippingFeeRaw) : undefined;
+  const uploadedProductImages = uploadedImageUrls(req.files, "productImages");
+  const uploadedIncludedImages = uploadedImageUrls(req.files, "includedImages");
+  const productImageListProvided = req.body?.productImageUrls !== undefined || uploadedProductImages.length > 0;
+  const includedImageListProvided = req.body?.includedImageUrls !== undefined || uploadedIncludedImages.length > 0;
+  const nextProductImageUrls = productImageListProvided
+    ? [...parseImageUrlList(req.body?.productImageUrls, { defaultEmpty: true }), ...uploadedProductImages]
+    : undefined;
+  const nextIncludedImageUrls = includedImageListProvided
+    ? [...parseImageUrlList(req.body?.includedImageUrls, { defaultEmpty: true }), ...uploadedIncludedImages]
+    : undefined;
 
   try {
     const updated = await updateProduct(req.params.id, {
@@ -448,6 +713,8 @@ app.put("/api/admin/products/:id", requireAdmin, upload.single("image"), async (
       included: req.body?.included !== undefined ? req.body.included : undefined,
       priceCents: nextPriceRaw ? nextPrice : undefined,
       imageUrl,
+      productImageUrls: nextProductImageUrls,
+      includedImageUrls: nextIncludedImageUrls,
       shippingEnabled: parseBooleanFlag(req.body?.shippingEnabled, undefined),
       shippingFeeCents: shippingFeeRaw ? nextShippingFee : undefined,
       isVisible: parseBooleanFlag(req.body?.isVisible, undefined),
@@ -456,13 +723,13 @@ app.put("/api/admin/products/:id", requireAdmin, upload.single("image"), async (
     });
 
     if (!updated) {
-      await removeUploadedFile(req.file);
+      await removeUploadedFiles(req.files, ["image", "productImages", "includedImages"]);
       return res.status(404).json({ error: "Product not found." });
     }
 
     return res.json(updated);
   } catch (error) {
-    await removeUploadedFile(req.file);
+    await removeUploadedFiles(req.files, ["image", "productImages", "includedImages"]);
     if (error instanceof ProductValidationError) {
       return res.status(400).json({ error: error.message });
     }
@@ -495,6 +762,19 @@ app.delete("/api/admin/products/:id", requireAdmin, async (req, res) => {
     return res.status(404).json({ error: "Product not found." });
   }
   return res.json({ ok: true });
+});
+
+app.post("/api/admin/publish", requireAdmin, async (req, res) => {
+  try {
+    const result = await publishAdminSnapshot(req.body?.message);
+    return res.json(result);
+  } catch (error) {
+    const text = String(error?.message || "");
+    if (text.includes("not configured")) {
+      return res.status(503).json({ error: text });
+    }
+    return res.status(500).json({ error: maskSecrets(text || "Could not publish changes.") });
+  }
 });
 
 app.post("/api/create-checkout-session", async (req, res) => {

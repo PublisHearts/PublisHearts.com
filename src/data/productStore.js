@@ -14,6 +14,7 @@ const defaultShippingFeeCents =
   Number.isFinite(parsedDefaultShippingFee) && parsedDefaultShippingFee >= 0
     ? Math.round(parsedDefaultShippingFee * 100)
     : 500;
+const maxGalleryImages = 16;
 
 let loaded = false;
 let products = [];
@@ -48,6 +49,8 @@ function cloneProduct(product) {
     included: product.included,
     priceCents: product.priceCents,
     imageUrl: product.imageUrl,
+    productImageUrls: Array.isArray(product.productImageUrls) ? [...product.productImageUrls] : [],
+    includedImageUrls: Array.isArray(product.includedImageUrls) ? [...product.includedImageUrls] : [],
     shippingEnabled: parseStoredBoolean(product.shippingEnabled, true),
     shippingFeeCents: Number.isFinite(product.shippingFeeCents)
       ? product.shippingFeeCents
@@ -102,6 +105,57 @@ function cleanImageUrl(value) {
     return candidate;
   }
   throw new ProductValidationError("Image URL must start with https://, http://, or /uploads/.");
+}
+
+function splitImageList(value) {
+  if (value === undefined || value === null || value === "") {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return [];
+  }
+
+  if (text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Fall through to plain text parsing.
+    }
+  }
+
+  return text.split(/\r?\n|,/g);
+}
+
+function cleanImageUrlList(value, fieldName) {
+  const entries = splitImageList(value);
+  const unique = [];
+  const seen = new Set();
+
+  for (const entry of entries) {
+    const text = String(entry || "").trim();
+    if (!text) {
+      continue;
+    }
+    const cleaned = cleanImageUrl(text);
+    if (seen.has(cleaned)) {
+      continue;
+    }
+    seen.add(cleaned);
+    unique.push(cleaned);
+  }
+
+  if (unique.length > maxGalleryImages) {
+    throw new ProductValidationError(`${fieldName} must have ${maxGalleryImages} images or less.`);
+  }
+  return unique;
 }
 
 function cleanInStock(value, defaultValue = true) {
@@ -232,6 +286,10 @@ function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
   const included = cleanOptionalText(raw.included, 800, "What's included");
   const priceCents = cleanPriceCents(raw.priceCents);
   const imageUrl = cleanImageUrl(raw.imageUrl);
+  const productImageUrls = cleanImageUrlList(raw.productImageUrls, "Product image gallery").filter(
+    (url) => url !== imageUrl
+  );
+  const includedImageUrls = cleanImageUrlList(raw.includedImageUrls, "Included image gallery");
   const shippingEnabled = cleanShippingEnabled(raw.shippingEnabled, true);
   const shippingFeeCents = cleanShippingFeeCents(raw.shippingFeeCents, defaultShippingFeeCents);
   const isVisible = cleanVisibility(raw.isVisible, true);
@@ -247,6 +305,8 @@ function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
     included,
     priceCents,
     imageUrl,
+    productImageUrls,
+    includedImageUrls,
     shippingEnabled,
     shippingFeeCents,
     isVisible,
@@ -347,6 +407,8 @@ export async function createProduct({
   included,
   priceCents,
   imageUrl,
+  productImageUrls,
+  includedImageUrls,
   inStock,
   shippingEnabled,
   shippingFeeCents,
@@ -360,6 +422,10 @@ export async function createProduct({
   const cleanIncluded = cleanOptionalText(included, 800, "What's included");
   const cleanPrice = cleanPriceCents(priceCents);
   const cleanImage = cleanImageUrl(imageUrl);
+  const cleanGalleryImages = cleanImageUrlList(productImageUrls, "Product image gallery").filter(
+    (url) => url !== cleanImage
+  );
+  const cleanIncludedImages = cleanImageUrlList(includedImageUrls, "Included image gallery");
   const cleanAvailability = cleanInStock(inStock, true);
   const cleanShippingToggle = cleanShippingEnabled(shippingEnabled, true);
   const cleanShippingFee = cleanShippingFeeCents(shippingFeeCents, defaultShippingFeeCents);
@@ -375,6 +441,8 @@ export async function createProduct({
     included: cleanIncluded,
     priceCents: cleanPrice,
     imageUrl: cleanImage,
+    productImageUrls: cleanGalleryImages,
+    includedImageUrls: cleanIncludedImages,
     shippingEnabled: cleanShippingToggle,
     shippingFeeCents: cleanShippingFee,
     isVisible: cleanVisibilityValue,
@@ -397,6 +465,17 @@ export async function updateProduct(productId, changes) {
   }
 
   const current = products[index];
+  const nextPrimaryImage =
+    changes.imageUrl !== undefined ? cleanImageUrl(changes.imageUrl) : cleanImageUrl(current.imageUrl);
+  const nextProductImageUrls =
+    changes.productImageUrls !== undefined
+      ? cleanImageUrlList(changes.productImageUrls, "Product image gallery")
+      : cleanImageUrlList(current.productImageUrls, "Product image gallery");
+  const nextIncludedImageUrls =
+    changes.includedImageUrls !== undefined
+      ? cleanImageUrlList(changes.includedImageUrls, "Included image gallery")
+      : cleanImageUrlList(current.includedImageUrls, "Included image gallery");
+
   const updated = {
     ...current,
     title: changes.title !== undefined ? cleanText(changes.title, 140, "Title") : current.title,
@@ -410,7 +489,9 @@ export async function updateProduct(productId, changes) {
         : current.included,
     priceCents:
       changes.priceCents !== undefined ? cleanPriceCents(changes.priceCents) : current.priceCents,
-    imageUrl: changes.imageUrl !== undefined ? cleanImageUrl(changes.imageUrl) : current.imageUrl,
+    imageUrl: nextPrimaryImage,
+    productImageUrls: nextProductImageUrls.filter((url) => url !== nextPrimaryImage),
+    includedImageUrls: nextIncludedImageUrls,
     shippingEnabled:
       changes.shippingEnabled !== undefined
         ? cleanShippingEnabled(changes.shippingEnabled, current.shippingEnabled)

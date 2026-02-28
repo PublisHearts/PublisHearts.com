@@ -42,6 +42,11 @@ Optional:
 - `SITE_SETTINGS_FILE` (defaults to `data/site-settings.json`)
 - `UPLOADS_DIR` (defaults to `public/uploads`)
 - `DEFAULT_SHIPPING_FEE` (defaults to `5.00`, in USD)
+- `GITHUB_PUSH_TOKEN` (enables Admin -> Publish Live Changes)
+- `GITHUB_REPO` (format: `owner/repo`, for Admin publish)
+- `GITHUB_BRANCH` (defaults to `main`)
+- `GITHUB_AUTHOR_NAME` (defaults to `PublisHearts Admin Bot`)
+- `GITHUB_AUTHOR_EMAIL` (defaults to `admin@publishearts.com`)
 
 ## Admin dashboard (products + storefront design)
 
@@ -61,6 +66,7 @@ From the dashboard you can:
 - set title, description, what's included, price, in-stock status, and shipping fee toggle
 - drag product cards to reorder storefront display
 - edit/delete existing products
+- publish current live admin content back to GitHub with one button
 
 ## Data storage
 

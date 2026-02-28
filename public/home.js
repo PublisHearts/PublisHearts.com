@@ -59,6 +59,16 @@ function isComingSoon(product) {
   return ["true", "1", "yes", "on", "comingsoon", "coming-soon"].includes(text);
 }
 
+function getPrimaryProductImage(product) {
+  const candidates = [
+    String(product?.imageUrl || "").trim(),
+    ...(Array.isArray(product?.productImageUrls)
+      ? product.productImageUrls.map((entry) => String(entry || "").trim())
+      : [])
+  ].filter(Boolean);
+  return candidates[0] || "https://placehold.co/600x800/f2ece1/35211f?text=Coming+Soon";
+}
+
 function setStripeLinkedText(el, value) {
   const text = String(value || "").trim();
   if (!el || !text) {
@@ -194,7 +204,7 @@ function renderComingSoon(products) {
     .map(
       (product) => `<article class="coming-soon-card">
         <div class="coming-soon-cover-wrap">
-          <img class="coming-soon-cover" src="${product.imageUrl}" alt="${product.title} preview cover" loading="lazy" />
+          <img class="coming-soon-cover" src="${getPrimaryProductImage(product)}" alt="${product.title} preview cover" loading="lazy" />
         </div>
         <div class="coming-soon-body">
           <h3 class="product-title">${product.title}</h3>
