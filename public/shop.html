@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PublisHearts Books</title>
+    <title>PublisHearts Shop</title>
     <meta
       id="site-meta-description"
       name="description"
@@ -30,8 +30,12 @@
           <span id="brand-name-header">PublisHearts</span>
         </a>
         <div class="header-actions">
-          <a class="ghost-btn ghost-link" href="/shop.html">Shop</a>
+          <a class="ghost-btn ghost-link" href="/">Home</a>
           <a class="ghost-btn ghost-link" href="/admin.html">Admin</a>
+          <button id="open-cart" class="ghost-btn" type="button" aria-label="Open shopping cart">
+            Cart
+            <span id="cart-count" class="badge">0</span>
+          </button>
         </div>
       </div>
     </header>
@@ -47,15 +51,15 @@
           Discover curated titles from PublisHearts and check out securely with card payment.
           Every customer receives a receipt email instantly.
         </p>
-        <a id="hero-cta" class="primary-btn" href="/shop.html">Shop Books</a>
+        <a id="hero-cta" class="primary-btn" href="#books">Browse Books</a>
       </section>
 
-      <section class="container">
+      <section id="books" class="container">
         <div class="section-head">
-          <h2 id="featured-title">Coming Soon Previews</h2>
-          <p id="featured-copy">Sneak peeks of upcoming releases. Visit the shop page to place active orders.</p>
+          <h2 id="featured-title">Featured Titles</h2>
+          <p id="featured-copy">Each order is processed securely and shipped to the address collected at checkout.</p>
         </div>
-        <div id="coming-soon-grid" class="coming-soon-grid" aria-live="polite"></div>
+        <div id="products-grid" class="products-grid" aria-live="polite"></div>
       </section>
 
       <section class="container promise-grid">
@@ -74,6 +78,34 @@
       </section>
     </main>
 
+    <aside id="cart-panel" class="cart-panel" aria-hidden="true">
+      <div class="cart-card">
+        <div class="row-between cart-head">
+          <h2>Your Cart</h2>
+          <button id="close-cart" class="icon-btn" type="button" aria-label="Close cart">
+            x
+          </button>
+        </div>
+        <div id="cart-items" class="cart-items"></div>
+        <div class="cart-foot">
+          <div class="row-between">
+            <span>Items subtotal</span>
+            <strong id="cart-subtotal">$0.00</strong>
+          </div>
+          <div class="row-between">
+            <span>Shipping</span>
+            <strong id="cart-shipping">$0.00</strong>
+          </div>
+          <div class="row-between">
+            <span>Total</span>
+            <strong id="cart-total">$0.00</strong>
+          </div>
+          <button id="checkout-btn" class="primary-btn block" type="button">Checkout</button>
+          <p id="checkout-message" class="checkout-message"></p>
+        </div>
+      </div>
+    </aside>
+
     <footer class="site-footer">
       <div class="container row-between">
         <a id="footer-left" class="footer-link-btn" href="/about.html">PublisHearts</a>
@@ -81,6 +113,6 @@
       </div>
     </footer>
 
-    <script type="module" src="/home.js"></script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

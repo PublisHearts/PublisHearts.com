@@ -246,6 +246,52 @@ h1 {
   gap: 1rem;
 }
 
+.coming-soon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.coming-soon-card {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  border: 1px solid #eadfce;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.coming-soon-cover-wrap {
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  background: #f8f5ef;
+  display: grid;
+  place-items: center;
+  padding: 0.75rem;
+}
+
+.coming-soon-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.coming-soon-body {
+  padding: 1rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.coming-soon-pill {
+  font-size: 0.76rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  background: #f8e3df;
+  color: #912b21;
+  font-weight: 700;
+}
+
 .product-card {
   display: flex;
   flex-direction: column;
@@ -730,9 +776,17 @@ h1 {
 }
 
 .admin-card-actions {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.3rem;
+}
+
+.admin-card-actions .ghost-btn,
+.admin-card-actions .danger-btn {
+  padding: 0.42rem 0.72rem;
+  font-size: 0.82rem;
+  line-height: 1.2;
 }
 
 .admin-help {
