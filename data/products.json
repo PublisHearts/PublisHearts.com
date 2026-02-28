@@ -8,47 +8,9 @@
     "imageUrl": "/uploads/1772232287471-4a3b3355.jpg",
     "shippingEnabled": true,
     "shippingFeeCents": 1000,
+    "isVisible": true,
+    "isComingSoon": true,
     "inStock": true,
-    "sortOrder": 0,
-    "isVisible": true
-  },
-  {
-    "id": "the-little-big-superhero",
-    "title": "The Little Big Superhero",
-    "subtitle": "An encouraging story that helps children build confidence, courage, and kindness in daily life.",
-    "included": "one The Little Big Superhero book ,\r\n website-exclusive stickers, and protective packaging.",
-    "priceCents": 1099,
-    "imageUrl": "/uploads/1772231656386-a088d811.png",
-    "shippingEnabled": true,
-    "shippingFeeCents": 1000,
-    "inStock": true,
-    "sortOrder": 1,
-    "isVisible": true
-  },
-  {
-    "id": "the-little-big-superhero-goes-to-the-doctor",
-    "title": "The Little Big Superhero Goes to the Doctor",
-    "subtitle": "A reassuring, kid-friendly story that makes doctor visits feel less scary and more manageable.",
-    "included": "one The Little Big Superhero Goes to the Doctor book , website-exclusive stickers, and protective packaging.",
-    "priceCents": 1199,
-    "imageUrl": "/uploads/1772231706614-38720041.jpg",
-    "shippingEnabled": true,
-    "shippingFeeCents": 1000,
-    "inStock": true,
-    "sortOrder": 2,
-    "isVisible": true
-  },
-  {
-    "id": "little-larry-and-the-llama",
-    "title": "Little Larry and the Llama",
-    "subtitle": "A loving story of a little llama and his little llama routine teaching a solid foundation built on God",
-    "included": "one Little Larry and the Llama book , website-exclusive stickers, and protective packaging.",
-    "priceCents": 999,
-    "imageUrl": "/uploads/1772232010505-f4ec50be.jpg",
-    "shippingEnabled": true,
-    "shippingFeeCents": 1000,
-    "inStock": true,
-    "sortOrder": 3,
-    "isVisible": true
+    "sortOrder": 0
   }
 ]
