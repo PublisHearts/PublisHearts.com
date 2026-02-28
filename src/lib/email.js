@@ -133,6 +133,9 @@ function orderLineItemsText(lineItems, currency) {
 export async function sendCustomerReceipt({
   customerEmail,
   orderId,
+  amountSubtotal,
+  amountShipping,
+  amountTax,
   amountTotal,
   currency,
   lineItems,
@@ -144,6 +147,9 @@ export async function sendCustomerReceipt({
 
   const normalizedItems = normalizeLineItems(lineItems);
   const unitsTotal = getUnitsTotal(normalizedItems);
+  const subtotal = formatMoney(amountSubtotal || 0, currency);
+  const shippingTotal = formatMoney(amountShipping || 0, currency);
+  const taxTotal = formatMoney(amountTax || 0, currency);
   const total = formatMoney(amountTotal || 0, currency);
   const textItems = orderLineItemsText(normalizedItems, currency);
   const htmlItems = orderLineItemsHtml(normalizedItems, currency);
@@ -157,6 +163,9 @@ export async function sendCustomerReceipt({
     text: `Thank you for your order from PublisHearts.
 
 Order ID: ${orderId}
+Subtotal: ${subtotal}
+Shipping: ${shippingTotal}
+Sales tax: ${taxTotal}
 Total: ${total}
 Units ordered: ${unitsTotal}
 
@@ -171,6 +180,9 @@ If you have any questions, reply to this email.`,
     html: `<div style="font-family:Arial,sans-serif; color:#1f2937; line-height:1.4;">
       <h2 style="margin:0 0 12px;">Thank you for your order.</h2>
       <p style="margin:0 0 8px;">Order ID: <strong>${escapeHtml(orderId)}</strong></p>
+      <p style="margin:0 0 4px;">Subtotal: <strong>${escapeHtml(subtotal)}</strong></p>
+      <p style="margin:0 0 4px;">Shipping: <strong>${escapeHtml(shippingTotal)}</strong></p>
+      <p style="margin:0 0 4px;">Sales tax: <strong>${escapeHtml(taxTotal)}</strong></p>
       <p style="margin:0 0 16px;">Total: <strong>${escapeHtml(total)}</strong></p>
       <p style="margin:0 0 16px;">Units ordered: <strong>${unitsTotal}</strong></p>
       <h3 style="margin:0 0 8px;">Shipping</h3>
@@ -191,7 +203,17 @@ If you have any questions, reply to this email.`,
   });
 }
 
-export async function sendOwnerNotification({ orderId, amountTotal, currency, lineItems, customerDetails, shippingDetails }) {
+export async function sendOwnerNotification({
+  orderId,
+  amountSubtotal,
+  amountShipping,
+  amountTax,
+  amountTotal,
+  currency,
+  lineItems,
+  customerDetails,
+  shippingDetails
+}) {
   if (!emailConfigured()) {
     return;
   }
@@ -206,6 +228,9 @@ export async function sendOwnerNotification({ orderId, amountTotal, currency, li
 
   const normalizedItems = normalizeLineItems(lineItems);
   const unitsTotal = getUnitsTotal(normalizedItems);
+  const subtotal = formatMoney(amountSubtotal || 0, currency);
+  const shippingTotal = formatMoney(amountShipping || 0, currency);
+  const taxTotal = formatMoney(amountTax || 0, currency);
   const total = formatMoney(amountTotal || 0, currency);
   const customerName = customerDetails?.name || "Unknown";
   const customerEmail = customerDetails?.email || "Unknown";
@@ -222,6 +247,9 @@ export async function sendOwnerNotification({ orderId, amountTotal, currency, li
     text: `New order received.
 
 Order ID: ${orderId}
+Subtotal: ${subtotal}
+Shipping: ${shippingTotal}
+Sales tax: ${taxTotal}
 Total: ${total}
 Units ordered: ${unitsTotal}
 
@@ -239,6 +267,9 @@ ${textItems}`,
     html: `<div style="font-family:Arial,sans-serif; color:#1f2937; line-height:1.4;">
       <h2 style="margin:0 0 12px;">New order received</h2>
       <p style="margin:0 0 4px;">Order ID: <strong>${escapeHtml(orderId)}</strong></p>
+      <p style="margin:0 0 4px;">Subtotal: <strong>${escapeHtml(subtotal)}</strong></p>
+      <p style="margin:0 0 4px;">Shipping: <strong>${escapeHtml(shippingTotal)}</strong></p>
+      <p style="margin:0 0 4px;">Sales tax: <strong>${escapeHtml(taxTotal)}</strong></p>
       <p style="margin:0 0 16px;">Total: <strong>${escapeHtml(total)}</strong></p>
       <p style="margin:0 0 16px;">Units ordered: <strong>${unitsTotal}</strong></p>
       <h3 style="margin:0 0 8px;">Customer</h3>

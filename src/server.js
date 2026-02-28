@@ -33,6 +33,7 @@ const execFileAsync = promisify(execFile);
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const currency = (process.env.STRIPE_CURRENCY || "usd").toLowerCase();
 const port = Number(process.env.PORT || 4242);
+const stripeAutomaticTaxEnabled = (process.env.STRIPE_AUTOMATIC_TAX || "true").trim().toLowerCase() !== "false";
 const adminPassword = (process.env.ADMIN_PASSWORD || "").trim();
 const githubPushToken = (process.env.GITHUB_PUSH_TOKEN || "").trim();
 const githubRepoRaw = (process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY || "").trim();
@@ -634,6 +635,9 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), asyn
         await sendCustomerReceipt({
           customerEmail,
           orderId: session.id,
+          amountSubtotal: session.amount_subtotal || 0,
+          amountShipping: session.total_details?.amount_shipping || 0,
+          amountTax: session.total_details?.amount_tax || 0,
           amountTotal: session.amount_total || 0,
           currency: session.currency || currency,
           lineItems,
@@ -644,6 +648,9 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), asyn
 
       await sendOwnerNotification({
         orderId: session.id,
+        amountSubtotal: session.amount_subtotal || 0,
+        amountShipping: session.total_details?.amount_shipping || 0,
+        amountTax: session.total_details?.amount_tax || 0,
         amountTotal: session.amount_total || 0,
         currency: session.currency || currency,
         lineItems,
@@ -931,6 +938,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
       mode: "payment",
       payment_method_types: ["card"],
       line_items: lineItems,
+      automatic_tax: {
+        enabled: stripeAutomaticTaxEnabled
+      },
       billing_address_collection: "required",
       phone_number_collection: {
         enabled: true
@@ -987,6 +997,10 @@ app.get("/api/order/:sessionId", async (req, res) => {
 
     return res.json({
       id: session.id,
+      amountSubtotal: session.amount_subtotal || 0,
+      amountShipping: session.total_details?.amount_shipping || 0,
+      amountTax: session.total_details?.amount_tax || 0,
+      amountDiscount: session.total_details?.amount_discount || 0,
       amountTotal: session.amount_total || 0,
       currency: session.currency || currency,
       customerEmail: session.customer_details?.email || session.customer_email || "",

@@ -4,6 +4,7 @@ Bookstore web app with:
 
 - storefront + cart
 - Stripe card checkout
+- Stripe automatic sales tax at checkout
 - customer receipt email
 - owner order email with customer/shipping info
 - admin dashboard for product CRUD + cover image uploads
@@ -42,6 +43,7 @@ Optional:
 - `SITE_SETTINGS_FILE` (defaults to `data/site-settings.json`)
 - `UPLOADS_DIR` (defaults to `public/uploads`)
 - `DEFAULT_SHIPPING_FEE` (defaults to `5.00`, in USD)
+- `STRIPE_AUTOMATIC_TAX` (defaults to `true`)
 - `SHIPPING_MIN_FEE` (defaults to `10.00`, checkout minimum)
 - `SHIPPING_WEIGHT_PER_UNIT_LBS` (defaults to `1.5`)
 - `GITHUB_PUSH_TOKEN` (enables Admin -> Publish Live Changes)
@@ -94,3 +96,5 @@ Subscribe to event:
 - `checkout.session.completed`
 
 Then set returned signing secret as `STRIPE_WEBHOOK_SECRET`.
+
+For sales tax, enable Stripe Tax in your Stripe dashboard and keep `STRIPE_AUTOMATIC_TAX=true`.

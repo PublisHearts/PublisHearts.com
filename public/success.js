@@ -2,6 +2,7 @@ const receiptCopy = document.getElementById("receipt-copy");
 const orderItems = document.getElementById("order-items");
 const orderItemsSubtotal = document.getElementById("order-items-subtotal");
 const orderShipping = document.getElementById("order-shipping");
+const orderTax = document.getElementById("order-tax");
 const orderTotal = document.getElementById("order-total");
 const shippingName = document.getElementById("shipping-name");
 const shippingAddress = document.getElementById("shipping-address");
@@ -46,9 +47,16 @@ async function loadOrder() {
 
     receiptCopy.textContent =
       "A receipt email has been sent. Your shipping details and order summary are below.";
-    const shippingTotal = (order.lineItems || [])
+    const shippingFromLines = (order.lineItems || [])
       .filter((item) => isShippingLineItem(item))
       .reduce((sum, item) => sum + (Number(item.amountTotal) || 0), 0);
+    const shippingTotal = Number(order.amountShipping);
+    const normalizedShippingTotal = Number.isFinite(shippingTotal) ? shippingTotal : shippingFromLines;
+    const taxTotal = Number.isFinite(Number(order.amountTax)) ? Number(order.amountTax) : 0;
+    const subtotalFromApi = Number(order.amountSubtotal);
+    const itemsSubtotalCents = Number.isFinite(subtotalFromApi)
+      ? Math.max(0, subtotalFromApi - normalizedShippingTotal)
+      : Math.max(0, (Number(order.amountTotal) || 0) - normalizedShippingTotal - taxTotal);
 
     const productLineItems = (order.lineItems || []).filter((item) => !isShippingLineItem(item));
 
@@ -63,9 +71,9 @@ async function loadOrder() {
       orderItems.innerHTML = `<li><span>No product lines available.</span><strong>-</strong></li>`;
     }
 
-    const itemsSubtotalCents = Math.max(0, (Number(order.amountTotal) || 0) - shippingTotal);
     orderItemsSubtotal.textContent = formatMoney(itemsSubtotalCents, order.currency);
-    orderShipping.textContent = formatMoney(shippingTotal, order.currency);
+    orderShipping.textContent = formatMoney(normalizedShippingTotal, order.currency);
+    orderTax.textContent = formatMoney(taxTotal, order.currency);
     orderTotal.textContent = formatMoney(order.amountTotal, order.currency);
     shippingName.textContent = order.shippingDetails?.name || "Name not provided";
     shippingAddress.textContent = formatAddress(order.shippingDetails?.address);
