@@ -356,7 +356,8 @@ app.get("/api/site-settings", async (req, res) => {
 
 app.get("/api/products", async (req, res) => {
   const products = await listProducts();
-  res.json(products);
+  const visibleProducts = products.filter((product) => product.isVisible !== false);
+  res.json(visibleProducts);
 });
 
 app.post("/api/admin/login", (req, res) => {
@@ -415,7 +416,8 @@ app.post("/api/admin/products", requireAdmin, upload.single("image"), async (req
       imageUrl: imageUrlFromRequest(req),
       inStock: parseBooleanFlag(req.body?.inStock, true),
       shippingEnabled: parseBooleanFlag(req.body?.shippingEnabled, true),
-      shippingFeeCents: optionalPriceToCents(req.body?.shippingFee)
+      shippingFeeCents: optionalPriceToCents(req.body?.shippingFee),
+      isVisible: parseBooleanFlag(req.body?.isVisible, true)
     });
     return res.status(201).json(created);
   } catch (error) {
@@ -447,6 +449,7 @@ app.put("/api/admin/products/:id", requireAdmin, upload.single("image"), async (
       imageUrl,
       shippingEnabled: parseBooleanFlag(req.body?.shippingEnabled, undefined),
       shippingFeeCents: shippingFeeRaw ? nextShippingFee : undefined,
+      isVisible: parseBooleanFlag(req.body?.isVisible, undefined),
       inStock: parseBooleanFlag(req.body?.inStock, undefined)
     });
 
@@ -511,6 +514,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
     const product = await findProductById(item.id);
     if (!product) {
       return res.status(400).json({ error: `Unknown product id: ${item.id}` });
+    }
+    if (product.isVisible === false) {
+      return res.status(400).json({ error: `${product.title} is currently unavailable.` });
     }
     if (!product.inStock) {
       return res.status(400).json({ error: `${product.title} is sold out right now.` });

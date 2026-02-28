@@ -15,6 +15,7 @@ const shippingFeeInput = document.getElementById("product-shipping-fee");
 const imageFileInput = document.getElementById("product-image-file");
 const imageUrlInput = document.getElementById("product-image-url");
 const inStockInput = document.getElementById("product-in-stock");
+const isVisibleInput = document.getElementById("product-is-visible");
 const removeImageInput = document.getElementById("remove-image");
 const saveProductBtn = document.getElementById("save-product-btn");
 const cancelEditBtn = document.getElementById("cancel-edit-btn");
@@ -147,6 +148,7 @@ function resetForm() {
   imageFileInput.value = "";
   imageUrlInput.value = "";
   inStockInput.checked = true;
+  isVisibleInput.checked = true;
   removeImageInput.checked = false;
   saveProductBtn.textContent = "Save Product";
   syncShippingInputs();
@@ -215,6 +217,7 @@ function beginEdit(productId) {
   imageUrlInput.value = "";
   imageFileInput.value = "";
   inStockInput.checked = product.inStock !== false;
+  isVisibleInput.checked = product.isVisible !== false;
   removeImageInput.checked = false;
   saveProductBtn.textContent = "Update Product";
   syncShippingInputs();
@@ -264,6 +267,7 @@ function renderProducts() {
         const shippingFee = Number.isFinite(product.shippingFeeCents)
           ? product.shippingFeeCents
           : DEFAULT_SHIPPING_FEE * 100;
+        const isVisible = product.isVisible !== false;
 
         return `<article class="admin-product-card" draggable="true" data-id="${product.id}">
         <img class="admin-product-image" src="${product.imageUrl}" alt="${product.title} cover" />
@@ -285,6 +289,9 @@ function renderProducts() {
                   : `Shipping ${formatMoney(shippingFee)}`
               }
             </span>
+            <span class="admin-stock-badge ${isVisible ? "in-stock" : "sold-out"}">
+              ${isVisible ? "Visible" : "Hidden"}
+            </span>
             <span class="admin-drag-hint">Drag to reorder</span>
           </div>
           <p class="admin-id">ID: ${product.id}</p>
@@ -292,6 +299,9 @@ function renderProducts() {
             <button class="ghost-btn" type="button" data-action="edit" data-id="${product.id}">Edit</button>
             <button class="ghost-btn" type="button" data-action="toggle-shipping" data-id="${product.id}">
               ${shippingEnabled ? "Turn Shipping Off" : "Turn Shipping On"}
+            </button>
+            <button class="ghost-btn" type="button" data-action="toggle-visibility" data-id="${product.id}">
+              ${isVisible ? "Hide Listing" : "Show Listing"}
             </button>
             <button class="danger-btn" type="button" data-action="delete" data-id="${product.id}">Delete</button>
           </div>
@@ -510,6 +520,40 @@ productsEl.addEventListener("click", async (event) => {
     return;
   }
 
+  if (action === "toggle-visibility") {
+    const product = state.products.find((item) => item.id === productId);
+    if (!product) {
+      return;
+    }
+
+    const nextVisibility = product.isVisible === false;
+    try {
+      setProductMessage(nextVisibility ? "Showing listing..." : "Hiding listing...");
+      await adminRequest(`/api/admin/products/${encodeURIComponent(productId)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          isVisible: nextVisibility
+        })
+      });
+      await loadProducts();
+      setProductMessage(
+        nextVisibility
+          ? `"${product.title}" is now visible on storefront.`
+          : `"${product.title}" is hidden from storefront.`
+      );
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setProductMessage(error.message || "Could not update listing visibility.", true);
+    }
+    return;
+  }
+
   if (action === "delete") {
     if (!window.confirm("Delete this product?")) {
       return;
@@ -627,6 +671,7 @@ productForm.addEventListener("submit", async (event) => {
     formData.append("shippingFee", shippingFeeInput.value);
   }
   formData.append("inStock", String(inStockInput.checked));
+  formData.append("isVisible", String(isVisibleInput.checked));
 
   const file = imageFileInput.files?.[0];
   if (file) {

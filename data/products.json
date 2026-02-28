@@ -9,7 +9,8 @@
     "shippingEnabled": true,
     "shippingFeeCents": 1000,
     "inStock": true,
-    "sortOrder": 0
+    "sortOrder": 0,
+    "isVisible": true
   },
   {
     "id": "the-little-big-superhero",
@@ -21,7 +22,8 @@
     "shippingEnabled": true,
     "shippingFeeCents": 1000,
     "inStock": true,
-    "sortOrder": 1
+    "sortOrder": 1,
+    "isVisible": true
   },
   {
     "id": "the-little-big-superhero-goes-to-the-doctor",
@@ -33,7 +35,8 @@
     "shippingEnabled": true,
     "shippingFeeCents": 1000,
     "inStock": true,
-    "sortOrder": 2
+    "sortOrder": 2,
+    "isVisible": true
   },
   {
     "id": "little-larry-and-the-llama",
@@ -45,6 +48,7 @@
     "shippingEnabled": true,
     "shippingFeeCents": 1000,
     "inStock": true,
-    "sortOrder": 3
+    "sortOrder": 3,
+    "isVisible": true
   }
 ]
