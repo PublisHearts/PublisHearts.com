@@ -20,6 +20,7 @@ const includedGalleryFilesInput = document.getElementById("included-gallery-file
 const includedGalleryUrlsInput = document.getElementById("included-gallery-urls");
 const inStockInput = document.getElementById("product-in-stock");
 const isComingSoonInput = document.getElementById("product-is-coming-soon");
+const allowPreorderInput = document.getElementById("product-allow-preorder");
 const isVisibleInput = document.getElementById("product-is-visible");
 const removeImageInput = document.getElementById("remove-image");
 const saveProductBtn = document.getElementById("save-product-btn");
@@ -172,6 +173,7 @@ function resetForm() {
   includedGalleryUrlsInput.value = "";
   inStockInput.checked = true;
   isComingSoonInput.checked = false;
+  allowPreorderInput.checked = false;
   isVisibleInput.checked = true;
   removeImageInput.checked = false;
   saveProductBtn.textContent = "Save Product";
@@ -246,6 +248,7 @@ function beginEdit(productId) {
   includedGalleryUrlsInput.value = normalizeImageList(product.includedImageUrls).join("\n");
   inStockInput.checked = product.inStock !== false;
   isComingSoonInput.checked = product.isComingSoon === true;
+  allowPreorderInput.checked = product.allowPreorder === true;
   isVisibleInput.checked = product.isVisible !== false;
   removeImageInput.checked = false;
   saveProductBtn.textContent = "Update Product";
@@ -307,6 +310,7 @@ function renderProducts() {
           : DEFAULT_SHIPPING_FEE * 100;
         const isVisible = product.isVisible !== false;
         const isComingSoon = product.isComingSoon === true;
+        const allowPreorder = product.allowPreorder === true;
         const productGalleryCount = normalizeImageList(product.productImageUrls).length;
         const includedGalleryCount = normalizeImageList(product.includedImageUrls).length;
 
@@ -335,8 +339,8 @@ function renderProducts() {
             <span class="admin-stock-badge ${isVisible ? "in-stock" : "sold-out"}">
               ${isVisible ? "Visible" : "Hidden"}
             </span>
-            <span class="admin-stock-badge ${isComingSoon ? "sold-out" : "in-stock"}">
-              ${isComingSoon ? "Coming Soon" : "Orderable"}
+            <span class="admin-stock-badge ${isComingSoon && !allowPreorder ? "sold-out" : "in-stock"}">
+              ${isComingSoon ? (allowPreorder ? "Preorder Open" : "Coming Soon") : "Orderable"}
             </span>
             <span class="admin-drag-hint">Drag to reorder</span>
           </div>
@@ -351,6 +355,9 @@ function renderProducts() {
             </button>
             <button class="ghost-btn" type="button" data-action="toggle-coming-soon" data-id="${product.id}">
               ${isComingSoon ? "Make Orderable" : "Mark Coming Soon"}
+            </button>
+            <button class="ghost-btn" type="button" data-action="toggle-preorder" data-id="${product.id}">
+              ${allowPreorder ? "Disable Preorder" : "Enable Preorder"}
             </button>
             <button class="danger-btn" type="button" data-action="delete" data-id="${product.id}">Delete</button>
           </div>
@@ -680,6 +687,40 @@ productsEl.addEventListener("click", async (event) => {
     return;
   }
 
+  if (action === "toggle-preorder") {
+    const product = state.products.find((item) => item.id === productId);
+    if (!product) {
+      return;
+    }
+
+    const nextAllowPreorder = product.allowPreorder !== true;
+    try {
+      setProductMessage(nextAllowPreorder ? "Enabling preorder..." : "Disabling preorder...");
+      await adminRequest(`/api/admin/products/${encodeURIComponent(productId)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          allowPreorder: nextAllowPreorder
+        })
+      });
+      await loadProducts();
+      setProductMessage(
+        nextAllowPreorder
+          ? `Preorder enabled for "${product.title}".`
+          : `Preorder disabled for "${product.title}".`
+      );
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setProductMessage(error.message || "Could not update preorder status.", true);
+    }
+    return;
+  }
+
   if (action === "delete") {
     if (!window.confirm("Delete this product?")) {
       return;
@@ -798,6 +839,7 @@ productForm.addEventListener("submit", async (event) => {
   }
   formData.append("inStock", String(inStockInput.checked));
   formData.append("isComingSoon", String(isComingSoonInput.checked));
+  formData.append("allowPreorder", String(allowPreorderInput.checked));
   formData.append("isVisible", String(isVisibleInput.checked));
 
   const file = imageFileInput.files?.[0];

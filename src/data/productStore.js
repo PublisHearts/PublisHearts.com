@@ -57,6 +57,7 @@ function cloneProduct(product) {
       : defaultShippingFeeCents,
     isVisible: parseStoredBoolean(product.isVisible, true),
     isComingSoon: parseStoredBoolean(product.isComingSoon, false),
+    allowPreorder: parseStoredBoolean(product.allowPreorder, false),
     inStock: parseStoredBoolean(product.inStock, true),
     sortOrder: Number.isFinite(product.sortOrder) ? product.sortOrder : 0
   };
@@ -255,6 +256,26 @@ function cleanComingSoon(value, defaultValue = false) {
   throw new ProductValidationError("Coming soon flag must be true or false.");
 }
 
+function cleanAllowPreorder(value, defaultValue = false) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const text = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "on", "preorder", "pre-order", "enabled"].includes(text)) {
+    return true;
+  }
+  if (["false", "0", "no", "off", "disabled"].includes(text)) {
+    return false;
+  }
+
+  throw new ProductValidationError("Preorder flag must be true or false.");
+}
+
 function cleanSortOrder(value, fallbackSortOrder = 0) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -294,6 +315,7 @@ function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
   const shippingFeeCents = cleanShippingFeeCents(raw.shippingFeeCents, defaultShippingFeeCents);
   const isVisible = cleanVisibility(raw.isVisible, true);
   const isComingSoon = cleanComingSoon(raw.isComingSoon, false);
+  const allowPreorder = cleanAllowPreorder(raw.allowPreorder, false);
   const inStock = cleanInStock(raw.inStock, true);
   const sortOrder = cleanSortOrder(raw.sortOrder, fallbackSortOrder);
   const idCandidate = slugify(raw.id) || buildIdFromTitle(title, new Set());
@@ -311,6 +333,7 @@ function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
     shippingFeeCents,
     isVisible,
     isComingSoon,
+    allowPreorder,
     inStock,
     sortOrder
   };
@@ -413,7 +436,8 @@ export async function createProduct({
   shippingEnabled,
   shippingFeeCents,
   isVisible,
-  isComingSoon
+  isComingSoon,
+  allowPreorder
 }) {
   await ensureLoaded();
 
@@ -431,6 +455,7 @@ export async function createProduct({
   const cleanShippingFee = cleanShippingFeeCents(shippingFeeCents, defaultShippingFeeCents);
   const cleanVisibilityValue = cleanVisibility(isVisible, true);
   const cleanComingSoonValue = cleanComingSoon(isComingSoon, false);
+  const cleanAllowPreorderValue = cleanAllowPreorder(allowPreorder, false);
   const usedIds = new Set(products.map((product) => product.id));
   const id = buildIdFromTitle(cleanTitle, usedIds);
 
@@ -447,6 +472,7 @@ export async function createProduct({
     shippingFeeCents: cleanShippingFee,
     isVisible: cleanVisibilityValue,
     isComingSoon: cleanComingSoonValue,
+    allowPreorder: cleanAllowPreorderValue,
     inStock: cleanAvailability,
     sortOrder: products.length
   };
@@ -508,6 +534,10 @@ export async function updateProduct(productId, changes) {
       changes.isComingSoon !== undefined
         ? cleanComingSoon(changes.isComingSoon, current.isComingSoon)
         : cleanComingSoon(current.isComingSoon, false),
+    allowPreorder:
+      changes.allowPreorder !== undefined
+        ? cleanAllowPreorder(changes.allowPreorder, current.allowPreorder)
+        : cleanAllowPreorder(current.allowPreorder, false),
     inStock:
       changes.inStock !== undefined ? cleanInStock(changes.inStock, current.inStock) : current.inStock,
     sortOrder: current.sortOrder

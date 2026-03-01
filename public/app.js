@@ -97,6 +97,36 @@ function isComingSoon(product) {
   return false;
 }
 
+function isPreorderEnabled(product) {
+  if (!product) {
+    return false;
+  }
+  if (product.allowPreorder === true) {
+    return true;
+  }
+  if (product.allowPreorder === false) {
+    return false;
+  }
+
+  const text = String(product.allowPreorder || "")
+    .trim()
+    .toLowerCase();
+  if (["true", "1", "yes", "on", "preorder", "pre-order", "enabled"].includes(text)) {
+    return true;
+  }
+  return false;
+}
+
+function isOrderable(product) {
+  if (!product || product.inStock === false) {
+    return false;
+  }
+  if (isComingSoon(product) && !isPreorderEnabled(product)) {
+    return false;
+  }
+  return true;
+}
+
 function collectImageUrls(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -319,7 +349,7 @@ function getCartRows() {
   return Array.from(state.cart.values())
     .map((cartItem) => {
       const product = state.products.find((entry) => entry.id === cartItem.id);
-      if (!product || product.inStock === false || isComingSoon(product)) {
+      if (!isOrderable(product)) {
         return null;
       }
       return {
@@ -421,6 +451,8 @@ function renderProducts() {
 
   productsGrid.innerHTML = state.products
     .map((product, index) => {
+      const preorderOpen = isComingSoon(product) && isPreorderEnabled(product);
+      const orderable = isOrderable(product);
       const galleryImages = getProductGalleryImages(product);
       const primaryImage = galleryImages[0] || product.imageUrl;
       const productGalleryHtml =
@@ -461,7 +493,13 @@ function renderProducts() {
                   ? `<p class="product-stock">USPS Ground Advantage shipping (starts at ${formatMoney(SHIPPING_MINIMUM_CENTS)})</p>`
                   : ""
               }
-              ${isComingSoon(product) ? '<p class="product-stock sold-out-text">Coming soon</p>' : ""}
+              ${
+                isComingSoon(product)
+                  ? preorderOpen
+                    ? '<p class="product-stock">Coming soon preview - preorder is open</p>'
+                    : '<p class="product-stock sold-out-text">Coming soon</p>'
+                  : ""
+              }
               ${product.inStock === false ? '<p class="product-stock sold-out-text">Currently sold out</p>' : ""}
             </div>
             <details class="included-tab">
@@ -472,13 +510,21 @@ function renderProducts() {
             <div class="product-row">
               <span class="price">${formatMoney(product.priceCents)}</span>
               <button
-                class="primary-btn ${product.inStock === false || isComingSoon(product) ? "sold-out-btn" : ""}"
+                class="primary-btn ${orderable ? "" : "sold-out-btn"}"
                 type="button"
                 data-action="add"
                 data-id="${product.id}"
-                ${product.inStock === false || isComingSoon(product) ? "disabled" : ""}
+                ${orderable ? "" : "disabled"}
               >
-                ${isComingSoon(product) ? "Coming Soon" : product.inStock === false ? "Sold Out" : "Add to cart"}
+                ${
+                  preorderOpen
+                    ? "Preorder"
+                    : isComingSoon(product)
+                      ? "Coming Soon"
+                      : product.inStock === false
+                        ? "Sold Out"
+                        : "Add to cart"
+                }
               </button>
             </div>
           </div>
@@ -499,7 +545,7 @@ function closeCart() {
 
 function addToCart(productId) {
   const product = state.products.find((entry) => entry.id === productId);
-  if (!product || product.inStock === false || isComingSoon(product)) {
+  if (!isOrderable(product)) {
     return;
   }
 
@@ -536,7 +582,7 @@ function sanitizeCartAgainstCatalog() {
   let changed = false;
   Array.from(state.cart.keys()).forEach((productId) => {
     const product = state.products.find((entry) => entry.id === productId);
-    if (!product || product.inStock === false || isComingSoon(product)) {
+    if (!isOrderable(product)) {
       state.cart.delete(productId);
       changed = true;
     }

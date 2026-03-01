@@ -295,6 +295,17 @@ h1 {
   font-weight: 700;
 }
 
+.coming-soon-pill.preorder-open {
+  background: #e7f4ea;
+  color: #17693b;
+}
+
+.coming-soon-cta {
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
 .product-card {
   display: flex;
   flex-direction: column;

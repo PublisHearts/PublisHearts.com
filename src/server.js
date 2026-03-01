@@ -759,7 +759,8 @@ app.post("/api/admin/products", requireAdmin, productUpload, async (req, res) =>
       shippingEnabled: parseBooleanFlag(req.body?.shippingEnabled, true),
       shippingFeeCents: optionalPriceToCents(req.body?.shippingFee),
       isVisible: parseBooleanFlag(req.body?.isVisible, true),
-      isComingSoon: parseBooleanFlag(req.body?.isComingSoon, false)
+      isComingSoon: parseBooleanFlag(req.body?.isComingSoon, false),
+      allowPreorder: parseBooleanFlag(req.body?.allowPreorder, false)
     });
     return res.status(201).json(created);
   } catch (error) {
@@ -805,6 +806,7 @@ app.put("/api/admin/products/:id", requireAdmin, productUpload, async (req, res)
       shippingFeeCents: shippingFeeRaw ? nextShippingFee : undefined,
       isVisible: parseBooleanFlag(req.body?.isVisible, undefined),
       isComingSoon: parseBooleanFlag(req.body?.isComingSoon, undefined),
+      allowPreorder: parseBooleanFlag(req.body?.allowPreorder, undefined),
       inStock: parseBooleanFlag(req.body?.inStock, undefined)
     });
 
@@ -886,7 +888,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
     if (product.isVisible === false) {
       return res.status(400).json({ error: `${product.title} is currently unavailable.` });
     }
-    if (product.isComingSoon === true) {
+    if (product.isComingSoon === true && product.allowPreorder !== true) {
       return res.status(400).json({ error: `${product.title} is coming soon and not orderable yet.` });
     }
     if (!product.inStock) {

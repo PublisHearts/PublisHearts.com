@@ -59,6 +59,22 @@ function isComingSoon(product) {
   return ["true", "1", "yes", "on", "comingsoon", "coming-soon"].includes(text);
 }
 
+function isPreorderEnabled(product) {
+  if (!product) {
+    return false;
+  }
+  if (product.allowPreorder === true) {
+    return true;
+  }
+  if (product.allowPreorder === false) {
+    return false;
+  }
+  const text = String(product.allowPreorder || "")
+    .trim()
+    .toLowerCase();
+  return ["true", "1", "yes", "on", "preorder", "pre-order", "enabled"].includes(text);
+}
+
 function getPrimaryProductImage(product) {
   const candidates = [
     String(product?.imageUrl || "").trim(),
@@ -202,7 +218,9 @@ function renderComingSoon(products) {
 
   comingSoonGrid.innerHTML = comingSoonItems
     .map(
-      (product) => `<article class="coming-soon-card">
+      (product) => {
+        const preorderOpen = isPreorderEnabled(product);
+        return `<article class="coming-soon-card">
         <div class="coming-soon-cover-wrap">
           <img class="coming-soon-cover" src="${getPrimaryProductImage(product)}" alt="${product.title} preview cover" loading="lazy" />
         </div>
@@ -211,10 +229,12 @@ function renderComingSoon(products) {
           <p class="product-subtitle">${product.subtitle || "New title arriving soon."}</p>
           <div class="row-between">
             <span class="price">${formatMoney(product.priceCents || 0)}</span>
-            <span class="coming-soon-pill">Coming Soon</span>
+            <span class="coming-soon-pill ${preorderOpen ? "preorder-open" : ""}">${preorderOpen ? "Preorder Open" : "Coming Soon"}</span>
           </div>
+          ${preorderOpen ? '<a class="ghost-btn ghost-link coming-soon-cta" href="/shop.html#books">Preorder</a>' : ""}
         </div>
-      </article>`
+      </article>`;
+      }
     )
     .join("");
 }
