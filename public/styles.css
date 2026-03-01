@@ -248,8 +248,9 @@ h1 {
 
 .coming-soon-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(170px, 220px));
   gap: 1rem;
+  justify-content: flex-start;
   align-items: start;
 }
 
@@ -262,6 +263,7 @@ h1 {
   box-shadow: var(--shadow);
   overflow: hidden;
   width: 100%;
+  max-width: 220px;
   text-decoration: none;
   color: inherit;
 }
@@ -295,10 +297,8 @@ h1 {
 }
 
 .coming-soon-body .product-subtitle {
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  display: block;
+  overflow: visible;
 }
 
 .coming-soon-body .row-between {
