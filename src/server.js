@@ -34,6 +34,12 @@ const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const currency = (process.env.STRIPE_CURRENCY || "usd").toLowerCase();
 const port = Number(process.env.PORT || 4242);
 const stripeAutomaticTaxEnabled = (process.env.STRIPE_AUTOMATIC_TAX || "true").trim().toLowerCase() !== "false";
+const parsedManualSalesTaxRate = Number.parseFloat(String(process.env.MANUAL_SALES_TAX_RATE || "0"));
+const manualSalesTaxRatePercent =
+  Number.isFinite(parsedManualSalesTaxRate) && parsedManualSalesTaxRate >= 0 ? parsedManualSalesTaxRate : 0;
+const manualSalesTaxEnabled = manualSalesTaxRatePercent > 0;
+const manualSalesTaxApplyToShipping =
+  (process.env.MANUAL_SALES_TAX_APPLY_TO_SHIPPING || "false").trim().toLowerCase() === "true";
 const adminPassword = (process.env.ADMIN_PASSWORD || "").trim();
 const githubPushToken = (process.env.GITHUB_PUSH_TOKEN || "").trim();
 const githubRepoRaw = (process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY || "").trim();
@@ -122,6 +128,54 @@ function parseLineItemsFromMetadata(metadata = {}) {
         amountTotal: null
       };
     });
+}
+
+function isShippingLineItem(item) {
+  return String(item?.name || "").trim().toLowerCase() === "shipping";
+}
+
+function isTaxLineItem(item) {
+  const name = String(item?.name || "").trim().toLowerCase();
+  return name === "sales tax" || name === "tax";
+}
+
+function getLineAmountTotal(item) {
+  const value = Number(item?.amountTotal);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function computeOrderTotals(session, lineItems = []) {
+  const shippingFromLines = lineItems
+    .filter((item) => isShippingLineItem(item))
+    .reduce((sum, item) => sum + getLineAmountTotal(item), 0);
+  const taxFromLines = lineItems
+    .filter((item) => isTaxLineItem(item))
+    .reduce((sum, item) => sum + getLineAmountTotal(item), 0);
+  const itemsFromLines = lineItems
+    .filter((item) => !isShippingLineItem(item) && !isTaxLineItem(item))
+    .reduce((sum, item) => sum + getLineAmountTotal(item), 0);
+
+  const stripeShipping = Number(session?.total_details?.amount_shipping);
+  const stripeTax = Number(session?.total_details?.amount_tax);
+  const stripeSubtotal = Number(session?.amount_subtotal);
+  const stripeTotal = Number(session?.amount_total);
+
+  const amountShipping = Number.isFinite(stripeShipping) && stripeShipping > 0 ? stripeShipping : shippingFromLines;
+  const amountTax = Number.isFinite(stripeTax) && stripeTax > 0 ? stripeTax : taxFromLines;
+  const amountSubtotal =
+    itemsFromLines > 0
+      ? itemsFromLines
+      : Number.isFinite(stripeSubtotal)
+        ? Math.max(0, stripeSubtotal - amountShipping - amountTax)
+        : 0;
+  const amountTotal = Number.isFinite(stripeTotal) ? stripeTotal : amountSubtotal + amountShipping + amountTax;
+
+  return {
+    amountSubtotal,
+    amountShipping,
+    amountTax,
+    amountTotal
+  };
 }
 
 function getUspsGroundAdvantageRetailCents(weightLbs) {
@@ -627,6 +681,7 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), asyn
           console.warn(`Using metadata fallback for line items on session ${session.id}`);
         }
       }
+      const totals = computeOrderTotals(session, lineItems);
       const customerEmail = session.customer_details?.email || session.customer_email || "";
 
       if (!customerEmail) {
@@ -635,10 +690,10 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), asyn
         await sendCustomerReceipt({
           customerEmail,
           orderId: session.id,
-          amountSubtotal: session.amount_subtotal || 0,
-          amountShipping: session.total_details?.amount_shipping || 0,
-          amountTax: session.total_details?.amount_tax || 0,
-          amountTotal: session.amount_total || 0,
+          amountSubtotal: totals.amountSubtotal,
+          amountShipping: totals.amountShipping,
+          amountTax: totals.amountTax,
+          amountTotal: totals.amountTotal,
           currency: session.currency || currency,
           lineItems,
           shippingDetails: session.shipping_details || {}
@@ -648,10 +703,10 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), asyn
 
       await sendOwnerNotification({
         orderId: session.id,
-        amountSubtotal: session.amount_subtotal || 0,
-        amountShipping: session.total_details?.amount_shipping || 0,
-        amountTax: session.total_details?.amount_tax || 0,
-        amountTotal: session.amount_total || 0,
+        amountSubtotal: totals.amountSubtotal,
+        amountShipping: totals.amountShipping,
+        amountTax: totals.amountTax,
+        amountTotal: totals.amountTotal,
         currency: session.currency || currency,
         lineItems,
         customerDetails: session.customer_details || {},
@@ -917,6 +972,10 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
   const shippingTotal = calculateShippingFromUnits(shippableUnits);
   const shippingWeightLbs = Number((shippableUnits * shippingWeightPerUnitLbs).toFixed(2));
+  const taxBase = itemsSubtotal + (manualSalesTaxApplyToShipping ? shippingTotal : 0);
+  const manualSalesTaxTotal = manualSalesTaxEnabled
+    ? Math.max(0, Math.round(taxBase * (manualSalesTaxRatePercent / 100)))
+    : 0;
 
   if (shippingTotal > 0) {
     lineItems.push({
@@ -933,6 +992,21 @@ app.post("/api/create-checkout-session", async (req, res) => {
     cartSummaryParts.push("Shipping x1");
   }
 
+  if (manualSalesTaxTotal > 0) {
+    lineItems.push({
+      price_data: {
+        currency,
+        unit_amount: manualSalesTaxTotal,
+        product_data: {
+          name: "Sales Tax",
+          description: `Manual sales tax (${manualSalesTaxRatePercent.toFixed(2)}%)`
+        }
+      },
+      quantity: 1
+    });
+    cartSummaryParts.push("Sales Tax x1");
+  }
+
   try {
     const appUrl = getAppUrl(req);
 
@@ -941,7 +1015,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
       payment_method_types: ["card"],
       line_items: lineItems,
       automatic_tax: {
-        enabled: stripeAutomaticTaxEnabled
+        enabled: manualSalesTaxEnabled ? false : stripeAutomaticTaxEnabled
       },
       billing_address_collection: "required",
       phone_number_collection: {
@@ -960,6 +1034,8 @@ app.post("/api/create-checkout-session", async (req, res) => {
         shipping_weight_lbs: String(shippingWeightLbs),
         items_subtotal_cents: String(itemsSubtotal),
         shipping_total_cents: String(shippingTotal),
+        manual_sales_tax_rate_pct: String(manualSalesTaxRatePercent),
+        manual_sales_tax_cents: String(manualSalesTaxTotal),
         cart_summary: cartSummaryParts.join(" | ").slice(0, 500)
       }
     });
@@ -996,14 +1072,15 @@ app.get("/api/order/:sessionId", async (req, res) => {
     if (lineItems.length === 0) {
       lineItems = parseLineItemsFromMetadata(session.metadata);
     }
+    const totals = computeOrderTotals(session, lineItems);
 
     return res.json({
       id: session.id,
-      amountSubtotal: session.amount_subtotal || 0,
-      amountShipping: session.total_details?.amount_shipping || 0,
-      amountTax: session.total_details?.amount_tax || 0,
+      amountSubtotal: totals.amountSubtotal,
+      amountShipping: totals.amountShipping,
+      amountTax: totals.amountTax,
       amountDiscount: session.total_details?.amount_discount || 0,
-      amountTotal: session.amount_total || 0,
+      amountTotal: totals.amountTotal,
       currency: session.currency || currency,
       customerEmail: session.customer_details?.email || session.customer_email || "",
       shippingDetails: session.shipping_details || null,

@@ -85,9 +85,14 @@ function isShippingLineItem(item) {
   return String(item?.name || "").trim().toLowerCase() === "shipping";
 }
 
+function isTaxLineItem(item) {
+  const name = String(item?.name || "").trim().toLowerCase();
+  return name === "sales tax" || name === "tax";
+}
+
 function getUnitsTotal(lineItems) {
   return lineItems.reduce((sum, item) => {
-    if (isShippingLineItem(item)) {
+    if (isShippingLineItem(item) || isTaxLineItem(item)) {
       return sum;
     }
     return sum + (item.quantity || 1);

@@ -44,6 +44,8 @@ Optional:
 - `UPLOADS_DIR` (defaults to `public/uploads`)
 - `DEFAULT_SHIPPING_FEE` (defaults to `5.00`, in USD)
 - `STRIPE_AUTOMATIC_TAX` (defaults to `true`)
+- `MANUAL_SALES_TAX_RATE` (defaults to `0`; set percent like `7.25` for manual tax line item)
+- `MANUAL_SALES_TAX_APPLY_TO_SHIPPING` (`true` or `false`, defaults to `false`)
 - `SHIPPING_MIN_FEE` (defaults to `10.00`, checkout minimum)
 - `SHIPPING_WEIGHT_PER_UNIT_LBS` (defaults to `1.5`)
 - `GITHUB_PUSH_TOKEN` (enables Admin -> Publish Live Changes)
@@ -97,4 +99,5 @@ Subscribe to event:
 
 Then set returned signing secret as `STRIPE_WEBHOOK_SECRET`.
 
-For sales tax, enable Stripe Tax in your Stripe dashboard and keep `STRIPE_AUTOMATIC_TAX=true`.
+For sales tax, prefer Stripe Tax with `STRIPE_AUTOMATIC_TAX=true`.
+If Stripe Tax is not configured yet, you can set `MANUAL_SALES_TAX_RATE` to add a checkout "Sales Tax" line item and show tax on receipts.

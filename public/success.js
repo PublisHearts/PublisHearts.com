@@ -30,6 +30,11 @@ function isShippingLineItem(item) {
   return name === "shipping";
 }
 
+function isTaxLineItem(item) {
+  const name = String(item?.name || "").trim().toLowerCase();
+  return name === "sales tax" || name === "tax";
+}
+
 async function loadOrder() {
   const sessionId = new URLSearchParams(window.location.search).get("session_id");
   if (!sessionId) {
@@ -50,15 +55,21 @@ async function loadOrder() {
     const shippingFromLines = (order.lineItems || [])
       .filter((item) => isShippingLineItem(item))
       .reduce((sum, item) => sum + (Number(item.amountTotal) || 0), 0);
+    const taxFromLines = (order.lineItems || [])
+      .filter((item) => isTaxLineItem(item))
+      .reduce((sum, item) => sum + (Number(item.amountTotal) || 0), 0);
     const shippingTotal = Number(order.amountShipping);
     const normalizedShippingTotal = Number.isFinite(shippingTotal) ? shippingTotal : shippingFromLines;
-    const taxTotal = Number.isFinite(Number(order.amountTax)) ? Number(order.amountTax) : 0;
+    const parsedTaxTotal = Number(order.amountTax);
+    const taxTotal = Number.isFinite(parsedTaxTotal) && parsedTaxTotal > 0 ? parsedTaxTotal : taxFromLines;
     const subtotalFromApi = Number(order.amountSubtotal);
     const itemsSubtotalCents = Number.isFinite(subtotalFromApi)
-      ? Math.max(0, subtotalFromApi - normalizedShippingTotal)
+      ? Math.max(0, subtotalFromApi)
       : Math.max(0, (Number(order.amountTotal) || 0) - normalizedShippingTotal - taxTotal);
 
-    const productLineItems = (order.lineItems || []).filter((item) => !isShippingLineItem(item));
+    const productLineItems = (order.lineItems || []).filter(
+      (item) => !isShippingLineItem(item) && !isTaxLineItem(item)
+    );
 
     orderItems.innerHTML = productLineItems
       .map(
