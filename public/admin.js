@@ -388,35 +388,64 @@ function renderOrders(payload) {
     return;
   }
 
-  ordersEl.innerHTML = `
-    <h3>Recent Orders</h3>
-    <div class="admin-orders-list">
-      ${orders
-        .map((order) => {
-          const itemSummary =
-            Array.isArray(order.items) && order.items.length > 0
-              ? order.items.map((item) => `${escapeHtml(item.name)} x${item.quantity}`).join(", ")
-              : "No item summary saved.";
-          const pastOrders =
-            Array.isArray(order.customerPastOrderIds) && order.customerPastOrderIds.length > 0
-              ? order.customerPastOrderIds.map((orderId) => escapeHtml(orderId)).join(", ")
-              : "None";
+  const pendingOrders = orders.filter((order) => String(order.fulfillmentStatus || "pending") !== "shipped");
+  const shippedOrders = orders.filter((order) => String(order.fulfillmentStatus || "pending") === "shipped");
 
-          return `<article class="admin-order-card">
-            <div class="row-between">
-              <h4>${escapeHtml(order.id)}</h4>
-              <strong>${formatMoney(order.amountTotal || 0)}</strong>
-            </div>
-            <p><strong>Date:</strong> ${escapeHtml(formatDateTime(order.createdAt))}</p>
-            <p><strong>Customer:</strong> ${escapeHtml(order.customerName || "Unknown")} (${escapeHtml(order.customerEmail || "No email")})</p>
-            <p><strong>Ship to:</strong> ${escapeHtml(order.shippingName || "Unknown")} - ${escapeHtml(order.shippingAddress || "No address")}</p>
-            <p><strong>Units:</strong> ${order.unitsTotal || 0} | <strong>Items:</strong> ${formatMoney(order.amountSubtotal || 0)} | <strong>Shipping:</strong> ${formatMoney(order.amountShipping || 0)} | <strong>Tax:</strong> ${formatMoney(order.amountTax || 0)}</p>
-            <p><strong>Items ordered:</strong> ${itemSummary}</p>
-            <p><strong>Past orders by this customer:</strong> ${pastOrders}</p>
-            <p><strong>Customer total orders:</strong> ${order.customerOrdersCount || 1}</p>
-          </article>`;
-        })
-        .join("")}
+  const renderOrderCard = (order) => {
+    const itemSummary =
+      Array.isArray(order.items) && order.items.length > 0
+        ? order.items.map((item) => `${escapeHtml(item.name)} x${item.quantity}`).join(", ")
+        : "No item summary saved.";
+    const pastOrders =
+      Array.isArray(order.customerPastOrderIds) && order.customerPastOrderIds.length > 0
+        ? order.customerPastOrderIds.map((orderId) => escapeHtml(orderId)).join(", ")
+        : "None";
+    const shipped = String(order.fulfillmentStatus || "pending") === "shipped";
+    const fulfillmentLabel = shipped ? "Shipped" : "Needs Fulfillment";
+    const shipDate = order.shippedAt ? formatDateTime(order.shippedAt) : "";
+
+    return `<article class="admin-order-card">
+      <div class="row-between">
+        <h4>${escapeHtml(order.id)}</h4>
+        <strong>${formatMoney(order.amountTotal || 0)}</strong>
+      </div>
+      <p><strong>Status:</strong> <span class="admin-order-status ${shipped ? "shipped" : "pending"}">${fulfillmentLabel}</span>${shipDate ? ` - ${escapeHtml(shipDate)}` : ""}</p>
+      <p><strong>Date:</strong> ${escapeHtml(formatDateTime(order.createdAt))}</p>
+      <p><strong>Customer:</strong> ${escapeHtml(order.customerName || "Unknown")} (${escapeHtml(order.customerEmail || "No email")})</p>
+      <p><strong>Ship to:</strong> ${escapeHtml(order.shippingName || "Unknown")} - ${escapeHtml(order.shippingAddress || "No address")}</p>
+      <p><strong>Units:</strong> ${order.unitsTotal || 0} | <strong>Items:</strong> ${formatMoney(order.amountSubtotal || 0)} | <strong>Shipping:</strong> ${formatMoney(order.amountShipping || 0)} | <strong>Tax:</strong> ${formatMoney(order.amountTax || 0)}</p>
+      <p><strong>Items ordered:</strong> ${itemSummary}</p>
+      ${
+        order.shipmentTrackingNumber || order.shipmentTrackingUrl
+          ? `<p><strong>Tracking:</strong> ${
+              order.shipmentTrackingUrl
+                ? `<a class="inline-link" href="${escapeHtml(order.shipmentTrackingUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(order.shipmentTrackingUrl)}</a>`
+                : escapeHtml(order.shipmentTrackingNumber)
+            }</p>`
+          : ""
+      }
+      ${order.shipmentCarrier ? `<p><strong>Carrier:</strong> ${escapeHtml(order.shipmentCarrier)}</p>` : ""}
+      <p><strong>Past orders by this customer:</strong> ${pastOrders}</p>
+      <p><strong>Customer total orders:</strong> ${order.customerOrdersCount || 1}</p>
+      <div class="admin-card-actions">
+        ${
+          shipped
+            ? `<button class="ghost-btn" type="button" data-action="resend-shipped-email" data-id="${escapeHtml(order.id)}">Resend Shipment Email</button>
+               <button class="ghost-btn" type="button" data-action="mark-pending-order" data-id="${escapeHtml(order.id)}">Mark Pending</button>`
+            : `<button class="primary-btn" type="button" data-action="mark-shipped-order" data-id="${escapeHtml(order.id)}">Mark Shipped + Email Customer</button>`
+        }
+      </div>
+    </article>`;
+  };
+
+  ordersEl.innerHTML = `
+    <h3>Needs Fulfillment (${pendingOrders.length})</h3>
+    <div class="admin-orders-list">
+      ${pendingOrders.length > 0 ? pendingOrders.map(renderOrderCard).join("") : '<p class="cart-item-sub">No orders waiting to ship.</p>'}
+    </div>
+    <h3>Shipped (${shippedOrders.length})</h3>
+    <div class="admin-orders-list">
+      ${shippedOrders.length > 0 ? shippedOrders.map(renderOrderCard).join("") : '<p class="cart-item-sub">No shipped orders yet.</p>'}
     </div>
   `;
 }
@@ -540,6 +569,31 @@ async function loadHealth() {
 async function loadOrders() {
   const payload = await adminRequest("/api/admin/orders?limit=100");
   renderOrders(payload);
+}
+
+function promptShipmentDetails() {
+  const carrier = window.prompt("Carrier name (optional):", "");
+  if (carrier === null) {
+    return null;
+  }
+  const trackingNumber = window.prompt("Tracking number (optional):", "");
+  if (trackingNumber === null) {
+    return null;
+  }
+  const trackingUrl = window.prompt("Tracking URL (optional):", "");
+  if (trackingUrl === null) {
+    return null;
+  }
+  const note = window.prompt("Optional shipment note for customer email:", "");
+  if (note === null) {
+    return null;
+  }
+  return {
+    carrier: String(carrier || "").trim(),
+    trackingNumber: String(trackingNumber || "").trim(),
+    trackingUrl: String(trackingUrl || "").trim(),
+    note: String(note || "").trim()
+  };
 }
 
 function syncShippingInputs() {
@@ -724,6 +778,106 @@ refreshOrdersBtn?.addEventListener("click", async () => {
     setOrdersMessage(error.message || "Could not load orders.", true);
   } finally {
     setOrdersBusy(false);
+  }
+});
+
+ordersEl?.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) {
+    return;
+  }
+
+  const action = button.dataset.action;
+  const orderId = String(button.dataset.id || "").trim();
+  if (!orderId || state.ordersBusy) {
+    return;
+  }
+
+  if (action === "mark-shipped-order") {
+    const shipmentDetails = promptShipmentDetails();
+    if (!shipmentDetails) {
+      return;
+    }
+
+    setOrdersBusy(true);
+    setOrdersMessage("Marking order shipped and sending customer email...");
+    try {
+      await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/ship`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(shipmentDetails)
+      });
+      await loadOrders();
+      setOrdersMessage(`Order ${orderId} marked shipped and customer emailed.`);
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setOrdersMessage(error.message || "Could not mark order as shipped.", true);
+    } finally {
+      setOrdersBusy(false);
+    }
+    return;
+  }
+
+  if (action === "resend-shipped-email") {
+    if (!window.confirm("Resend shipment email to this customer?")) {
+      return;
+    }
+
+    setOrdersBusy(true);
+    setOrdersMessage("Resending shipment email...");
+    try {
+      await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/ship`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          resendEmail: true
+        })
+      });
+      setOrdersMessage(`Shipment email re-sent for order ${orderId}.`);
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setOrdersMessage(error.message || "Could not resend shipment email.", true);
+    } finally {
+      setOrdersBusy(false);
+    }
+    return;
+  }
+
+  if (action === "mark-pending-order") {
+    if (!window.confirm("Move this order back to pending fulfillment?")) {
+      return;
+    }
+
+    setOrdersBusy(true);
+    setOrdersMessage("Updating order status...");
+    try {
+      await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/mark-pending`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+      await loadOrders();
+      setOrdersMessage(`Order ${orderId} moved back to pending.`);
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setOrdersMessage(error.message || "Could not update order status.", true);
+    } finally {
+      setOrdersBusy(false);
+    }
   }
 });
 

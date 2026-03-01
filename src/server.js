@@ -19,7 +19,12 @@ import {
   reorderProducts,
   updateProduct
 } from "./data/productStore.js";
-import { getEmailHealth, sendCustomerReceipt, sendOwnerNotification } from "./lib/email.js";
+import {
+  getEmailHealth,
+  sendCustomerReceipt,
+  sendOwnerNotification,
+  sendShipmentNotification
+} from "./lib/email.js";
 import {
   SiteSettingsValidationError,
   ensureSiteSettingsStore,
@@ -133,6 +138,27 @@ function parseLineItemsFromMetadata(metadata = {}) {
 function readMetadataInteger(metadata, key) {
   const parsed = Number.parseInt(String(metadata?.[key] ?? ""), 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeFulfillmentStatus(value) {
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (["fulfilled", "shipped", "sent", "complete", "completed"].includes(text)) {
+    return "shipped";
+  }
+  return "pending";
+}
+
+function getPaymentIntentIdFromSession(session) {
+  const ref = session?.payment_intent;
+  if (!ref) {
+    return "";
+  }
+  if (typeof ref === "string") {
+    return ref;
+  }
+  return String(ref.id || "").trim();
 }
 
 function parseCartSummaryEntries(metadata = {}) {
@@ -867,7 +893,10 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
   const paidOnly = String(req.query?.paidOnly ?? "true").trim().toLowerCase() !== "false";
 
   try {
-    const response = await stripe.checkout.sessions.list({ limit });
+    const response = await stripe.checkout.sessions.list({
+      limit,
+      expand: ["data.payment_intent"]
+    });
     const rawSessions = Array.isArray(response?.data) ? response.data : [];
     const paidSessions = paidOnly
       ? rawSessions.filter((session) => session.payment_status === "paid")
@@ -877,6 +906,21 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
       .map((session) => {
         const totals = computeOrderTotals(session, []);
         const metadata = session.metadata || {};
+        const paymentIntentRef = session.payment_intent;
+        const paymentIntentId =
+          typeof paymentIntentRef === "string"
+            ? paymentIntentRef
+            : String(paymentIntentRef?.id || "").trim();
+        const paymentIntentMetadata =
+          paymentIntentRef && typeof paymentIntentRef === "object" && paymentIntentRef.metadata
+            ? paymentIntentRef.metadata
+            : {};
+        const fulfillmentStatus = normalizeFulfillmentStatus(paymentIntentMetadata.fulfillment_status);
+        const shippedAt = readMetadataInteger(paymentIntentMetadata, "fulfillment_shipped_at") || 0;
+        const shipmentCarrier = String(paymentIntentMetadata.fulfillment_carrier || "").trim();
+        const shipmentTrackingNumber = String(paymentIntentMetadata.fulfillment_tracking_number || "").trim();
+        const shipmentTrackingUrl = String(paymentIntentMetadata.fulfillment_tracking_url || "").trim();
+        const shipmentNote = String(paymentIntentMetadata.fulfillment_note || "").trim();
         const cartEntries = parseCartSummaryEntries(metadata).filter((entry) => {
           const name = String(entry.name || "").trim().toLowerCase();
           return name !== "shipping" && name !== "sales tax" && name !== "tax";
@@ -909,6 +953,14 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           amountTotal: totals.amountTotal,
           unitsTotal,
           items: cartEntries,
+          fulfillmentStatus,
+          shippedAt,
+          shippedAtIso: shippedAt > 0 ? new Date(shippedAt * 1000).toISOString() : "",
+          shipmentCarrier,
+          shipmentTrackingNumber,
+          shipmentTrackingUrl,
+          shipmentNote,
+          paymentIntentId,
           customerName,
           customerEmail,
           customerPhone,
@@ -957,6 +1009,14 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         amountTotal: order.amountTotal,
         unitsTotal: order.unitsTotal,
         items: order.items,
+        fulfillmentStatus: order.fulfillmentStatus,
+        shippedAt: order.shippedAt,
+        shippedAtIso: order.shippedAtIso,
+        shipmentCarrier: order.shipmentCarrier,
+        shipmentTrackingNumber: order.shipmentTrackingNumber,
+        shipmentTrackingUrl: order.shipmentTrackingUrl,
+        shipmentNote: order.shipmentNote,
+        paymentIntentId: order.paymentIntentId,
         customerName: order.customerName,
         customerEmail: order.customerEmail,
         customerPhone: order.customerPhone,
@@ -992,6 +1052,171 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
     const details = typeof error?.message === "string" ? error.message : "";
     return res.status(500).json({
       error: details ? `Could not load orders: ${details}` : "Could not load orders right now."
+    });
+  }
+});
+
+app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  const carrierRaw = req.body?.carrier;
+  const trackingNumberRaw = req.body?.trackingNumber;
+  const trackingUrlRaw = req.body?.trackingUrl;
+  const noteRaw = req.body?.note;
+  const resendEmail = parseBooleanFlag(req.body?.resendEmail, false) === true;
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(orderId, {
+      expand: ["payment_intent"]
+    });
+    if (!session || session.payment_status !== "paid") {
+      return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const paymentIntentId = getPaymentIntentIdFromSession(session);
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: "This order has no payment intent to update." });
+    }
+
+    const currentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+    const carrier =
+      carrierRaw !== undefined
+        ? String(carrierRaw || "").trim().slice(0, 80)
+        : String(currentMetadata.fulfillment_carrier || "").trim().slice(0, 80);
+    const trackingNumber =
+      trackingNumberRaw !== undefined
+        ? String(trackingNumberRaw || "").trim().slice(0, 140)
+        : String(currentMetadata.fulfillment_tracking_number || "").trim().slice(0, 140);
+    const trackingUrl =
+      trackingUrlRaw !== undefined
+        ? String(trackingUrlRaw || "").trim().slice(0, 500)
+        : String(currentMetadata.fulfillment_tracking_url || "").trim().slice(0, 500);
+    const note =
+      noteRaw !== undefined
+        ? String(noteRaw || "").trim().slice(0, 500)
+        : String(currentMetadata.fulfillment_note || "").trim().slice(0, 500);
+    const existingStatus = normalizeFulfillmentStatus(currentMetadata.fulfillment_status);
+    if (existingStatus === "shipped" && !resendEmail) {
+      return res.json({
+        ok: true,
+        alreadyShipped: true,
+        message: "Order already marked shipped. Use resendEmail=true to re-send shipment email."
+      });
+    }
+
+    const shippedAtUnix = Math.floor(Date.now() / 1000);
+    await stripe.paymentIntents.update(paymentIntentId, {
+      metadata: {
+        fulfillment_status: "shipped",
+        fulfillment_shipped_at: String(shippedAtUnix),
+        fulfillment_carrier: carrier,
+        fulfillment_tracking_number: trackingNumber,
+        fulfillment_tracking_url: trackingUrl,
+        fulfillment_note: note
+      }
+    });
+
+    const customerEmail = String(session.customer_details?.email || session.customer_email || "").trim();
+    if (!customerEmail) {
+      return res.json({
+        ok: true,
+        shipped: true,
+        emailed: false,
+        message: "Order marked shipped, but customer email was missing."
+      });
+    }
+
+    const lineItemsResponse = await stripe.checkout.sessions.listLineItems(session.id, {
+      limit: 100
+    });
+    const lineItems = (lineItemsResponse?.data || [])
+      .map((item) => ({
+        name: item.description || "Book",
+        quantity: item.quantity || 1,
+        amountTotal: item.amount_total || 0
+      }))
+      .filter((item) => !isShippingLineItem(item) && !isTaxLineItem(item));
+
+    await sendShipmentNotification({
+      customerEmail,
+      customerName: session.customer_details?.name || session.shipping_details?.name || "",
+      orderId: session.id,
+      currency: session.currency || currency,
+      lineItems,
+      shippingDetails: session.shipping_details || {},
+      carrier,
+      trackingNumber,
+      trackingUrl,
+      note
+    });
+
+    return res.json({
+      ok: true,
+      shipped: true,
+      emailed: true,
+      shippedAt: shippedAtUnix
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not mark shipped: ${details}` : "Could not mark shipped right now."
+    });
+  }
+});
+
+app.post("/api/admin/orders/:id/mark-pending", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(orderId, {
+      expand: ["payment_intent"]
+    });
+    if (!session || session.payment_status !== "paid") {
+      return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const paymentIntentId = getPaymentIntentIdFromSession(session);
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: "This order has no payment intent to update." });
+    }
+
+    await stripe.paymentIntents.update(paymentIntentId, {
+      metadata: {
+        fulfillment_status: "pending",
+        fulfillment_shipped_at: "",
+        fulfillment_carrier: "",
+        fulfillment_tracking_number: "",
+        fulfillment_tracking_url: "",
+        fulfillment_note: ""
+      }
+    });
+
+    return res.json({
+      ok: true,
+      shipped: false,
+      status: "pending"
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not mark pending: ${details}` : "Could not update fulfillment status right now."
     });
   }
 });

@@ -148,6 +148,84 @@ export function getEmailHealth() {
   };
 }
 
+export async function sendShipmentNotification({
+  customerEmail,
+  customerName,
+  orderId,
+  currency,
+  lineItems,
+  shippingDetails,
+  carrier,
+  trackingNumber,
+  trackingUrl,
+  note
+}) {
+  if (!emailConfigured() || !customerEmail) {
+    return;
+  }
+
+  const normalizedItems = normalizeLineItems(lineItems);
+  const unitsTotal = getUnitsTotal(normalizedItems);
+  const textItems = orderLineItemsText(normalizedItems, currency);
+  const htmlItems = orderLineItemsHtml(normalizedItems, currency);
+  const shipmentName = shippingDetails?.name || customerName || "Customer";
+  const shipmentAddress = formatAddress(shippingDetails?.address);
+  const safeCarrier = String(carrier || "").trim();
+  const safeTrackingNumber = String(trackingNumber || "").trim();
+  const safeTrackingUrl = String(trackingUrl || "").trim();
+  const safeNote = String(note || "").trim();
+  const trackingBlockText = safeTrackingUrl
+    ? `Tracking: ${safeTrackingUrl}`
+    : safeTrackingNumber
+      ? `Tracking #: ${safeTrackingNumber}`
+      : "Tracking: Pending";
+  const trackingBlockHtml = safeTrackingUrl
+    ? `<a href="${escapeHtml(safeTrackingUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(safeTrackingUrl)}</a>`
+    : safeTrackingNumber
+      ? escapeHtml(safeTrackingNumber)
+      : "Pending";
+
+  await transporter.sendMail({
+    from: fromEmail,
+    to: customerEmail,
+    subject: `PublisHearts shipping update - Order ${orderId}`,
+    text: `Good news - your PublisHearts order is on the way.
+
+Order ID: ${orderId}
+Ship to: ${shipmentName}
+Address: ${shipmentAddress}
+${safeCarrier ? `Carrier: ${safeCarrier}` : ""}
+${trackingBlockText}
+${safeNote ? `Note: ${safeNote}` : ""}
+
+Items (${unitsTotal} units):
+${textItems}
+
+Thank you for supporting PublisHearts.`,
+    html: `<div style="font-family:Arial,sans-serif; color:#1f2937; line-height:1.4;">
+      <h2 style="margin:0 0 12px;">Your order is on the way</h2>
+      <p style="margin:0 0 8px;">Order ID: <strong>${escapeHtml(orderId)}</strong></p>
+      <p style="margin:0 0 4px;">Ship to: <strong>${escapeHtml(shipmentName)}</strong></p>
+      <p style="margin:0 0 8px;">Address: ${escapeHtml(shipmentAddress)}</p>
+      ${safeCarrier ? `<p style="margin:0 0 4px;">Carrier: <strong>${escapeHtml(safeCarrier)}</strong></p>` : ""}
+      <p style="margin:0 0 8px;">Tracking: <strong>${trackingBlockHtml}</strong></p>
+      ${safeNote ? `<p style="margin:0 0 12px;">Note: ${escapeHtml(safeNote)}</p>` : ""}
+      <h3 style="margin:0 0 8px;">Items (${unitsTotal} units)</h3>
+      <table style="width:100%; border-collapse:collapse; margin:0 0 12px;">
+        <thead>
+          <tr>
+            <th style="text-align:left; border-bottom:1px solid #d1d5db; padding:6px 0;">Item</th>
+            <th style="text-align:center; border-bottom:1px solid #d1d5db; padding:6px 0;">Qty</th>
+            <th style="text-align:right; border-bottom:1px solid #d1d5db; padding:6px 0;">Total</th>
+          </tr>
+        </thead>
+        <tbody>${htmlItems}</tbody>
+      </table>
+      <p style="margin:0;">Thank you for supporting PublisHearts.</p>
+    </div>`
+  });
+}
+
 export async function sendCustomerReceipt({
   customerEmail,
   orderId,
