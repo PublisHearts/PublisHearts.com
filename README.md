@@ -9,6 +9,8 @@ Bookstore web app with:
 - owner order email with customer/shipping info
 - admin dashboard for product CRUD + cover image uploads
 - admin storefront design editor (logo, customer text, colors)
+- admin health panel (Stripe/email/tax/deploy commit)
+- admin orders + customer history view (from Stripe paid sessions)
 - product stock control (in stock / sold out)
 - drag-and-drop product ordering
 - homepage hero banner uploader

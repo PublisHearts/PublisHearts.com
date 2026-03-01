@@ -19,7 +19,7 @@ import {
   reorderProducts,
   updateProduct
 } from "./data/productStore.js";
-import { sendCustomerReceipt, sendOwnerNotification } from "./lib/email.js";
+import { getEmailHealth, sendCustomerReceipt, sendOwnerNotification } from "./lib/email.js";
 import {
   SiteSettingsValidationError,
   ensureSiteSettingsStore,
@@ -130,6 +130,46 @@ function parseLineItemsFromMetadata(metadata = {}) {
     });
 }
 
+function readMetadataInteger(metadata, key) {
+  const parsed = Number.parseInt(String(metadata?.[key] ?? ""), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseCartSummaryEntries(metadata = {}) {
+  const summary = String(metadata?.cart_summary || "").trim();
+  if (!summary) {
+    return [];
+  }
+
+  return summary
+    .split("|")
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const match = entry.match(/^(.*)\s+x(\d+)$/i);
+      if (!match) {
+        return {
+          name: entry,
+          quantity: 1
+        };
+      }
+      return {
+        name: String(match[1] || "").trim(),
+        quantity: Math.max(1, Number.parseInt(match[2], 10) || 1)
+      };
+    });
+}
+
+function formatAddressLine(address) {
+  if (!address || typeof address !== "object") {
+    return "";
+  }
+  return [address.line1, address.line2, address.city, address.state, address.postal_code, address.country]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
 function isShippingLineItem(item) {
   return String(item?.name || "").trim().toLowerCase() === "shipping";
 }
@@ -145,6 +185,10 @@ function getLineAmountTotal(item) {
 }
 
 function computeOrderTotals(session, lineItems = []) {
+  const metadata = session?.metadata || {};
+  const metadataShipping = readMetadataInteger(metadata, "shipping_total_cents");
+  const metadataTax = readMetadataInteger(metadata, "manual_sales_tax_cents");
+  const metadataItemsSubtotal = readMetadataInteger(metadata, "items_subtotal_cents");
   const shippingFromLines = lineItems
     .filter((item) => isShippingLineItem(item))
     .reduce((sum, item) => sum + getLineAmountTotal(item), 0);
@@ -160,10 +204,22 @@ function computeOrderTotals(session, lineItems = []) {
   const stripeSubtotal = Number(session?.amount_subtotal);
   const stripeTotal = Number(session?.amount_total);
 
-  const amountShipping = Number.isFinite(stripeShipping) && stripeShipping > 0 ? stripeShipping : shippingFromLines;
-  const amountTax = Number.isFinite(stripeTax) && stripeTax > 0 ? stripeTax : taxFromLines;
+  const amountShipping =
+    Number.isFinite(stripeShipping) && stripeShipping > 0
+      ? stripeShipping
+      : Number.isFinite(metadataShipping)
+        ? metadataShipping
+        : shippingFromLines;
+  const amountTax =
+    Number.isFinite(stripeTax) && stripeTax > 0
+      ? stripeTax
+      : Number.isFinite(metadataTax)
+        ? metadataTax
+        : taxFromLines;
   const amountSubtotal =
-    itemsFromLines > 0
+    Number.isFinite(metadataItemsSubtotal)
+      ? metadataItemsSubtotal
+      : itemsFromLines > 0
       ? itemsFromLines
       : Number.isFinite(stripeSubtotal)
         ? Math.max(0, stripeSubtotal - amountShipping - amountTax)
@@ -176,6 +232,16 @@ function computeOrderTotals(session, lineItems = []) {
     amountTax,
     amountTotal
   };
+}
+
+function getTaxRuntimeStatus() {
+  if (manualSalesTaxEnabled) {
+    return "manual";
+  }
+  if (stripeAutomaticTaxEnabled) {
+    return "stripe_automatic";
+  }
+  return "off";
 }
 
 function getUspsGroundAdvantageRetailCents(weightLbs) {
@@ -762,6 +828,172 @@ app.get("/api/admin/products", requireAdmin, async (req, res) => {
 app.get("/api/admin/site-settings", requireAdmin, async (req, res) => {
   const settings = await getSiteSettings();
   res.json(settings);
+});
+
+app.get("/api/admin/health", requireAdmin, (req, res) => {
+  const emailHealth = getEmailHealth();
+  const deployCommitRaw = (
+    process.env.RENDER_GIT_COMMIT ||
+    process.env.GIT_COMMIT ||
+    process.env.COMMIT_SHA ||
+    ""
+  ).trim();
+  const deployCommit = deployCommitRaw ? deployCommitRaw.slice(0, 12) : "";
+
+  res.json({
+    status: "ok",
+    stripeConfigured: Boolean(stripeSecretKey),
+    smtpConfigured: emailHealth.smtpConfigured,
+    emailSendingEnabled: emailHealth.emailSendingEnabled,
+    ownerNotificationEnabled: emailHealth.ownerNotificationEnabled,
+    smtpHost: emailHealth.host || "",
+    taxMode: getTaxRuntimeStatus(),
+    stripeAutomaticTaxEnabled,
+    manualSalesTaxRatePercent,
+    manualSalesTaxApplyToShipping,
+    appUrl: (process.env.APP_URL || "").trim(),
+    deployCommit,
+    deployCommitRaw
+  });
+});
+
+app.get("/api/admin/orders", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const parsedLimit = Number.parseInt(String(req.query?.limit ?? ""), 10);
+  const limit = Number.isFinite(parsedLimit) ? Math.min(100, Math.max(1, parsedLimit)) : 50;
+  const paidOnly = String(req.query?.paidOnly ?? "true").trim().toLowerCase() !== "false";
+
+  try {
+    const response = await stripe.checkout.sessions.list({ limit });
+    const rawSessions = Array.isArray(response?.data) ? response.data : [];
+    const paidSessions = paidOnly
+      ? rawSessions.filter((session) => session.payment_status === "paid")
+      : rawSessions;
+
+    const normalizedOrders = paidSessions
+      .map((session) => {
+        const totals = computeOrderTotals(session, []);
+        const metadata = session.metadata || {};
+        const cartEntries = parseCartSummaryEntries(metadata).filter((entry) => {
+          const name = String(entry.name || "").trim().toLowerCase();
+          return name !== "shipping" && name !== "sales tax" && name !== "tax";
+        });
+        const unitsFromMetadata = readMetadataInteger(metadata, "units_total");
+        const unitsTotal =
+          Number.isFinite(unitsFromMetadata) && unitsFromMetadata > 0
+            ? unitsFromMetadata
+            : cartEntries.reduce((sum, entry) => sum + (entry.quantity || 0), 0);
+
+        const customerEmail = String(session.customer_details?.email || session.customer_email || "").trim();
+        const customerName = String(
+          session.customer_details?.name || session.shipping_details?.name || "Unknown customer"
+        ).trim();
+        const customerPhone = String(session.customer_details?.phone || "").trim();
+        const shippingName = String(session.shipping_details?.name || customerName).trim();
+        const shippingAddress = formatAddressLine(session.shipping_details?.address);
+        const createdAt = Number(session.created) || 0;
+        const customerKey = customerEmail ? customerEmail.toLowerCase() : `guest:${session.id}`;
+
+        return {
+          id: session.id,
+          createdAt,
+          createdAtIso: createdAt > 0 ? new Date(createdAt * 1000).toISOString() : "",
+          paymentStatus: session.payment_status || "unknown",
+          currency: session.currency || currency,
+          amountSubtotal: totals.amountSubtotal,
+          amountShipping: totals.amountShipping,
+          amountTax: totals.amountTax,
+          amountTotal: totals.amountTotal,
+          unitsTotal,
+          items: cartEntries,
+          customerName,
+          customerEmail,
+          customerPhone,
+          shippingName,
+          shippingAddress,
+          customerKey
+        };
+      })
+      .sort((left, right) => right.createdAt - left.createdAt);
+
+    const customerMap = new Map();
+    for (const order of normalizedOrders) {
+      const existing = customerMap.get(order.customerKey) || {
+        key: order.customerKey,
+        email: order.customerEmail,
+        name: order.customerName,
+        ordersCount: 0,
+        unitsTotal: 0,
+        amountTotal: 0,
+        lastOrderAt: 0,
+        orderIds: []
+      };
+      existing.ordersCount += 1;
+      existing.unitsTotal += Number(order.unitsTotal) || 0;
+      existing.amountTotal += Number(order.amountTotal) || 0;
+      existing.lastOrderAt = Math.max(existing.lastOrderAt, order.createdAt);
+      if (!existing.name && order.customerName) {
+        existing.name = order.customerName;
+      }
+      existing.orderIds.push(order.id);
+      customerMap.set(order.customerKey, existing);
+    }
+
+    const orders = normalizedOrders.map((order) => {
+      const customer = customerMap.get(order.customerKey);
+      const pastOrderIds = (customer?.orderIds || []).filter((id) => id !== order.id).slice(0, 10);
+      return {
+        id: order.id,
+        createdAt: order.createdAt,
+        createdAtIso: order.createdAtIso,
+        paymentStatus: order.paymentStatus,
+        currency: order.currency,
+        amountSubtotal: order.amountSubtotal,
+        amountShipping: order.amountShipping,
+        amountTax: order.amountTax,
+        amountTotal: order.amountTotal,
+        unitsTotal: order.unitsTotal,
+        items: order.items,
+        customerName: order.customerName,
+        customerEmail: order.customerEmail,
+        customerPhone: order.customerPhone,
+        shippingName: order.shippingName,
+        shippingAddress: order.shippingAddress,
+        customerOrdersCount: customer?.ordersCount || 1,
+        customerUnitsTotal: customer?.unitsTotal || order.unitsTotal,
+        customerPastOrderIds: pastOrderIds
+      };
+    });
+
+    const customers = Array.from(customerMap.values())
+      .sort((left, right) => right.lastOrderAt - left.lastOrderAt)
+      .map((customer) => ({
+        email: customer.email,
+        name: customer.name,
+        ordersCount: customer.ordersCount,
+        unitsTotal: customer.unitsTotal,
+        amountTotal: customer.amountTotal,
+        lastOrderAt: customer.lastOrderAt,
+        lastOrderAtIso: customer.lastOrderAt ? new Date(customer.lastOrderAt * 1000).toISOString() : "",
+        orderIds: customer.orderIds
+      }));
+
+    return res.json({
+      fetchedAt: new Date().toISOString(),
+      paidOnly,
+      count: orders.length,
+      orders,
+      customers
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not load orders: ${details}` : "Could not load orders right now."
+    });
+  }
 });
 
 const siteSettingsUpload = upload.fields([

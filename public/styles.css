@@ -868,6 +868,60 @@ h1 {
   font-size: 0.9rem;
 }
 
+.admin-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.admin-health-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffaf4;
+  padding: 0.8rem;
+}
+
+.admin-health-card h3,
+.admin-order-customers h3,
+.admin-orders h3 {
+  margin: 0 0 0.45rem;
+}
+
+.admin-health-card p,
+.admin-customer-card p,
+.admin-order-card p {
+  margin: 0 0 0.35rem;
+  color: var(--ink-soft);
+}
+
+.admin-order-customers,
+.admin-orders {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.8rem;
+}
+
+.admin-customer-list,
+.admin-orders-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.admin-customer-card,
+.admin-order-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem;
+  background: #fffefb;
+}
+
+.admin-order-card h4 {
+  margin: 0;
+  font-family: monospace;
+  font-size: 0.95rem;
+}
+
 .status-wrap {
   min-height: calc(100vh - 78px);
   display: grid;

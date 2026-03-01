@@ -135,6 +135,19 @@ function orderLineItemsText(lineItems, currency) {
     .join("\n");
 }
 
+export function getEmailHealth() {
+  const smtpConfigured = Boolean(smtpHost && smtpUser && smtpPass);
+  const emailSendingEnabled = Boolean(transporter && fromEmail);
+  return {
+    smtpConfigured,
+    emailSendingEnabled,
+    ownerNotificationEnabled: Boolean(emailSendingEnabled && ownerEmail),
+    fromEmailConfigured: Boolean(fromEmail),
+    ownerEmailConfigured: Boolean(ownerEmail),
+    host: smtpHost ? String(smtpHost) : ""
+  };
+}
+
 export async function sendCustomerReceipt({
   customerEmail,
   orderId,

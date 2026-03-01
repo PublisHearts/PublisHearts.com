@@ -51,6 +51,18 @@
         <p id="publish-message" class="checkout-message"></p>
 
         <section class="admin-section">
+          <div class="admin-section-head row-between">
+            <div>
+              <h2>Store Health</h2>
+              <p>Quick checks for Stripe, email, tax mode, and deployed commit.</p>
+            </div>
+            <button id="refresh-health-btn" class="ghost-btn" type="button">Refresh Health</button>
+          </div>
+          <div id="admin-health" class="admin-health-grid"></div>
+          <p id="health-message" class="checkout-message"></p>
+        </section>
+
+        <section class="admin-section">
           <div class="admin-section-head">
             <h2>Storefront Design</h2>
             <p>Control brand/logo, all customer-facing text, and colors.</p>
@@ -335,6 +347,19 @@
           <p id="admin-message" class="checkout-message"></p>
           <p class="admin-help">Tip: drag product cards to reorder your storefront.</p>
           <div id="admin-products" class="admin-products"></div>
+        </section>
+
+        <section class="admin-section">
+          <div class="admin-section-head row-between">
+            <div>
+              <h2>Orders</h2>
+              <p>View paid customer orders, units sold, ship-to details, and customer order history.</p>
+            </div>
+            <button id="refresh-orders-btn" class="ghost-btn" type="button">Refresh Orders</button>
+          </div>
+          <div id="admin-order-customers" class="admin-order-customers"></div>
+          <div id="admin-orders" class="admin-orders"></div>
+          <p id="orders-message" class="checkout-message"></p>
         </section>
       </section>
     </main>

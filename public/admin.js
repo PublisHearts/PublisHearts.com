@@ -30,6 +30,13 @@ const logoutBtn = document.getElementById("logout-btn");
 const publishBtn = document.getElementById("publish-btn");
 const productMessageEl = document.getElementById("admin-message");
 const publishMessageEl = document.getElementById("publish-message");
+const refreshHealthBtn = document.getElementById("refresh-health-btn");
+const adminHealthEl = document.getElementById("admin-health");
+const healthMessageEl = document.getElementById("health-message");
+const refreshOrdersBtn = document.getElementById("refresh-orders-btn");
+const orderCustomersEl = document.getElementById("admin-order-customers");
+const ordersEl = document.getElementById("admin-orders");
+const ordersMessageEl = document.getElementById("orders-message");
 
 const siteSettingsForm = document.getElementById("site-settings-form");
 const designMessageEl = document.getElementById("design-message");
@@ -75,6 +82,8 @@ const state = {
   productBusy: false,
   designBusy: false,
   publishBusy: false,
+  healthBusy: false,
+  ordersBusy: false,
   dragProductId: null,
   dropTargetId: null,
   dropAfter: false
@@ -102,6 +111,14 @@ function setPublishMessage(message, isError = false) {
   setMessage(publishMessageEl, message, isError);
 }
 
+function setHealthMessage(message, isError = false) {
+  setMessage(healthMessageEl, message, isError);
+}
+
+function setOrdersMessage(message, isError = false) {
+  setMessage(ordersMessageEl, message, isError);
+}
+
 function setLoginMessage(message, isError = false) {
   setMessage(loginMessageEl, message, isError);
 }
@@ -121,6 +138,20 @@ function setPublishBusy(isBusy) {
   state.publishBusy = isBusy;
   if (publishBtn) {
     publishBtn.disabled = isBusy;
+  }
+}
+
+function setHealthBusy(isBusy) {
+  state.healthBusy = isBusy;
+  if (refreshHealthBtn) {
+    refreshHealthBtn.disabled = isBusy;
+  }
+}
+
+function setOrdersBusy(isBusy) {
+  state.ordersBusy = isBusy;
+  if (refreshOrdersBtn) {
+    refreshOrdersBtn.disabled = isBusy;
   }
 }
 
@@ -263,6 +294,133 @@ function formatMoney(cents) {
   }).format((Number(cents) || 0) / 100);
 }
 
+function formatDateTime(epochSeconds) {
+  const value = Number(epochSeconds);
+  if (!Number.isFinite(value) || value <= 0) {
+    return "Unknown date";
+  }
+  return new Date(value * 1000).toLocaleString();
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderHealth(health) {
+  if (!adminHealthEl) {
+    return;
+  }
+
+  if (!health || typeof health !== "object") {
+    adminHealthEl.innerHTML = `<p class="cart-item-sub">Health data unavailable.</p>`;
+    return;
+  }
+
+  const taxModeLabel =
+    health.taxMode === "manual"
+      ? `Manual (${Number(health.manualSalesTaxRatePercent || 0).toFixed(2)}%)`
+      : health.taxMode === "stripe_automatic"
+        ? "Stripe Automatic Tax"
+        : "Off";
+  const deployLabel = health.deployCommit || "Unknown";
+  const appUrl = String(health.appUrl || "").trim() || "(not set)";
+  const smtpHost = String(health.smtpHost || "").trim() || "(not set)";
+
+  adminHealthEl.innerHTML = `
+    <article class="admin-health-card">
+      <h3>Payments</h3>
+      <p><strong>Stripe:</strong> ${health.stripeConfigured ? "Configured" : "Missing key"}</p>
+      <p><strong>Tax mode:</strong> ${escapeHtml(taxModeLabel)}</p>
+      <p><strong>Tax on shipping:</strong> ${health.manualSalesTaxApplyToShipping ? "Yes" : "No"}</p>
+    </article>
+    <article class="admin-health-card">
+      <h3>Email</h3>
+      <p><strong>SMTP:</strong> ${health.smtpConfigured ? "Configured" : "Not configured"}</p>
+      <p><strong>Receipt sending:</strong> ${health.emailSendingEnabled ? "Enabled" : "Disabled"}</p>
+      <p><strong>Owner alerts:</strong> ${health.ownerNotificationEnabled ? "Enabled" : "Disabled"}</p>
+      <p><strong>Host:</strong> ${escapeHtml(smtpHost)}</p>
+    </article>
+    <article class="admin-health-card">
+      <h3>Deploy</h3>
+      <p><strong>Commit:</strong> ${escapeHtml(deployLabel)}</p>
+      <p><strong>App URL:</strong> ${escapeHtml(appUrl)}</p>
+      <p><strong>Status:</strong> ${health.status === "ok" ? "OK" : "Unknown"}</p>
+    </article>
+  `;
+}
+
+function renderOrders(payload) {
+  if (!ordersEl || !orderCustomersEl) {
+    return;
+  }
+
+  const orders = Array.isArray(payload?.orders) ? payload.orders : [];
+  const customers = Array.isArray(payload?.customers) ? payload.customers : [];
+
+  if (customers.length > 0) {
+    orderCustomersEl.innerHTML = `
+      <h3>Customer History</h3>
+      <div class="admin-customer-list">
+        ${customers
+          .slice(0, 20)
+          .map(
+            (customer) => `<article class="admin-customer-card">
+              <p><strong>${escapeHtml(customer.name || "Unknown customer")}</strong></p>
+              <p>${escapeHtml(customer.email || "No email on file")}</p>
+              <p>Orders: <strong>${customer.ordersCount || 0}</strong> | Units: <strong>${customer.unitsTotal || 0}</strong> | Total: <strong>${formatMoney(customer.amountTotal || 0)}</strong></p>
+              <p>Last order: ${escapeHtml(formatDateTime(customer.lastOrderAt))}</p>
+            </article>`
+          )
+          .join("")}
+      </div>
+    `;
+  } else {
+    orderCustomersEl.innerHTML = `<h3>Customer History</h3><p class="cart-item-sub">No customer history yet.</p>`;
+  }
+
+  if (orders.length === 0) {
+    ordersEl.innerHTML = `<p class="cart-item-sub">No paid orders found yet.</p>`;
+    return;
+  }
+
+  ordersEl.innerHTML = `
+    <h3>Recent Orders</h3>
+    <div class="admin-orders-list">
+      ${orders
+        .map((order) => {
+          const itemSummary =
+            Array.isArray(order.items) && order.items.length > 0
+              ? order.items.map((item) => `${escapeHtml(item.name)} x${item.quantity}`).join(", ")
+              : "No item summary saved.";
+          const pastOrders =
+            Array.isArray(order.customerPastOrderIds) && order.customerPastOrderIds.length > 0
+              ? order.customerPastOrderIds.map((orderId) => escapeHtml(orderId)).join(", ")
+              : "None";
+
+          return `<article class="admin-order-card">
+            <div class="row-between">
+              <h4>${escapeHtml(order.id)}</h4>
+              <strong>${formatMoney(order.amountTotal || 0)}</strong>
+            </div>
+            <p><strong>Date:</strong> ${escapeHtml(formatDateTime(order.createdAt))}</p>
+            <p><strong>Customer:</strong> ${escapeHtml(order.customerName || "Unknown")} (${escapeHtml(order.customerEmail || "No email")})</p>
+            <p><strong>Ship to:</strong> ${escapeHtml(order.shippingName || "Unknown")} - ${escapeHtml(order.shippingAddress || "No address")}</p>
+            <p><strong>Units:</strong> ${order.unitsTotal || 0} | <strong>Items:</strong> ${formatMoney(order.amountSubtotal || 0)} | <strong>Shipping:</strong> ${formatMoney(order.amountShipping || 0)} | <strong>Tax:</strong> ${formatMoney(order.amountTax || 0)}</p>
+            <p><strong>Items ordered:</strong> ${itemSummary}</p>
+            <p><strong>Past orders by this customer:</strong> ${pastOrders}</p>
+            <p><strong>Customer total orders:</strong> ${order.customerOrdersCount || 1}</p>
+          </article>`;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
 function normalizeImageList(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -374,6 +532,16 @@ async function loadProducts() {
   renderProducts();
 }
 
+async function loadHealth() {
+  const health = await adminRequest("/api/admin/health");
+  renderHealth(health);
+}
+
+async function loadOrders() {
+  const payload = await adminRequest("/api/admin/orders?limit=100");
+  renderOrders(payload);
+}
+
 function syncShippingInputs() {
   if (!shippingEnabledInput || !shippingFeeInput) {
     return;
@@ -471,7 +639,7 @@ async function ensureAuthenticated() {
   try {
     await login(state.adminPassword);
     showPanel();
-    await Promise.all([loadProducts(), loadSiteSettings()]);
+    await Promise.all([loadProducts(), loadSiteSettings(), loadHealth(), loadOrders()]);
   } catch {
     state.adminPassword = "";
     window.localStorage.removeItem(ADMIN_KEY);
@@ -493,10 +661,12 @@ loginForm.addEventListener("submit", async (event) => {
     window.localStorage.setItem(ADMIN_KEY, password);
     passwordInput.value = "";
     showPanel();
-    await Promise.all([loadProducts(), loadSiteSettings()]);
+    await Promise.all([loadProducts(), loadSiteSettings(), loadHealth(), loadOrders()]);
     setProductMessage("Signed in.");
     setDesignMessage("");
     setPublishMessage("");
+    setHealthMessage("");
+    setOrdersMessage("");
     setLoginMessage("");
   } catch (error) {
     setLoginMessage(error.message || "Could not sign in.", true);
@@ -512,7 +682,49 @@ logoutBtn.addEventListener("click", () => {
   setProductMessage("");
   setDesignMessage("");
   setPublishMessage("");
+  setHealthMessage("");
+  setOrdersMessage("");
   setLoginMessage("");
+});
+
+refreshHealthBtn?.addEventListener("click", async () => {
+  if (state.healthBusy) {
+    return;
+  }
+  setHealthBusy(true);
+  setHealthMessage("Refreshing health...");
+  try {
+    await loadHealth();
+    setHealthMessage("Health refreshed.");
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setHealthMessage(error.message || "Could not load health status.", true);
+  } finally {
+    setHealthBusy(false);
+  }
+});
+
+refreshOrdersBtn?.addEventListener("click", async () => {
+  if (state.ordersBusy) {
+    return;
+  }
+  setOrdersBusy(true);
+  setOrdersMessage("Loading orders...");
+  try {
+    await loadOrders();
+    setOrdersMessage("Orders refreshed.");
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setOrdersMessage(error.message || "Could not load orders.", true);
+  } finally {
+    setOrdersBusy(false);
+  }
 });
 
 publishBtn.addEventListener("click", async () => {
