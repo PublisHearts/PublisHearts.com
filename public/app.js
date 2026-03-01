@@ -592,6 +592,54 @@ function sanitizeCartAgainstCatalog() {
   }
 }
 
+function readPreorderTargetId() {
+  const params = new URLSearchParams(window.location.search);
+  const raw = String(params.get("preorder") || "").trim();
+  return raw;
+}
+
+function clearPreorderTargetId() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("preorder")) {
+    return;
+  }
+  url.searchParams.delete("preorder");
+  const nextSearch = url.searchParams.toString();
+  const nextUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ""}${url.hash}`;
+  window.history.replaceState({}, "", nextUrl);
+}
+
+function applyPreorderDeepLink() {
+  const preorderId = readPreorderTargetId();
+  if (!preorderId) {
+    return;
+  }
+
+  const product = state.products.find((entry) => entry.id === preorderId);
+  if (!product) {
+    setCheckoutMessage("Preorder title not found.");
+    clearPreorderTargetId();
+    return;
+  }
+
+  if (!isOrderable(product)) {
+    setCheckoutMessage(`${product.title} is not available for preorder yet.`, true);
+    clearPreorderTargetId();
+    return;
+  }
+
+  const current = state.cart.get(preorderId);
+  if (!current) {
+    state.cart.set(preorderId, { id: preorderId, quantity: 1 });
+    saveCart();
+    updateCartUi();
+  }
+
+  openCart();
+  setCheckoutMessage(`${product.title} added to cart for preorder.`);
+  clearPreorderTargetId();
+}
+
 async function loadProducts() {
   const response = await fetch("/api/products");
   if (!response.ok) {
@@ -601,6 +649,7 @@ async function loadProducts() {
   sanitizeCartAgainstCatalog();
   renderProducts();
   updateCartUi();
+  applyPreorderDeepLink();
 }
 
 async function loadSiteSettings() {

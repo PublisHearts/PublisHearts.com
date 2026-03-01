@@ -248,21 +248,22 @@ h1 {
 
 .coming-soon-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 220px));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1rem;
-  justify-content: flex-start;
+  align-items: start;
 }
 
 .coming-soon-card {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto;
   border: 1px solid #eadfce;
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow);
   overflow: hidden;
   width: 100%;
-  max-width: 220px;
+  text-decoration: none;
+  color: inherit;
 }
 
 .coming-soon-cover-wrap {
@@ -283,7 +284,27 @@ h1 {
 .coming-soon-body {
   padding: 1rem;
   display: grid;
+  align-content: start;
   gap: 0.6rem;
+}
+
+.coming-soon-body .product-title,
+.coming-soon-body .product-subtitle {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.coming-soon-body .product-subtitle {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.coming-soon-body .row-between {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
 }
 
 .coming-soon-pill {
@@ -301,9 +322,12 @@ h1 {
 }
 
 .coming-soon-cta {
+  width: 100%;
+  text-align: center;
   justify-content: center;
   font-size: 0.9rem;
   font-weight: 700;
+  pointer-events: none;
 }
 
 .product-card {

@@ -220,7 +220,10 @@ function renderComingSoon(products) {
     .map(
       (product) => {
         const preorderOpen = isPreorderEnabled(product);
-        return `<article class="coming-soon-card">
+        const preorderHref = preorderOpen
+          ? `/shop.html?preorder=${encodeURIComponent(product.id)}#books`
+          : "/shop.html#books";
+        return `<a class="coming-soon-card" href="${preorderHref}" aria-label="${preorderOpen ? `Preorder ${product.title}` : `View ${product.title} in shop`}">
         <div class="coming-soon-cover-wrap">
           <img class="coming-soon-cover" src="${getPrimaryProductImage(product)}" alt="${product.title} preview cover" loading="lazy" />
         </div>
@@ -231,9 +234,9 @@ function renderComingSoon(products) {
             <span class="price">${formatMoney(product.priceCents || 0)}</span>
             <span class="coming-soon-pill ${preorderOpen ? "preorder-open" : ""}">${preorderOpen ? "Preorder Open" : "Coming Soon"}</span>
           </div>
-          ${preorderOpen ? '<a class="ghost-btn ghost-link coming-soon-cta" href="/shop.html#books">Preorder</a>' : ""}
+          <span class="ghost-btn coming-soon-cta">${preorderOpen ? "Preorder" : "View in Shop"}</span>
         </div>
-      </article>`;
+      </a>`;
       }
     )
     .join("");
