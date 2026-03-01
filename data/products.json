@@ -14,7 +14,7 @@
     "shippingFeeCents": 1000,
     "isVisible": true,
     "isComingSoon": true,
-    "allowPreorder": true,
+    "allowPreorder": false,
     "inStock": true,
     "sortOrder": 0
   },
