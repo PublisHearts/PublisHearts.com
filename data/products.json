@@ -69,5 +69,24 @@
     "allowPreorder": false,
     "inStock": true,
     "sortOrder": 3
+  },
+  {
+    "id": "raw-assorted-minerals-starter-kit",
+    "title": "Raw assorted minerals starter kit",
+    "subtitle": "15 pc starter collection of real  unpolished minerals Get a unique mix of \r\nsize 1/2\"- 1\"",
+    "included": "15 out of at least 28 types of genuine rough stones like amethyst, lapis lazuli, rose quartz, tiger's eye, green aventurine, red jasper, clear crystal, sodalite, blue apatite, black tourmaline, citrine, sunstone, ruby in zoisite, amazonite, labradorite, smoky quartz, rainbow fluorite and more. Every batch is a random surprise for collectors.",
+    "priceCents": 1599,
+    "imageUrl": "/uploads/1772408545930-2cab139e.png",
+    "productImageUrls": [
+      "/uploads/1772408546117-1e7c9fed.png"
+    ],
+    "includedImageUrls": [],
+    "shippingEnabled": true,
+    "shippingFeeCents": 1000,
+    "isVisible": true,
+    "isComingSoon": false,
+    "allowPreorder": false,
+    "inStock": true,
+    "sortOrder": 4
   }
 ]
