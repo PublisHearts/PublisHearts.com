@@ -941,6 +941,24 @@ h1 {
   font-size: 0.95rem;
 }
 
+.admin-orders-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.admin-orders-search {
+  min-width: 240px;
+  border: 1px solid #d8cab8;
+  border-radius: 999px;
+  padding: 0.56rem 0.9rem;
+  font: inherit;
+  color: var(--ink);
+  background: #fffdfa;
+}
+
 .status-wrap {
   min-height: calc(100vh - 78px);
   display: grid;

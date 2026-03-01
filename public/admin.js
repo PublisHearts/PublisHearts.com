@@ -34,6 +34,7 @@ const refreshHealthBtn = document.getElementById("refresh-health-btn");
 const adminHealthEl = document.getElementById("admin-health");
 const healthMessageEl = document.getElementById("health-message");
 const refreshOrdersBtn = document.getElementById("refresh-orders-btn");
+const ordersSearchInput = document.getElementById("orders-search");
 const orderCustomersEl = document.getElementById("admin-order-customers");
 const ordersEl = document.getElementById("admin-orders");
 const ordersMessageEl = document.getElementById("orders-message");
@@ -84,6 +85,7 @@ const state = {
   publishBusy: false,
   healthBusy: false,
   ordersBusy: false,
+  ordersPayload: null,
   dragProductId: null,
   dropTargetId: null,
   dropAfter: false
@@ -359,12 +361,49 @@ function renderOrders(payload) {
     return;
   }
 
-  const orders = Array.isArray(payload?.orders) ? payload.orders : [];
-  const customers = Array.isArray(payload?.customers) ? payload.customers : [];
+  const allOrders = Array.isArray(payload?.orders) ? payload.orders : [];
+  const allCustomers = Array.isArray(payload?.customers) ? payload.customers : [];
+  const query = String(ordersSearchInput?.value || "")
+    .trim()
+    .toLowerCase();
+  const matchesSearch = (order) => {
+    if (!query) {
+      return true;
+    }
+    const haystack = [
+      order.id,
+      order.customerName,
+      order.customerEmail,
+      order.shippingName,
+      order.shippingAddress
+    ]
+      .map((value) => String(value || "").toLowerCase())
+      .join(" ");
+    return haystack.includes(query);
+  };
+
+  const orders = allOrders.filter(matchesSearch);
+  const orderCustomerEmails = new Set(
+    orders
+      .map((order) => String(order.customerEmail || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const customers = allCustomers.filter((customer) => {
+    const email = String(customer.email || "")
+      .trim()
+      .toLowerCase();
+    const name = String(customer.name || "")
+      .trim()
+      .toLowerCase();
+    if (!query) {
+      return true;
+    }
+    return email.includes(query) || name.includes(query) || orderCustomerEmails.has(email);
+  });
 
   if (customers.length > 0) {
     orderCustomersEl.innerHTML = `
-      <h3>Customer History</h3>
+      <h3>Customer History${query ? ` (${customers.length} match)` : ""}</h3>
       <div class="admin-customer-list">
         ${customers
           .slice(0, 20)
@@ -384,7 +423,9 @@ function renderOrders(payload) {
   }
 
   if (orders.length === 0) {
-    ordersEl.innerHTML = `<p class="cart-item-sub">No paid orders found yet.</p>`;
+    ordersEl.innerHTML = `<p class="cart-item-sub">${
+      query ? "No orders matched your search." : "No paid orders found yet."
+    }</p>`;
     return;
   }
 
@@ -439,11 +480,11 @@ function renderOrders(payload) {
   };
 
   ordersEl.innerHTML = `
-    <h3>Needs Fulfillment (${pendingOrders.length})</h3>
+    <h3>Needs Fulfillment (${pendingOrders.length}${query ? ` / ${allOrders.length} total` : ""})</h3>
     <div class="admin-orders-list">
       ${pendingOrders.length > 0 ? pendingOrders.map(renderOrderCard).join("") : '<p class="cart-item-sub">No orders waiting to ship.</p>'}
     </div>
-    <h3>Shipped (${shippedOrders.length})</h3>
+    <h3>Shipped (${shippedOrders.length}${query ? ` / ${allOrders.length} total` : ""})</h3>
     <div class="admin-orders-list">
       ${shippedOrders.length > 0 ? shippedOrders.map(renderOrderCard).join("") : '<p class="cart-item-sub">No shipped orders yet.</p>'}
     </div>
@@ -568,6 +609,7 @@ async function loadHealth() {
 
 async function loadOrders() {
   const payload = await adminRequest("/api/admin/orders?limit=100");
+  state.ordersPayload = payload;
   renderOrders(payload);
 }
 
@@ -730,6 +772,7 @@ loginForm.addEventListener("submit", async (event) => {
 logoutBtn.addEventListener("click", () => {
   state.adminPassword = "";
   window.localStorage.removeItem(ADMIN_KEY);
+  state.ordersPayload = null;
   resetForm();
   resetSiteSettingsDraftFields();
   showLogin();
@@ -779,6 +822,13 @@ refreshOrdersBtn?.addEventListener("click", async () => {
   } finally {
     setOrdersBusy(false);
   }
+});
+
+ordersSearchInput?.addEventListener("input", () => {
+  if (!state.ordersPayload) {
+    return;
+  }
+  renderOrders(state.ordersPayload);
 });
 
 ordersEl?.addEventListener("click", async (event) => {

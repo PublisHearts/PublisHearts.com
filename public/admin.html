@@ -355,7 +355,16 @@
               <h2>Orders</h2>
               <p>View paid customer orders, units sold, ship-to details, and customer order history.</p>
             </div>
-            <button id="refresh-orders-btn" class="ghost-btn" type="button">Refresh Orders</button>
+            <div class="admin-orders-toolbar">
+              <input
+                id="orders-search"
+                class="admin-orders-search"
+                type="search"
+                placeholder="Search by order # or customer name"
+                autocomplete="off"
+              />
+              <button id="refresh-orders-btn" class="ghost-btn" type="button">Refresh Orders</button>
+            </div>
           </div>
           <div id="admin-order-customers" class="admin-order-customers"></div>
           <div id="admin-orders" class="admin-orders"></div>
