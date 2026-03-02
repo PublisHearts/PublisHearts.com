@@ -1,3 +1,5 @@
+import { setupStateGate } from "./stateGate.js";
+
 const siteMetaDescription = document.getElementById("site-meta-description");
 const brandNameHeader = document.getElementById("brand-name-header");
 const brandMarkText = document.getElementById("brand-mark-text");
@@ -266,3 +268,5 @@ loadProducts().catch(() => {
     comingSoonGrid.innerHTML = `<p class="cart-item-sub">Could not load previews. Refresh and try again.</p>`;
   }
 });
+
+setupStateGate();

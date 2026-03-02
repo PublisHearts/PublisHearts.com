@@ -332,6 +332,7 @@ function renderHealth(health) {
   const deployLabel = health.deployCommit || "Unknown";
   const appUrl = String(health.appUrl || "").trim() || "(not set)";
   const smtpHost = String(health.smtpHost || "").trim() || "(not set)";
+  const nonTaxStates = Array.isArray(health.manualNonTaxStates) ? health.manualNonTaxStates.join(", ") : "";
 
   adminHealthEl.innerHTML = `
     <article class="admin-health-card">
@@ -339,6 +340,7 @@ function renderHealth(health) {
       <p><strong>Stripe:</strong> ${health.stripeConfigured ? "Configured" : "Missing key"}</p>
       <p><strong>Tax mode:</strong> ${escapeHtml(taxModeLabel)}</p>
       <p><strong>Tax on shipping:</strong> ${health.manualSalesTaxApplyToShipping ? "Yes" : "No"}</p>
+      <p><strong>No-tax states:</strong> ${escapeHtml(nonTaxStates || "(none)")}</p>
     </article>
     <article class="admin-health-card">
       <h3>Email</h3>
@@ -374,6 +376,7 @@ function renderOrders(payload) {
       order.id,
       order.customerName,
       order.customerEmail,
+      order.customerState,
       order.shippingName,
       order.shippingAddress
     ]
@@ -453,6 +456,9 @@ function renderOrders(payload) {
       <p><strong>Status:</strong> <span class="admin-order-status ${shipped ? "shipped" : "pending"}">${fulfillmentLabel}</span>${shipDate ? ` - ${escapeHtml(shipDate)}` : ""}</p>
       <p><strong>Date:</strong> ${escapeHtml(formatDateTime(order.createdAt))}</p>
       <p><strong>Customer:</strong> ${escapeHtml(order.customerName || "Unknown")} (${escapeHtml(order.customerEmail || "No email")})</p>
+      <p><strong>State:</strong> ${escapeHtml(order.customerState || "Unknown")} ${
+        order.customerTaxExemptByState ? '(no-sales-tax state)' : ""
+      }</p>
       <p><strong>Ship to:</strong> ${escapeHtml(order.shippingName || "Unknown")} - ${escapeHtml(order.shippingAddress || "No address")}</p>
       <p><strong>Units:</strong> ${order.unitsTotal || 0} | <strong>Items:</strong> ${formatMoney(order.amountSubtotal || 0)} | <strong>Shipping:</strong> ${formatMoney(order.amountShipping || 0)} | <strong>Tax:</strong> ${formatMoney(order.amountTax || 0)}</p>
       <p><strong>Items ordered:</strong> ${itemSummary}</p>

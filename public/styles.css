@@ -146,6 +146,54 @@ body {
   text-align: center;
 }
 
+.state-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(21, 18, 14, 0.62);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.state-gate-card {
+  width: min(460px, calc(100vw - 1.4rem));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: #fffefb;
+  box-shadow: var(--shadow);
+  padding: 1rem;
+}
+
+.state-gate-card h2 {
+  margin: 0.35rem 0 0.5rem;
+}
+
+.state-gate-card p {
+  margin: 0 0 0.7rem;
+  color: var(--ink-soft);
+}
+
+.state-gate-form {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.state-gate-form label {
+  font-weight: 600;
+  color: #4e4337;
+}
+
+.state-gate-form select {
+  width: 100%;
+  border: 1px solid #d8cab8;
+  border-radius: 10px;
+  padding: 0.58rem 0.7rem;
+  font: inherit;
+  color: var(--ink);
+  background: #fffdfa;
+}
+
 .hero {
   padding: 4.4rem 0 2rem;
   animation: rise-in 420ms ease-out both;

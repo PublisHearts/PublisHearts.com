@@ -30,6 +30,7 @@
           <span id="brand-name-header">PublisHearts</span>
         </a>
         <div class="header-actions">
+          <button id="state-chip" class="ghost-btn" type="button">Set State</button>
           <a class="ghost-btn ghost-link" href="/">Home</a>
           <a class="ghost-btn ghost-link" href="/admin.html">Admin</a>
           <button id="open-cart" class="ghost-btn" type="button" aria-label="Open shopping cart">
@@ -39,6 +40,20 @@
         </div>
       </div>
     </header>
+
+    <div id="state-gate" class="state-gate hidden" aria-hidden="true">
+      <section class="state-gate-card" aria-labelledby="state-gate-title">
+        <p class="eyebrow">Required</p>
+        <h2 id="state-gate-title">Choose your state</h2>
+        <p>We use your state to calculate sales tax before checkout.</p>
+        <form id="state-gate-form" class="state-gate-form">
+          <label for="state-select">State</label>
+          <select id="state-select" name="state" required></select>
+          <button class="primary-btn block" type="submit">Continue</button>
+        </form>
+        <p id="state-gate-message" class="checkout-message"></p>
+      </section>
+    </div>
 
     <main>
       <section class="hero container">

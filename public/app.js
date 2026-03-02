@@ -1,3 +1,5 @@
+import { getCustomerState, setupStateGate } from "./stateGate.js";
+
 const productsGrid = document.getElementById("products-grid");
 const cartPanel = document.getElementById("cart-panel");
 const cartItems = document.getElementById("cart-items");
@@ -36,6 +38,7 @@ const state = {
   checkingOut: false,
   siteSettings: null
 };
+let stateGate = null;
 
 const CART_KEY = "publishearts_cart_v1";
 const SHIPPING_WEIGHT_PER_UNIT_LBS = 1.5;
@@ -666,6 +669,13 @@ async function checkout() {
     return;
   }
 
+  const customerState = getCustomerState();
+  if (!customerState) {
+    setCheckoutMessage("Select your state before checkout.", true);
+    stateGate?.open();
+    return;
+  }
+
   const cart = getCartRows().map((item) => ({ id: item.id, quantity: item.quantity }));
   if (cart.length === 0) {
     setCheckoutMessage("Add at least one book to continue.", true);
@@ -682,7 +692,7 @@ async function checkout() {
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ cart })
+      body: JSON.stringify({ cart, customerState })
     });
 
     const payload = await response.json();
@@ -740,6 +750,11 @@ cartPanel.addEventListener("click", (event) => {
 });
 
 loadCart();
+stateGate = setupStateGate({
+  onStateChange: () => {
+    setCheckoutMessage("");
+  }
+});
 loadSiteSettings().catch(() => {});
 loadProducts().catch(() => {
   productsGrid.innerHTML = `<p>Could not load books. Refresh and try again.</p>`;

@@ -12,6 +12,7 @@ Bookstore web app with:
 - admin health panel (Stripe/email/tax/deploy commit)
 - admin orders + customer history view (from Stripe paid sessions)
 - order fulfillment actions (mark shipped, resend shipment email, mark pending)
+- required customer state selection gate before storefront access
 - product stock control (in stock / sold out)
 - drag-and-drop product ordering
 - homepage hero banner uploader
@@ -49,6 +50,7 @@ Optional:
 - `STRIPE_AUTOMATIC_TAX` (defaults to `true`)
 - `MANUAL_SALES_TAX_RATE` (defaults to `0`; set percent like `7.25` for manual tax line item)
 - `MANUAL_SALES_TAX_APPLY_TO_SHIPPING` (`true` or `false`, defaults to `false`)
+- `MANUAL_NON_TAX_STATES` (defaults to `AK,DE,MT,NH,OR`; manual tax skipped for these states)
 - `SHIPPING_MIN_FEE` (defaults to `10.00`, checkout minimum)
 - `SHIPPING_WEIGHT_PER_UNIT_LBS` (defaults to `1.5`)
 - `GITHUB_PUSH_TOKEN` (enables Admin -> Publish Live Changes)

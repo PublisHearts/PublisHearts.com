@@ -45,6 +45,64 @@ const manualSalesTaxRatePercent =
 const manualSalesTaxEnabled = manualSalesTaxRatePercent > 0;
 const manualSalesTaxApplyToShipping =
   (process.env.MANUAL_SALES_TAX_APPLY_TO_SHIPPING || "false").trim().toLowerCase() === "true";
+const usStateCodes = new Set([
+  "AL",
+  "AK",
+  "AZ",
+  "AR",
+  "CA",
+  "CO",
+  "CT",
+  "DE",
+  "FL",
+  "GA",
+  "HI",
+  "ID",
+  "IL",
+  "IN",
+  "IA",
+  "KS",
+  "KY",
+  "LA",
+  "ME",
+  "MD",
+  "MA",
+  "MI",
+  "MN",
+  "MS",
+  "MO",
+  "MT",
+  "NE",
+  "NV",
+  "NH",
+  "NJ",
+  "NM",
+  "NY",
+  "NC",
+  "ND",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VT",
+  "VA",
+  "WA",
+  "WV",
+  "WI",
+  "WY",
+  "DC"
+]);
+const parsedManualNonTaxStates = (process.env.MANUAL_NON_TAX_STATES || "AK,DE,MT,NH,OR")
+  .split(",")
+  .map((code) => String(code || "").trim().toUpperCase())
+  .filter((code) => usStateCodes.has(code));
+const manualNonTaxStates = new Set(parsedManualNonTaxStates.length > 0 ? parsedManualNonTaxStates : ["AK", "DE", "MT", "NH", "OR"]);
 const adminPassword = (process.env.ADMIN_PASSWORD || "").trim();
 const githubPushToken = (process.env.GITHUB_PUSH_TOKEN || "").trim();
 const githubRepoRaw = (process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY || "").trim();
@@ -159,6 +217,16 @@ function getPaymentIntentIdFromSession(session) {
     return ref;
   }
   return String(ref.id || "").trim();
+}
+
+function normalizeUsStateCode(value) {
+  const code = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (!usStateCodes.has(code)) {
+    return "";
+  }
+  return code;
 }
 
 function parseCartSummaryEntries(metadata = {}) {
@@ -877,6 +945,7 @@ app.get("/api/admin/health", requireAdmin, (req, res) => {
     stripeAutomaticTaxEnabled,
     manualSalesTaxRatePercent,
     manualSalesTaxApplyToShipping,
+    manualNonTaxStates: Array.from(manualNonTaxStates),
     appUrl: (process.env.APP_URL || "").trim(),
     deployCommit,
     deployCommitRaw
@@ -921,6 +990,11 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         const shipmentTrackingNumber = String(paymentIntentMetadata.fulfillment_tracking_number || "").trim();
         const shipmentTrackingUrl = String(paymentIntentMetadata.fulfillment_tracking_url || "").trim();
         const shipmentNote = String(paymentIntentMetadata.fulfillment_note || "").trim();
+        const customerState = normalizeUsStateCode(metadata.customer_state);
+        const customerTaxExemptByState =
+          String(metadata.customer_tax_exempt_by_state || "")
+            .trim()
+            .toLowerCase() === "true";
         const cartEntries = parseCartSummaryEntries(metadata).filter((entry) => {
           const name = String(entry.name || "").trim().toLowerCase();
           return name !== "shipping" && name !== "sales tax" && name !== "tax";
@@ -960,6 +1034,8 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           shipmentTrackingNumber,
           shipmentTrackingUrl,
           shipmentNote,
+          customerState,
+          customerTaxExemptByState,
           paymentIntentId,
           customerName,
           customerEmail,
@@ -1016,6 +1092,8 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         shipmentTrackingNumber: order.shipmentTrackingNumber,
         shipmentTrackingUrl: order.shipmentTrackingUrl,
         shipmentNote: order.shipmentNote,
+        customerState: order.customerState,
+        customerTaxExemptByState: order.customerTaxExemptByState,
         paymentIntentId: order.paymentIntentId,
         customerName: order.customerName,
         customerEmail: order.customerEmail,
@@ -1386,6 +1464,10 @@ app.post("/api/create-checkout-session", async (req, res) => {
   if (cart.length === 0) {
     return res.status(400).json({ error: "Your cart is empty." });
   }
+  const customerState = normalizeUsStateCode(req.body?.customerState);
+  if (!customerState) {
+    return res.status(400).json({ error: "Select a valid U.S. state before checkout." });
+  }
 
   const lineItems = [];
   const cartSummaryParts = [];
@@ -1429,8 +1511,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
   const shippingTotal = calculateShippingFromUnits(shippableUnits);
   const shippingWeightLbs = Number((shippableUnits * shippingWeightPerUnitLbs).toFixed(2));
+  const salesTaxExemptByState = manualNonTaxStates.has(customerState);
   const taxBase = itemsSubtotal + (manualSalesTaxApplyToShipping ? shippingTotal : 0);
-  const manualSalesTaxTotal = manualSalesTaxEnabled
+  const manualSalesTaxTotal = manualSalesTaxEnabled && !salesTaxExemptByState
     ? Math.max(0, Math.round(taxBase * (manualSalesTaxRatePercent / 100)))
     : 0;
 
@@ -1493,6 +1576,8 @@ app.post("/api/create-checkout-session", async (req, res) => {
         shipping_total_cents: String(shippingTotal),
         manual_sales_tax_rate_pct: String(manualSalesTaxRatePercent),
         manual_sales_tax_cents: String(manualSalesTaxTotal),
+        customer_state: customerState,
+        customer_tax_exempt_by_state: String(salesTaxExemptByState),
         cart_summary: cartSummaryParts.join(" | ").slice(0, 500)
       }
     });
@@ -1539,6 +1624,11 @@ app.get("/api/order/:sessionId", async (req, res) => {
       amountDiscount: session.total_details?.amount_discount || 0,
       amountTotal: totals.amountTotal,
       currency: session.currency || currency,
+      customerState: normalizeUsStateCode(session.metadata?.customer_state),
+      customerTaxExemptByState:
+        String(session.metadata?.customer_tax_exempt_by_state || "")
+          .trim()
+          .toLowerCase() === "true",
       customerEmail: session.customer_details?.email || session.customer_email || "",
       shippingDetails: session.shipping_details || null,
       lineItems
