@@ -21,6 +21,11 @@ const promise3Copy = document.getElementById("promise-3-copy");
 const footerLeft = document.getElementById("footer-left");
 const footerRight = document.getElementById("footer-right");
 const comingSoonGrid = document.getElementById("coming-soon-grid");
+const homeSoldCounter = document.getElementById("home-sold-counter");
+const homeSoldCounterValue = document.getElementById("home-sold-counter-value");
+
+let homeSoldCurrentValue = 0;
+let homeSoldAnimationFrame = 0;
 
 function setText(el, value) {
   const text = String(value || "").trim();
@@ -43,6 +48,64 @@ function formatMoney(amountCents = 0) {
     style: "currency",
     currency: "USD"
   }).format(amountCents / 100);
+}
+
+function formatWholeNumber(value) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0
+  }).format(Math.max(0, Math.round(Number(value) || 0)));
+}
+
+function setHomeSoldCounterValue(value) {
+  if (!homeSoldCounterValue) {
+    return;
+  }
+  homeSoldCounterValue.textContent = formatWholeNumber(value);
+}
+
+function animateHomeSoldCounter(targetValue) {
+  const target = Math.max(0, Math.round(Number(targetValue) || 0));
+  if (!homeSoldCounter || !homeSoldCounterValue) {
+    homeSoldCurrentValue = target;
+    return;
+  }
+
+  if (homeSoldAnimationFrame) {
+    window.cancelAnimationFrame(homeSoldAnimationFrame);
+    homeSoldAnimationFrame = 0;
+  }
+
+  const start = Math.max(0, Math.round(Number(homeSoldCurrentValue) || 0));
+  if (start === target) {
+    setHomeSoldCounterValue(target);
+    homeSoldCounter.classList.remove("is-animating");
+    return;
+  }
+
+  const distance = Math.abs(target - start);
+  const durationMs = Math.min(1500, 450 + distance * 16);
+  const startedAt = performance.now();
+  homeSoldCounter.classList.add("is-animating");
+
+  const tick = (now) => {
+    const progress = Math.min(1, (now - startedAt) / durationMs);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const nextValue = Math.round(start + (target - start) * eased);
+    homeSoldCurrentValue = nextValue;
+    setHomeSoldCounterValue(nextValue);
+
+    if (progress < 1) {
+      homeSoldAnimationFrame = window.requestAnimationFrame(tick);
+      return;
+    }
+
+    homeSoldAnimationFrame = 0;
+    homeSoldCurrentValue = target;
+    setHomeSoldCounterValue(target);
+    homeSoldCounter.classList.remove("is-animating");
+  };
+
+  homeSoldAnimationFrame = window.requestAnimationFrame(tick);
 }
 
 function isComingSoon(product) {
@@ -262,11 +325,33 @@ async function loadProducts() {
   renderComingSoon(products);
 }
 
+async function loadSoldCopies() {
+  const response = await fetch("/api/stats/sold-copies", {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("Could not load sold copies");
+  }
+  const payload = await response.json();
+  const soldCopies = Math.max(0, Math.round(Number(payload?.soldCopies) || 0));
+  homeSoldCounter?.classList.remove("hidden");
+  homeSoldCounter?.classList.toggle("is-empty", soldCopies <= 0);
+  animateHomeSoldCounter(soldCopies);
+}
+
 loadSiteSettings().catch(() => {});
 loadProducts().catch(() => {
   if (comingSoonGrid) {
     comingSoonGrid.innerHTML = `<p class="cart-item-sub">Could not load previews. Refresh and try again.</p>`;
   }
+});
+loadSoldCopies().catch(() => {
+  if (!homeSoldCounter) {
+    return;
+  }
+  homeSoldCounter.classList.remove("hidden");
+  homeSoldCounter.classList.add("is-empty");
+  setHomeSoldCounterValue(0);
 });
 
 setupStateGate();

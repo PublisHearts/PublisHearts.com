@@ -245,6 +245,35 @@ h1 {
   font-size: 1.05rem;
 }
 
+.home-sold-counter {
+  margin: 0.9rem 0 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #e5ceb6;
+  border-radius: 999px;
+  background: #fff9f2;
+  color: #7f2f18;
+  font-weight: 700;
+}
+
+.home-sold-counter span {
+  display: inline-block;
+  min-width: 2ch;
+  font-family: "Fraunces", serif;
+  font-size: clamp(1.05rem, 2.8vw, 1.35rem);
+  line-height: 1;
+}
+
+.home-sold-counter.is-empty {
+  opacity: 0.78;
+}
+
+.home-sold-counter.is-animating span {
+  animation: sold-slide 240ms ease-out;
+}
+
 .primary-btn {
   display: inline-block;
   padding: 0.74rem 1.4rem;

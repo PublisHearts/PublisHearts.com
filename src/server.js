@@ -218,6 +218,28 @@ const uspsDefaultLabelType = String(process.env.USPS_LABEL_TYPE || "4X6LABEL")
 const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : null;
 const app = express();
 app.set("trust proxy", true);
+const parsedPublicSoldCopiesCacheSeconds = Number.parseInt(
+  String(process.env.PUBLIC_SOLD_COPIES_CACHE_SECONDS || "45"),
+  10
+);
+const publicSoldCopiesCacheMs =
+  Number.isFinite(parsedPublicSoldCopiesCacheSeconds) && parsedPublicSoldCopiesCacheSeconds >= 0
+    ? parsedPublicSoldCopiesCacheSeconds * 1000
+    : 45000;
+const parsedPublicSoldCopiesMaxSessions = Number.parseInt(
+  String(process.env.PUBLIC_SOLD_COPIES_MAX_SESSIONS || "2500"),
+  10
+);
+const publicSoldCopiesMaxSessions =
+  Number.isFinite(parsedPublicSoldCopiesMaxSessions) && parsedPublicSoldCopiesMaxSessions >= 100
+    ? Math.min(10000, parsedPublicSoldCopiesMaxSessions)
+    : 2500;
+const soldCopiesCacheState = {
+  soldCopies: 0,
+  paidOrders: 0,
+  updatedAtMs: 0,
+  inFlightPromise: null
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -393,6 +415,110 @@ function parseCartSummaryEntries(metadata = {}) {
         quantity: Math.max(1, Number.parseInt(match[2], 10) || 1)
       };
     });
+}
+
+function calculateUnitsTotalFromSessionMetadata(session) {
+  const metadata = session?.metadata || {};
+  const unitsFromMetadata = readMetadataInteger(metadata, "units_total");
+  if (Number.isFinite(unitsFromMetadata) && unitsFromMetadata > 0) {
+    return unitsFromMetadata;
+  }
+  const cartEntries = parseCartSummaryEntries(metadata).filter((entry) => {
+    const name = String(entry.name || "").trim().toLowerCase();
+    return name !== "shipping" && name !== "sales tax" && name !== "tax";
+  });
+  return cartEntries.reduce((sum, entry) => sum + (Number(entry.quantity) || 0), 0);
+}
+
+async function fetchSoldCopiesStatsFromStripe() {
+  if (!stripe) {
+    return {
+      soldCopies: 0,
+      paidOrders: 0,
+      updatedAtMs: Date.now()
+    };
+  }
+
+  let soldCopies = 0;
+  let paidOrders = 0;
+  let scannedSessions = 0;
+  let hasMore = true;
+  let startingAfter = "";
+
+  while (hasMore && scannedSessions < publicSoldCopiesMaxSessions) {
+    const remaining = publicSoldCopiesMaxSessions - scannedSessions;
+    const listParams = {
+      limit: Math.min(100, remaining)
+    };
+    if (startingAfter) {
+      listParams.starting_after = startingAfter;
+    }
+
+    const response = await stripe.checkout.sessions.list(listParams);
+    const sessions = Array.isArray(response?.data) ? response.data : [];
+    if (sessions.length === 0) {
+      break;
+    }
+
+    for (const session of sessions) {
+      if (session?.payment_status !== "paid") {
+        continue;
+      }
+      paidOrders += 1;
+      soldCopies += calculateUnitsTotalFromSessionMetadata(session);
+    }
+
+    scannedSessions += sessions.length;
+    const lastSession = sessions[sessions.length - 1];
+    startingAfter = String(lastSession?.id || "").trim();
+    hasMore = Boolean(response?.has_more) && Boolean(startingAfter);
+  }
+
+  return {
+    soldCopies: Math.max(0, Math.round(Number(soldCopies) || 0)),
+    paidOrders: Math.max(0, Math.round(Number(paidOrders) || 0)),
+    updatedAtMs: Date.now()
+  };
+}
+
+async function getSoldCopiesStats() {
+  const now = Date.now();
+  const hasFreshCache =
+    soldCopiesCacheState.updatedAtMs > 0 && now - soldCopiesCacheState.updatedAtMs < publicSoldCopiesCacheMs;
+  if (hasFreshCache) {
+    return {
+      soldCopies: soldCopiesCacheState.soldCopies,
+      paidOrders: soldCopiesCacheState.paidOrders,
+      updatedAtMs: soldCopiesCacheState.updatedAtMs
+    };
+  }
+
+  if (soldCopiesCacheState.inFlightPromise) {
+    return soldCopiesCacheState.inFlightPromise;
+  }
+
+  soldCopiesCacheState.inFlightPromise = fetchSoldCopiesStatsFromStripe()
+    .then((stats) => {
+      soldCopiesCacheState.soldCopies = stats.soldCopies;
+      soldCopiesCacheState.paidOrders = stats.paidOrders;
+      soldCopiesCacheState.updatedAtMs = stats.updatedAtMs;
+      return stats;
+    })
+    .catch((error) => {
+      if (soldCopiesCacheState.updatedAtMs > 0) {
+        return {
+          soldCopies: soldCopiesCacheState.soldCopies,
+          paidOrders: soldCopiesCacheState.paidOrders,
+          updatedAtMs: soldCopiesCacheState.updatedAtMs
+        };
+      }
+      throw error;
+    })
+    .finally(() => {
+      soldCopiesCacheState.inFlightPromise = null;
+    });
+
+  return soldCopiesCacheState.inFlightPromise;
 }
 
 function formatAddressLine(address) {
@@ -1892,6 +2018,21 @@ app.get("/api/products", async (req, res) => {
   const products = await listProducts();
   const visibleProducts = products.filter((product) => product.isVisible !== false);
   res.json(visibleProducts);
+});
+
+app.get("/api/stats/sold-copies", async (req, res) => {
+  try {
+    const stats = await getSoldCopiesStats();
+    return res.json({
+      soldCopies: stats.soldCopies,
+      asOf: new Date(stats.updatedAtMs || Date.now()).toISOString()
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(503).json({
+      error: details ? `Could not load sold copies: ${details}` : "Could not load sold copies right now."
+    });
+  }
 });
 
 app.post("/api/admin/login", (req, res) => {
