@@ -203,7 +203,7 @@ body {
   position: relative;
   margin-bottom: 1rem;
   border-radius: 16px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
   background: #f3ece3;
@@ -214,6 +214,7 @@ body {
   display: block;
   aspect-ratio: 16 / 6;
   object-fit: cover;
+  border-radius: 16px;
 }
 
 .eyebrow {
@@ -248,7 +249,7 @@ h1 {
 
 .home-sold-counter {
   position: absolute;
-  top: clamp(0.45rem, 2.2vw, 1rem);
+  top: calc(clamp(0.45rem, 2.2vw, 1rem) - 0.95in);
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
