@@ -1007,6 +1007,50 @@ h1 {
   background: #fffdfa;
 }
 
+.admin-orders-celebration {
+  border: 1px solid #e5ceb6;
+  border-radius: 14px;
+  background: linear-gradient(140deg, #fffaf2 0%, #fff2e4 62%, #fbe8d8 100%);
+  padding: 0.85rem 1rem;
+  box-shadow: 0 10px 24px rgba(141, 57, 28, 0.08);
+}
+
+.admin-sold-kicker {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #8d391c;
+}
+
+.admin-sold-count {
+  margin: 0.2rem 0 0.15rem;
+  font-family: "Fraunces", serif;
+  font-size: clamp(1.35rem, 3vw, 1.9rem);
+  font-weight: 700;
+  color: #5e2410;
+}
+
+.admin-sold-count span {
+  display: inline-block;
+  min-width: 2ch;
+  color: #ad4f2d;
+}
+
+.admin-sold-caption {
+  margin: 0;
+  color: #6d5a4b;
+}
+
+.admin-orders-celebration.is-empty {
+  filter: saturate(0.75);
+}
+
+.admin-orders-celebration.is-animating .admin-sold-count span {
+  animation: sold-slide 240ms ease-out;
+}
+
 .status-wrap {
   min-height: calc(100vh - 78px);
   display: grid;
@@ -1068,6 +1112,19 @@ h1 {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes sold-slide {
+  from {
+    opacity: 0.2;
+    transform: translateY(36%);
+    filter: blur(1px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
   }
 }
 

@@ -38,6 +38,9 @@ const ordersSearchInput = document.getElementById("orders-search");
 const orderCustomersEl = document.getElementById("admin-order-customers");
 const ordersEl = document.getElementById("admin-orders");
 const ordersMessageEl = document.getElementById("orders-message");
+const soldCounterEl = document.getElementById("admin-sold-counter");
+const soldCounterValueEl = document.getElementById("admin-sold-counter-value");
+const soldCounterNoteEl = document.getElementById("admin-sold-counter-note");
 
 const siteSettingsForm = document.getElementById("site-settings-form");
 const designMessageEl = document.getElementById("design-message");
@@ -87,6 +90,8 @@ const state = {
   healthBusy: false,
   ordersBusy: false,
   ordersPayload: null,
+  soldCounterValue: 0,
+  soldCounterAnimationFrame: 0,
   dragProductId: null,
   dropTargetId: null,
   dropAfter: false
@@ -305,6 +310,95 @@ function formatDateTime(epochSeconds) {
   return new Date(value * 1000).toLocaleString();
 }
 
+function formatWholeNumber(value) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0
+  }).format(Math.max(0, Math.round(Number(value) || 0)));
+}
+
+function getOrderUnits(order) {
+  const unitsTotal = Number(order?.unitsTotal);
+  if (Number.isFinite(unitsTotal) && unitsTotal > 0) {
+    return unitsTotal;
+  }
+
+  if (!Array.isArray(order?.items) || order.items.length === 0) {
+    return 0;
+  }
+
+  return order.items.reduce((sum, item) => {
+    const quantity = Number(item?.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      return sum;
+    }
+    return sum + quantity;
+  }, 0);
+}
+
+function setSoldCounterValue(value) {
+  if (!soldCounterValueEl) {
+    return;
+  }
+  soldCounterValueEl.textContent = formatWholeNumber(value);
+}
+
+function animateSoldCounter(targetValue) {
+  const target = Math.max(0, Math.round(Number(targetValue) || 0));
+  if (!soldCounterValueEl) {
+    state.soldCounterValue = target;
+    return;
+  }
+
+  if (state.soldCounterAnimationFrame) {
+    window.cancelAnimationFrame(state.soldCounterAnimationFrame);
+    state.soldCounterAnimationFrame = 0;
+  }
+
+  const start = Math.max(0, Math.round(Number(state.soldCounterValue) || 0));
+  if (start === target) {
+    setSoldCounterValue(target);
+    return;
+  }
+
+  const distance = Math.abs(target - start);
+  const durationMs = Math.min(1500, 450 + distance * 28);
+  const startedAt = performance.now();
+  soldCounterEl?.classList.add("is-animating");
+
+  const tick = (now) => {
+    const progress = Math.min(1, (now - startedAt) / durationMs);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const nextValue = Math.round(start + (target - start) * eased);
+    state.soldCounterValue = nextValue;
+    setSoldCounterValue(nextValue);
+
+    if (progress < 1) {
+      state.soldCounterAnimationFrame = window.requestAnimationFrame(tick);
+      return;
+    }
+
+    state.soldCounterAnimationFrame = 0;
+    state.soldCounterValue = target;
+    setSoldCounterValue(target);
+    soldCounterEl?.classList.remove("is-animating");
+  };
+
+  state.soldCounterAnimationFrame = window.requestAnimationFrame(tick);
+}
+
+function updateSoldCounter(orders) {
+  const orderList = Array.isArray(orders) ? orders : [];
+  const soldUnits = orderList.reduce((sum, order) => sum + getOrderUnits(order), 0);
+  animateSoldCounter(soldUnits);
+  soldCounterEl?.classList.toggle("is-empty", soldUnits <= 0);
+  if (soldCounterNoteEl) {
+    soldCounterNoteEl.textContent =
+      soldUnits > 0
+        ? `Across ${formatWholeNumber(orderList.length)} paid orders`
+        : "No paid orders yet";
+  }
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replaceAll("&", "&amp;")
@@ -421,6 +515,7 @@ function renderOrders(payload) {
 
   const allOrders = Array.isArray(payload?.orders) ? payload.orders : [];
   const allCustomers = Array.isArray(payload?.customers) ? payload.customers : [];
+  updateSoldCounter(allOrders);
   const query = String(ordersSearchInput?.value || "")
     .trim()
     .toLowerCase();
