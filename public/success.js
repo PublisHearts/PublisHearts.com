@@ -50,8 +50,10 @@ async function loadOrder() {
       throw new Error(order.error || "Could not load order");
     }
 
-    receiptCopy.textContent =
-      "A receipt email has been sent. Your shipping details and order summary are below.";
+    const stateMatchOk = order.shippingStateMatchesCustomerState !== false;
+    receiptCopy.textContent = stateMatchOk
+      ? "A receipt email has been sent. Your shipping details and order summary are below."
+      : "Your order is paid but on hold: shipping address state did not match your selected state. Please contact support.";
     const shippingFromLines = (order.lineItems || [])
       .filter((item) => isShippingLineItem(item))
       .reduce((sum, item) => sum + (Number(item.amountTotal) || 0), 0);

@@ -317,6 +317,53 @@ function normalizeUsStateCode(value) {
   return code;
 }
 
+function evaluateCheckoutStateMatch(session) {
+  const metadata = session?.metadata || {};
+  const selectedState = normalizeUsStateCode(metadata.customer_state);
+  const shippingAddress = session?.shipping_details?.address || {};
+  const shippingCountry = normalizeIsoCountry(shippingAddress.country, "US");
+  const shippingStateRaw = String(shippingAddress.state || "")
+    .trim()
+    .toUpperCase();
+  const shippingState = normalizeUsStateCode(shippingStateRaw);
+  const stateMatch =
+    Boolean(selectedState) &&
+    shippingCountry === "US" &&
+    Boolean(shippingState) &&
+    selectedState === shippingState;
+
+  let mismatchReason = "";
+  if (!stateMatch) {
+    if (!selectedState) {
+      mismatchReason = "Checkout state selection is missing.";
+    } else if (shippingCountry !== "US") {
+      mismatchReason = `Shipping country ${shippingCountry || "Unknown"} is not supported for state-based shipping.`;
+    } else if (!shippingState) {
+      mismatchReason = `Shipping state "${shippingStateRaw || "Unknown"}" is invalid or missing.`;
+    } else {
+      mismatchReason = `Selected state ${selectedState} does not match shipping state ${shippingState}.`;
+    }
+  }
+
+  return {
+    selectedState,
+    shippingState,
+    shippingStateRaw,
+    shippingCountry,
+    stateMatch,
+    mismatchReason
+  };
+}
+
+function buildStateMismatchErrorMessage(matchResult) {
+  const selected = matchResult?.selectedState || "Unknown";
+  const shippingState = matchResult?.shippingState || matchResult?.shippingStateRaw || "Unknown";
+  const shippingCountry = matchResult?.shippingCountry || "Unknown";
+  const reason = String(matchResult?.mismatchReason || "").trim();
+  const detail = reason || `Selected state ${selected} does not match shipping state ${shippingState}.`;
+  return `${detail} (Selected: ${selected}, Shipping: ${shippingState}, Country: ${shippingCountry})`;
+}
+
 function parseCartSummaryEntries(metadata = {}) {
   const summary = String(metadata?.cart_summary || "").trim();
   if (!summary) {
@@ -1727,7 +1774,9 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), asyn
 
     try {
       // Re-fetch the session from Stripe for complete customer/shipping fields.
-      const session = await stripe.checkout.sessions.retrieve(eventSession.id);
+      const session = await stripe.checkout.sessions.retrieve(eventSession.id, {
+        expand: ["payment_intent"]
+      });
       const lineItemsResponse = await stripe.checkout.sessions.listLineItems(session.id, {
         limit: 100
       });
@@ -1744,6 +1793,40 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), asyn
       }
       const totals = computeOrderTotals(session, lineItems);
       const customerEmail = session.customer_details?.email || session.customer_email || "";
+      const stateMatchResult = evaluateCheckoutStateMatch(session);
+      const paymentIntentId = getPaymentIntentIdFromSession(session);
+      const paymentIntentMetadata =
+        session.payment_intent && typeof session.payment_intent === "object"
+          ? session.payment_intent.metadata || {}
+          : {};
+      const holdForStateMismatch = !stateMatchResult.stateMatch;
+
+      if (paymentIntentId) {
+        await stripe.paymentIntents.update(paymentIntentId, {
+          metadata: {
+            ...paymentIntentMetadata,
+            fulfillment_status:
+              holdForStateMismatch
+                ? "pending"
+                : String(paymentIntentMetadata.fulfillment_status || "pending"),
+            fulfillment_hold_reason:
+              holdForStateMismatch
+                ? "state_mismatch"
+                : String(paymentIntentMetadata.fulfillment_hold_reason || ""),
+            fulfillment_selected_state: stateMatchResult.selectedState || "",
+            fulfillment_shipping_state: stateMatchResult.shippingState || stateMatchResult.shippingStateRaw || "",
+            fulfillment_shipping_country: stateMatchResult.shippingCountry || "",
+            fulfillment_state_match: String(stateMatchResult.stateMatch),
+            fulfillment_state_mismatch_reason: holdForStateMismatch ? stateMatchResult.mismatchReason : ""
+          }
+        });
+      }
+
+      if (holdForStateMismatch) {
+        console.warn(
+          `State mismatch hold on order ${session.id}: ${buildStateMismatchErrorMessage(stateMatchResult)}`
+        );
+      }
 
       if (!customerEmail) {
         console.warn(`No customer email found for completed session ${session.id}`);
@@ -1906,7 +1989,15 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         const shipmentPostageCentsRaw = readMetadataInteger(paymentIntentMetadata, "fulfillment_postage_cents");
         const shipmentPostageCents =
           Number.isFinite(shipmentPostageCentsRaw) && shipmentPostageCentsRaw >= 0 ? shipmentPostageCentsRaw : 0;
-        const customerState = normalizeUsStateCode(metadata.customer_state);
+        const stateMatchResult = evaluateCheckoutStateMatch(session);
+        const customerState = stateMatchResult.selectedState;
+        const shippingState = stateMatchResult.shippingState || stateMatchResult.shippingStateRaw || "";
+        const shippingCountry = stateMatchResult.shippingCountry;
+        const shippingStateMatchesCustomerState = stateMatchResult.stateMatch;
+        const shippingStateMismatchReason = stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason;
+        const explicitHoldReason = String(paymentIntentMetadata.fulfillment_hold_reason || "").trim();
+        const fulfillmentHoldReason =
+          explicitHoldReason || (shippingStateMatchesCustomerState ? "" : "state_mismatch");
         const customerTaxExemptByState =
           String(metadata.customer_tax_exempt_by_state || "")
             .trim()
@@ -1947,6 +2038,11 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         ).trim();
         const customerPhone = String(session.customer_details?.phone || "").trim();
         const shippingName = String(session.shipping_details?.name || customerName).trim();
+        const shippingAddressObj = session.shipping_details?.address || {};
+        const shippingAddressLine1 = String(shippingAddressObj.line1 || "").trim();
+        const shippingAddressLine2 = String(shippingAddressObj.line2 || "").trim();
+        const shippingCity = String(shippingAddressObj.city || "").trim();
+        const shippingPostalCode = String(shippingAddressObj.postal_code || "").trim();
         const shippingAddress = formatAddressLine(session.shipping_details?.address);
         const createdAt = Number(session.created) || 0;
         const customerKey = customerEmail ? customerEmail.toLowerCase() : `guest:${session.id}`;
@@ -1977,14 +2073,23 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           shipmentLabelId,
           shipmentLabelUrl,
           shipmentPostageCents,
+          fulfillmentHoldReason,
           customerState,
+          shippingState,
+          shippingCountry,
+          shippingStateMatchesCustomerState,
+          shippingStateMismatchReason,
           customerTaxExemptByState,
           paymentIntentId,
           customerName,
           customerEmail,
           customerPhone,
           shippingName,
+          shippingAddressLine1,
+          shippingAddressLine2,
+          shippingCity,
           shippingAddress,
+          shippingPostalCode,
           customerKey
         };
       })
@@ -2042,14 +2147,23 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         shipmentLabelId: order.shipmentLabelId,
         shipmentLabelUrl: order.shipmentLabelUrl,
         shipmentPostageCents: order.shipmentPostageCents,
+        fulfillmentHoldReason: order.fulfillmentHoldReason,
         customerState: order.customerState,
+        shippingState: order.shippingState,
+        shippingCountry: order.shippingCountry,
+        shippingStateMatchesCustomerState: order.shippingStateMatchesCustomerState,
+        shippingStateMismatchReason: order.shippingStateMismatchReason,
         customerTaxExemptByState: order.customerTaxExemptByState,
         paymentIntentId: order.paymentIntentId,
         customerName: order.customerName,
         customerEmail: order.customerEmail,
         customerPhone: order.customerPhone,
         shippingName: order.shippingName,
+        shippingAddressLine1: order.shippingAddressLine1,
+        shippingAddressLine2: order.shippingAddressLine2,
+        shippingCity: order.shippingCity,
         shippingAddress: order.shippingAddress,
+        shippingPostalCode: order.shippingPostalCode,
         customerOrdersCount: customer?.ordersCount || 1,
         customerUnitsTotal: customer?.unitsTotal || order.unitsTotal,
         customerPastOrderIds: pastOrderIds
@@ -2149,6 +2263,13 @@ app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
     });
     if (!session || session.payment_status !== "paid") {
       return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const stateMatchResult = evaluateCheckoutStateMatch(session);
+    if (!stateMatchResult.stateMatch) {
+      return res.status(409).json({
+        error: `Cannot create USPS label: ${buildStateMismatchErrorMessage(stateMatchResult)}`
+      });
     }
 
     const paymentIntentId = getPaymentIntentIdFromSession(session);
@@ -2259,6 +2380,13 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
     });
     if (!session || session.payment_status !== "paid") {
       return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const stateMatchResult = evaluateCheckoutStateMatch(session);
+    if (!stateMatchResult.stateMatch) {
+      return res.status(409).json({
+        error: `Cannot mark shipped: ${buildStateMismatchErrorMessage(stateMatchResult)}`
+      });
     }
 
     const paymentIntentId = getPaymentIntentIdFromSession(session);
@@ -2689,6 +2817,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
         manual_sales_tax_rate_pct: String(manualSalesTaxRatePercent),
         manual_sales_tax_cents: String(manualSalesTaxTotal),
         customer_state: customerState,
+        shipping_state_match_required: "true",
         customer_tax_exempt_by_state: String(salesTaxExemptByState),
         cart_summary: cartSummaryParts.join(" | ").slice(0, 500)
       }
@@ -2727,6 +2856,7 @@ app.get("/api/order/:sessionId", async (req, res) => {
       lineItems = parseLineItemsFromMetadata(session.metadata);
     }
     const totals = computeOrderTotals(session, lineItems);
+    const stateMatchResult = evaluateCheckoutStateMatch(session);
 
     return res.json({
       id: session.id,
@@ -2736,7 +2866,11 @@ app.get("/api/order/:sessionId", async (req, res) => {
       amountDiscount: session.total_details?.amount_discount || 0,
       amountTotal: totals.amountTotal,
       currency: session.currency || currency,
-      customerState: normalizeUsStateCode(session.metadata?.customer_state),
+      customerState: stateMatchResult.selectedState,
+      shippingState: stateMatchResult.shippingState || stateMatchResult.shippingStateRaw || "",
+      shippingCountry: stateMatchResult.shippingCountry,
+      shippingStateMatchesCustomerState: stateMatchResult.stateMatch,
+      shippingStateMismatchReason: stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason,
       customerTaxExemptByState:
         String(session.metadata?.customer_tax_exempt_by_state || "")
           .trim()

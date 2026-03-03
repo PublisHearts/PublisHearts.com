@@ -75,6 +75,7 @@ const siteInputs = {
 };
 
 const ADMIN_KEY = "publishearts_admin_password_v1";
+const SHIPPO_MANUAL_LABEL_URL = "https://apps.goshippo.com/orders";
 
 const state = {
   adminPassword: window.localStorage.getItem(ADMIN_KEY) || "",
@@ -313,6 +314,52 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function buildShippoManualLabelTemplate(order) {
+  const shippingWeightRaw = Number(order?.shippingWeightLbs);
+  const shippingWeight =
+    Number.isFinite(shippingWeightRaw) && shippingWeightRaw > 0 ? shippingWeightRaw.toFixed(2) : "1.00";
+  const items =
+    Array.isArray(order?.items) && order.items.length > 0
+      ? order.items.map((item) => `${item.name} x${item.quantity}`).join(", ")
+      : "";
+  return [
+    `Order ID: ${order?.id || ""}`,
+    "",
+    "Ship To",
+    `Name: ${order?.shippingName || ""}`,
+    `Address Line 1: ${order?.shippingAddressLine1 || ""}`,
+    `Address Line 2: ${order?.shippingAddressLine2 || ""}`,
+    `City: ${order?.shippingCity || ""}`,
+    `State: ${order?.shippingState || ""}`,
+    `ZIP: ${order?.shippingPostalCode || ""}`,
+    `Country: ${order?.shippingCountry || "US"}`,
+    "",
+    "Parcel",
+    `Weight (lb): ${shippingWeight}`,
+    "",
+    `Reference: ${order?.id || ""}`,
+    items ? `Items: ${items}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || "");
+  if (!value) {
+    return false;
+  }
+  if (!navigator.clipboard || !navigator.clipboard.writeText) {
+    return false;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function renderHealth(health) {
   if (!adminHealthEl) {
     return;
@@ -473,7 +520,18 @@ function renderOrders(payload) {
       Number.isFinite(shippingZoneRaw) && shippingZoneRaw >= 1 && shippingZoneRaw <= 8
         ? `Zone ${Math.round(shippingZoneRaw)}`
         : "Unknown";
-    const uspsButtonLabel = labelId || labelUrl ? "Recreate USPS Label" : "Create USPS Label";
+    const selectedState = String(order.customerState || "").trim().toUpperCase();
+    const shippingState = String(order.shippingState || "").trim().toUpperCase();
+    const shippingCountry = String(order.shippingCountry || "US").trim().toUpperCase();
+    const shippingStateMatchesCustomerState = order.shippingStateMatchesCustomerState !== false;
+    const shippingStateMismatchReason = String(order.shippingStateMismatchReason || "").trim();
+    const fulfillmentHoldReason = String(order.fulfillmentHoldReason || "").trim();
+    const blockedForStateMismatch =
+      !shippingStateMatchesCustomerState || fulfillmentHoldReason === "state_mismatch";
+    const uspsButtonLabel = "Open Shippo Manual Label";
+    const stateCheckText = blockedForStateMismatch
+      ? `Blocked - ${shippingStateMismatchReason || `Selected ${selectedState || "Unknown"} vs shipping ${shippingState || "Unknown"} (${shippingCountry})`}`
+      : `Match (${selectedState || "Unknown"} -> ${shippingState || selectedState || "Unknown"})`;
 
     return `<article class="admin-order-card">
       <div class="row-between">
@@ -487,6 +545,7 @@ function renderOrders(payload) {
         order.customerTaxExemptByState ? '(no-sales-tax state)' : ""
       }</p>
       <p><strong>Ship to:</strong> ${escapeHtml(order.shippingName || "Unknown")} - ${escapeHtml(order.shippingAddress || "No address")}</p>
+      <p><strong>Address state check:</strong> ${escapeHtml(stateCheckText)}</p>
       <p><strong>Weight:</strong> ${escapeHtml(shippingWeightLabel)} actual | ${escapeHtml(shippingBillableWeightLabel)} billable | <strong>Zone:</strong> ${escapeHtml(shippingZoneLabel)}</p>
       <p><strong>Units:</strong> ${order.unitsTotal || 0} | <strong>Items:</strong> ${formatMoney(order.amountSubtotal || 0)} | <strong>Shipping:</strong> ${formatMoney(order.amountShipping || 0)} | <strong>Tax:</strong> ${formatMoney(order.amountTax || 0)}</p>
       <p><strong>Items ordered:</strong> ${itemSummary}</p>
@@ -510,13 +569,17 @@ function renderOrders(payload) {
       <p><strong>Past orders by this customer:</strong> ${pastOrders}</p>
       <p><strong>Customer total orders:</strong> ${order.customerOrdersCount || 1}</p>
       <div class="admin-card-actions">
-        <button class="ghost-btn" type="button" data-action="create-usps-label" data-id="${escapeHtml(order.id)}">${uspsButtonLabel}</button>
+        <button class="ghost-btn" type="button" data-action="create-usps-label" data-id="${escapeHtml(order.id)}" ${
+          blockedForStateMismatch ? "disabled title=\"Fix state mismatch first\"" : ""
+        }>${uspsButtonLabel}</button>
         <button class="ghost-btn" type="button" data-action="save-shipping-address" data-id="${escapeHtml(order.id)}">Save Address</button>
         ${
           shipped
             ? `<button class="ghost-btn" type="button" data-action="resend-shipped-email" data-id="${escapeHtml(order.id)}">Resend Shipment Email</button>
                <button class="ghost-btn" type="button" data-action="mark-pending-order" data-id="${escapeHtml(order.id)}">Mark Pending</button>`
-            : `<button class="primary-btn" type="button" data-action="mark-shipped-order" data-id="${escapeHtml(order.id)}">Mark Shipped + Email Customer</button>`
+            : `<button class="primary-btn" type="button" data-action="mark-shipped-order" data-id="${escapeHtml(order.id)}" ${
+                blockedForStateMismatch ? "disabled title=\"Fix state mismatch first\"" : ""
+              }>Mark Shipped + Email Customer</button>`
         }
       </div>
     </article>`;
@@ -888,6 +951,14 @@ ordersEl?.addEventListener("click", async (event) => {
   const selectedOrder = Array.isArray(state.ordersPayload?.orders)
     ? state.ordersPayload.orders.find((order) => order.id === orderId)
     : null;
+  const blockedForStateMismatch =
+    selectedOrder &&
+    (selectedOrder.shippingStateMatchesCustomerState === false ||
+      String(selectedOrder.fulfillmentHoldReason || "").trim() === "state_mismatch");
+  const mismatchReason =
+    selectedOrder && String(selectedOrder.shippingStateMismatchReason || "").trim()
+      ? String(selectedOrder.shippingStateMismatchReason || "").trim()
+      : "Selected checkout state does not match shipping address state.";
 
   if (action === "save-shipping-address") {
     setOrdersBusy(true);
@@ -913,49 +984,34 @@ ordersEl?.addEventListener("click", async (event) => {
   }
 
   if (action === "create-usps-label") {
-    const suggestedWeight = Number(selectedOrder?.shippingWeightLbs);
-    const defaultWeight = Number.isFinite(suggestedWeight) && suggestedWeight > 0 ? suggestedWeight : 1;
-    const weightInput = window.prompt("Package weight in lbs:", defaultWeight.toFixed(2));
-    if (weightInput === null) {
+    if (blockedForStateMismatch) {
+      setOrdersMessage(`Cannot create label: ${mismatchReason}`, true);
       return;
     }
-
-    const parsedWeight = Number.parseFloat(String(weightInput || "").trim());
-    if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) {
-      setOrdersMessage("Enter a valid package weight in pounds.", true);
-      return;
-    }
-
-    const mailClassInput = window.prompt("USPS mail class:", "USPS_GROUND_ADVANTAGE");
-    if (mailClassInput === null) {
+    if (!selectedOrder) {
+      setOrdersMessage("Order details are missing. Refresh and try again.", true);
       return;
     }
 
     setOrdersBusy(true);
-    setOrdersMessage("Creating USPS label and saving address...");
+    setOrdersMessage("Opening Shippo manual label page...");
     try {
-      const result = await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/usps-label`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          weightLbs: parsedWeight,
-          mailClass: String(mailClassInput || "").trim().toUpperCase()
-        })
-      });
-      await loadOrders();
+      const template = buildShippoManualLabelTemplate(selectedOrder);
+      const copied = await copyTextToClipboard(template);
+      const shippoWindow = window.open(SHIPPO_MANUAL_LABEL_URL, "_blank", "noopener,noreferrer");
+      if (!shippoWindow) {
+        window.location.href = SHIPPO_MANUAL_LABEL_URL;
+      }
+      if (!copied) {
+        window.prompt("Copy this into Shippo manual label fields:", template);
+      }
       setOrdersMessage(
-        result.labelUrl
-          ? `USPS label created for ${orderId}. Open "USPS Label" on the order card.`
-          : `USPS label created for ${orderId}.`
+        copied
+          ? `Opened Shippo for order ${orderId}. Shipping fields copied to clipboard.`
+          : `Opened Shippo for order ${orderId}. Copy the field template from the popup and paste into Shippo.`
       );
     } catch (error) {
-      if (error.status === 401) {
-        logoutBtn.click();
-        return;
-      }
-      setOrdersMessage(error.message || "Could not create USPS label.", true);
+      setOrdersMessage(error.message || "Could not open Shippo label flow.", true);
     } finally {
       setOrdersBusy(false);
     }
@@ -963,6 +1019,10 @@ ordersEl?.addEventListener("click", async (event) => {
   }
 
   if (action === "mark-shipped-order") {
+    if (blockedForStateMismatch) {
+      setOrdersMessage(`Cannot mark shipped: ${mismatchReason}`, true);
+      return;
+    }
     const shipmentDetails = promptShipmentDetails();
     if (!shipmentDetails) {
       return;

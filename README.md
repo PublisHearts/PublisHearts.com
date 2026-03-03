@@ -15,6 +15,7 @@ Bookstore web app with:
 - USPS label creation from Admin orders (with tracking + saved label links)
 - admin shipping address book (auto-saved from order label flow)
 - required customer state selection gate before storefront access
+- shipping address state mismatch protection (orders are held if checkout-selected state != Stripe shipping state)
 - product stock control (in stock / sold out)
 - drag-and-drop product ordering
 - homepage hero banner uploader
