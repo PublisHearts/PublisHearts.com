@@ -674,6 +674,7 @@ function renderOrders(payload) {
         <button class="ghost-btn" type="button" data-action="create-usps-label" data-id="${escapeHtml(order.id)}" ${
           blockedForStateMismatch ? "disabled title=\"Fix state mismatch first\"" : ""
         }>${uspsButtonLabel}</button>
+        <button class="ghost-btn" type="button" data-action="edit-shipping-address" data-id="${escapeHtml(order.id)}">Edit Address</button>
         <button class="ghost-btn" type="button" data-action="save-shipping-address" data-id="${escapeHtml(order.id)}">Save Address</button>
         ${
           shipped
@@ -843,6 +844,47 @@ function promptShipmentDetails() {
     trackingNumber: String(trackingNumber || "").trim(),
     trackingUrl: String(trackingUrl || "").trim(),
     note: String(note || "").trim()
+  };
+}
+
+function promptShippingAddressUpdate(order) {
+  const shippingName = window.prompt("Shipping name:", String(order?.shippingName || "").trim());
+  if (shippingName === null) {
+    return null;
+  }
+  const line1 = window.prompt("Address line 1:", String(order?.shippingAddressLine1 || "").trim());
+  if (line1 === null) {
+    return null;
+  }
+  const line2 = window.prompt("Address line 2 (optional):", String(order?.shippingAddressLine2 || "").trim());
+  if (line2 === null) {
+    return null;
+  }
+  const city = window.prompt("City:", String(order?.shippingCity || "").trim());
+  if (city === null) {
+    return null;
+  }
+  const state = window.prompt("State (2-letter):", String(order?.shippingState || "").trim().toUpperCase());
+  if (state === null) {
+    return null;
+  }
+  const postalCode = window.prompt("ZIP code:", String(order?.shippingPostalCode || "").trim().toUpperCase());
+  if (postalCode === null) {
+    return null;
+  }
+  const country = window.prompt("Country code:", String(order?.shippingCountry || "US").trim().toUpperCase());
+  if (country === null) {
+    return null;
+  }
+
+  return {
+    name: String(shippingName || "").trim(),
+    line1: String(line1 || "").trim(),
+    line2: String(line2 || "").trim(),
+    city: String(city || "").trim(),
+    state: String(state || "").trim().toUpperCase(),
+    postalCode: String(postalCode || "").trim().toUpperCase(),
+    country: String(country || "US").trim().toUpperCase()
   };
 }
 
@@ -1107,6 +1149,41 @@ ordersEl?.addEventListener("click", async (event) => {
         return;
       }
       setOrdersMessage(error.message || "Could not save shipping address.", true);
+    } finally {
+      setOrdersBusy(false);
+    }
+    return;
+  }
+
+  if (action === "edit-shipping-address") {
+    if (!selectedOrder) {
+      setOrdersMessage("Order details are missing. Refresh and try again.", true);
+      return;
+    }
+
+    const nextAddress = promptShippingAddressUpdate(selectedOrder);
+    if (!nextAddress) {
+      return;
+    }
+
+    setOrdersBusy(true);
+    setOrdersMessage("Updating shipping address...");
+    try {
+      const result = await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/edit-shipping-address`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(nextAddress)
+      });
+      await loadOrders();
+      setOrdersMessage(result.message || `Shipping address updated for order ${orderId}.`);
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setOrdersMessage(error.message || "Could not update shipping address.", true);
     } finally {
       setOrdersBusy(false);
     }

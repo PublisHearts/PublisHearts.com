@@ -347,9 +347,9 @@ function evaluateCheckoutStateMatch(session, options = {}) {
     normalizeUsStateCode(paymentIntentMetadata.fulfillment_selected_state_override) ||
     normalizeUsStateCode(paymentIntentMetadata.fulfillment_selected_state);
   const selectedState = selectedStateFromSession || selectedStateFromPaymentIntent;
-  const shippingAddress = session?.shipping_details?.address || {};
-  const shippingCountry = normalizeIsoCountry(shippingAddress.country, "US");
-  const shippingStateRaw = String(shippingAddress.state || "")
+  const shipping = getOrderShippingAddress(session, { paymentIntentMetadata });
+  const shippingCountry = normalizeIsoCountry(shipping?.country, "US");
+  const shippingStateRaw = String(shipping?.state || "")
     .trim()
     .toUpperCase();
   const shippingState = normalizeUsStateCode(shippingStateRaw);
@@ -1171,35 +1171,55 @@ function deriveOrderWeightLbs(session) {
   return Number(shippingBaseWeightLbs.toFixed(2));
 }
 
-function getOrderShippingAddress(session) {
+function getOrderShippingAddress(session, options = {}) {
+  const paymentIntentMetadata = options?.paymentIntentMetadata || {};
   const shippingDetails = session?.shipping_details || {};
   const shippingAddress = shippingDetails?.address || {};
-  const shippingName = String(shippingDetails?.name || session?.customer_details?.name || "").trim();
+  const shippingNameBase = String(shippingDetails?.name || session?.customer_details?.name || "").trim();
+  const shippingNameOverride = String(paymentIntentMetadata.fulfillment_shipping_name_override || "").trim();
+  const shippingLine1Base = String(shippingAddress?.line1 || "").trim();
+  const shippingLine1Override = String(paymentIntentMetadata.fulfillment_shipping_line1_override || "").trim();
+  const shippingLine2Base = String(shippingAddress?.line2 || "").trim();
+  const shippingLine2Override = String(paymentIntentMetadata.fulfillment_shipping_line2_override || "").trim();
+  const shippingCityBase = String(shippingAddress?.city || "").trim();
+  const shippingCityOverride = String(paymentIntentMetadata.fulfillment_shipping_city_override || "").trim();
+  const shippingStateBase = String(shippingAddress?.state || "").trim().toUpperCase();
+  const shippingStateOverride = String(paymentIntentMetadata.fulfillment_shipping_state_override || "").trim().toUpperCase();
+  const shippingPostalCodeBase = String(shippingAddress?.postal_code || "").trim().toUpperCase();
+  const shippingPostalCodeOverride = String(paymentIntentMetadata.fulfillment_shipping_postal_code_override || "")
+    .trim()
+    .toUpperCase();
+  const shippingCountryBase = normalizeIsoCountry(shippingAddress?.country, "US");
+  const shippingCountryOverride = String(paymentIntentMetadata.fulfillment_shipping_country_override || "")
+    .trim()
+    .toUpperCase();
   const shippingEmail = String(session?.customer_details?.email || session?.customer_email || "").trim().toLowerCase();
   const shippingPhone = String(session?.customer_details?.phone || "").trim();
 
   return {
-    name: shippingName,
+    name: shippingNameOverride || shippingNameBase,
     email: shippingEmail,
     phone: shippingPhone,
-    line1: String(shippingAddress?.line1 || "").trim(),
-    line2: String(shippingAddress?.line2 || "").trim(),
-    city: String(shippingAddress?.city || "").trim(),
-    state: String(shippingAddress?.state || "").trim().toUpperCase(),
-    postalCode: String(shippingAddress?.postal_code || "").trim().toUpperCase(),
-    country: normalizeIsoCountry(shippingAddress?.country, "US")
+    line1: shippingLine1Override || shippingLine1Base,
+    line2: shippingLine2Override || shippingLine2Base,
+    city: shippingCityOverride || shippingCityBase,
+    state: shippingStateOverride || shippingStateBase,
+    postalCode: shippingPostalCodeOverride || shippingPostalCodeBase,
+    country: shippingCountryOverride
+      ? normalizeIsoCountry(shippingCountryOverride, shippingCountryBase || "US")
+      : shippingCountryBase
   };
 }
 
-function buildAddressBookInputFromSession(session) {
+function buildAddressBookInputFromSession(session, options = {}) {
   return {
     orderId: String(session?.id || "").trim(),
-    ...getOrderShippingAddress(session)
+    ...getOrderShippingAddress(session, options)
   };
 }
 
-async function saveOrderAddressToBook(session) {
-  const input = buildAddressBookInputFromSession(session);
+async function saveOrderAddressToBook(session, options = {}) {
+  const input = buildAddressBookInputFromSession(session, options);
   return upsertAddressBookEntry(input);
 }
 
@@ -1226,8 +1246,8 @@ function buildUspsFromAddress() {
   };
 }
 
-function buildUspsToAddress(session) {
-  const shipping = getOrderShippingAddress(session);
+function buildUspsToAddress(session, options = {}) {
+  const shipping = getOrderShippingAddress(session, options);
   const name = splitPersonName(shipping.name, "Customer");
   return {
     firstName: name.firstName,
@@ -1271,7 +1291,7 @@ function buildUspsLabelRequestPayload(session, options = {}) {
       suppressMailDate: false,
       returnLabel: false
     },
-    toAddress: buildUspsToAddress(session),
+    toAddress: buildUspsToAddress(session, options),
     fromAddress: buildUspsFromAddress(),
     packageDescription: {
       mailClass,
@@ -1535,7 +1555,9 @@ async function createUspsLabelForSession(session, options = {}) {
     throw new Error(`USPS is not configured. Missing: ${missing.join(", ")}`);
   }
 
-  const shipping = getOrderShippingAddress(session);
+  const shipping = getOrderShippingAddress(session, {
+    paymentIntentMetadata: options.paymentIntentMetadata || {}
+  });
   if (!shipping.line1 || !shipping.city || !shipping.state || !shipping.postalCode) {
     throw new Error("Order has no complete shipping address.");
   }
@@ -2183,18 +2205,23 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           getShippingZoneForState(customerState)
         );
 
+        const shipping = getOrderShippingAddress(session, {
+          paymentIntentMetadata
+        });
         const customerEmail = String(session.customer_details?.email || session.customer_email || "").trim();
         const customerName = String(
-          session.customer_details?.name || session.shipping_details?.name || "Unknown customer"
+          session.customer_details?.name || shipping.name || "Unknown customer"
         ).trim();
         const customerPhone = String(session.customer_details?.phone || "").trim();
-        const shippingName = String(session.shipping_details?.name || customerName).trim();
-        const shippingAddressObj = session.shipping_details?.address || {};
-        const shippingAddressLine1 = String(shippingAddressObj.line1 || "").trim();
-        const shippingAddressLine2 = String(shippingAddressObj.line2 || "").trim();
-        const shippingCity = String(shippingAddressObj.city || "").trim();
-        const shippingPostalCode = String(shippingAddressObj.postal_code || "").trim();
-        const shippingAddress = formatAddressLine(session.shipping_details?.address);
+        const shippingName = String(shipping.name || customerName).trim();
+        const shippingAddressLine1 = String(shipping.line1 || "").trim();
+        const shippingAddressLine2 = String(shipping.line2 || "").trim();
+        const shippingCity = String(shipping.city || "").trim();
+        const shippingPostalCode = String(shipping.postalCode || "").trim();
+        const shippingAddress = [shippingAddressLine1, shippingAddressLine2, shippingCity, shipping.state, shippingPostalCode, shipping.country]
+          .map((part) => String(part || "").trim())
+          .filter(Boolean)
+          .join(", ");
         const createdAt = Number(session.created) || 0;
         const customerKey = customerEmail ? customerEmail.toLowerCase() : `guest:${session.id}`;
 
@@ -2366,6 +2393,104 @@ app.get("/api/admin/address-book", requireAdmin, async (req, res) => {
   }
 });
 
+app.post("/api/admin/orders/:id/edit-shipping-address", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(orderId, {
+      expand: ["payment_intent"]
+    });
+    if (!session || session.payment_status !== "paid") {
+      return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const paymentIntentId = getPaymentIntentIdFromSession(session);
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: "This order has no payment intent to update." });
+    }
+
+    const paymentIntentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+
+    const shippingName = String(req.body?.name || "").trim().slice(0, 120);
+    const shippingLine1 = String(req.body?.line1 || "").trim().slice(0, 220);
+    const shippingLine2 = String(req.body?.line2 || "").trim().slice(0, 220);
+    const shippingCity = String(req.body?.city || "").trim().slice(0, 120);
+    const shippingState = normalizeUsStateCode(req.body?.state);
+    const shippingPostalCode = String(req.body?.postalCode || req.body?.postal_code || "")
+      .trim()
+      .toUpperCase()
+      .slice(0, 20);
+    const shippingCountry = normalizeIsoCountry(req.body?.country, "US");
+
+    if (!shippingName || !shippingLine1 || !shippingCity || !shippingState || !shippingPostalCode) {
+      return res.status(400).json({
+        error: "Name, address line 1, city, state, and ZIP are required."
+      });
+    }
+    if (shippingCountry !== "US") {
+      return res.status(400).json({
+        error: "Only U.S. shipping addresses are supported."
+      });
+    }
+
+    const currentStatus = normalizeFulfillmentStatus(paymentIntentMetadata.fulfillment_status);
+    const metadataWithAddress = {
+      ...paymentIntentMetadata,
+      fulfillment_shipping_name_override: shippingName,
+      fulfillment_shipping_line1_override: shippingLine1,
+      fulfillment_shipping_line2_override: shippingLine2,
+      fulfillment_shipping_city_override: shippingCity,
+      fulfillment_shipping_state_override: shippingState,
+      fulfillment_shipping_postal_code_override: shippingPostalCode,
+      fulfillment_shipping_country_override: shippingCountry
+    };
+    const stateMatchResult = evaluateCheckoutStateMatch(session, {
+      paymentIntentMetadata: metadataWithAddress
+    });
+    const nextMetadata = {
+      ...metadataWithAddress,
+      fulfillment_status: currentStatus === "shipped" ? "shipped" : "pending",
+      fulfillment_hold_reason: stateMatchResult.stateMatch ? "" : "state_mismatch",
+      fulfillment_shipping_state: stateMatchResult.shippingState || shippingState,
+      fulfillment_shipping_country: stateMatchResult.shippingCountry || shippingCountry,
+      fulfillment_state_match: String(stateMatchResult.stateMatch),
+      fulfillment_state_mismatch_reason: stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason
+    };
+
+    await stripe.paymentIntents.update(paymentIntentId, {
+      metadata: nextMetadata
+    });
+
+    return res.json({
+      ok: true,
+      orderId,
+      shipping: getOrderShippingAddress(session, {
+        paymentIntentMetadata: nextMetadata
+      }),
+      shippingStateMatchesCustomerState: stateMatchResult.stateMatch,
+      shippingStateMismatchReason: stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason,
+      message: stateMatchResult.stateMatch
+        ? "Shipping address updated."
+        : "Shipping address updated, but checkout state still does not match this state."
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not update shipping address: ${details}` : "Could not update shipping address right now."
+    });
+  }
+});
+
 app.post("/api/admin/orders/:id/save-address", requireAdmin, async (req, res) => {
   if (!requireStripe(res)) {
     return;
@@ -2377,12 +2502,20 @@ app.post("/api/admin/orders/:id/save-address", requireAdmin, async (req, res) =>
   }
 
   try {
-    const session = await stripe.checkout.sessions.retrieve(orderId);
+    const session = await stripe.checkout.sessions.retrieve(orderId, {
+      expand: ["payment_intent"]
+    });
     if (!session || session.payment_status !== "paid") {
       return res.status(404).json({ error: "Paid order not found." });
     }
 
-    const entry = await saveOrderAddressToBook(session);
+    const paymentIntentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+    const entry = await saveOrderAddressToBook(session, {
+      paymentIntentMetadata
+    });
     return res.json({
       ok: true,
       entry
@@ -2523,7 +2656,9 @@ app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "This order has no payment intent to update." });
     }
 
-    const savedAddress = await saveOrderAddressToBook(session);
+    const savedAddress = await saveOrderAddressToBook(session, {
+      paymentIntentMetadata
+    });
     const labelResult = await createUspsLabelForSession(session, {
       weightLbs: req.body?.weightLbs,
       mailClass: req.body?.mailClass,
@@ -2532,7 +2667,8 @@ app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
       lengthInches: req.body?.lengthInches,
       widthInches: req.body?.widthInches,
       heightInches: req.body?.heightInches,
-      declaredValueDollars: req.body?.declaredValueDollars
+      declaredValueDollars: req.body?.declaredValueDollars,
+      paymentIntentMetadata
     });
 
     const nextTrackingNumber = String(
