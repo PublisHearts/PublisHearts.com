@@ -528,6 +528,8 @@ function renderOrders(payload) {
     const fulfillmentHoldReason = String(order.fulfillmentHoldReason || "").trim();
     const blockedForStateMismatch =
       !shippingStateMatchesCustomerState || fulfillmentHoldReason === "state_mismatch";
+    const canUseShippingStateFallback =
+      blockedForStateMismatch && !selectedState && Boolean(shippingState) && shippingCountry === "US";
     const uspsButtonLabel = "Open Shippo Manual Label";
     const stateCheckText = blockedForStateMismatch
       ? `Blocked - ${shippingStateMismatchReason || `Selected ${selectedState || "Unknown"} vs shipping ${shippingState || "Unknown"} (${shippingCountry})`}`
@@ -569,6 +571,11 @@ function renderOrders(payload) {
       <p><strong>Past orders by this customer:</strong> ${pastOrders}</p>
       <p><strong>Customer total orders:</strong> ${order.customerOrdersCount || 1}</p>
       <div class="admin-card-actions">
+        ${
+          canUseShippingStateFallback
+            ? `<button class="ghost-btn" type="button" data-action="use-shipping-state" data-id="${escapeHtml(order.id)}">Use Shipping State</button>`
+            : ""
+        }
         <button class="ghost-btn" type="button" data-action="create-usps-label" data-id="${escapeHtml(order.id)}" ${
           blockedForStateMismatch ? "disabled title=\"Fix state mismatch first\"" : ""
         }>${uspsButtonLabel}</button>
@@ -959,6 +966,34 @@ ordersEl?.addEventListener("click", async (event) => {
     selectedOrder && String(selectedOrder.shippingStateMismatchReason || "").trim()
       ? String(selectedOrder.shippingStateMismatchReason || "").trim()
       : "Selected checkout state does not match shipping address state.";
+
+  if (action === "use-shipping-state") {
+    if (!selectedOrder) {
+      setOrdersMessage("Order details are missing. Refresh and try again.", true);
+      return;
+    }
+    setOrdersBusy(true);
+    setOrdersMessage("Applying shipping-state fix...");
+    try {
+      const result = await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/use-shipping-state`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+      await loadOrders();
+      setOrdersMessage(result.message || `Order ${orderId} updated.`);
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setOrdersMessage(error.message || "Could not apply shipping-state fix.", true);
+    } finally {
+      setOrdersBusy(false);
+    }
+    return;
+  }
 
   if (action === "save-shipping-address") {
     setOrdersBusy(true);

@@ -317,9 +317,14 @@ function normalizeUsStateCode(value) {
   return code;
 }
 
-function evaluateCheckoutStateMatch(session) {
+function evaluateCheckoutStateMatch(session, options = {}) {
+  const paymentIntentMetadata = options?.paymentIntentMetadata || {};
   const metadata = session?.metadata || {};
-  const selectedState = normalizeUsStateCode(metadata.customer_state);
+  const selectedStateFromSession = normalizeUsStateCode(metadata.customer_state);
+  const selectedStateFromPaymentIntent =
+    normalizeUsStateCode(paymentIntentMetadata.fulfillment_selected_state_override) ||
+    normalizeUsStateCode(paymentIntentMetadata.fulfillment_selected_state);
+  const selectedState = selectedStateFromSession || selectedStateFromPaymentIntent;
   const shippingAddress = session?.shipping_details?.address || {};
   const shippingCountry = normalizeIsoCountry(shippingAddress.country, "US");
   const shippingStateRaw = String(shippingAddress.state || "")
@@ -347,6 +352,7 @@ function evaluateCheckoutStateMatch(session) {
 
   return {
     selectedState,
+    selectedStateSource: selectedStateFromSession ? "session_metadata" : selectedStateFromPaymentIntent ? "payment_intent" : "",
     shippingState,
     shippingStateRaw,
     shippingCountry,
@@ -1793,12 +1799,14 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), asyn
       }
       const totals = computeOrderTotals(session, lineItems);
       const customerEmail = session.customer_details?.email || session.customer_email || "";
-      const stateMatchResult = evaluateCheckoutStateMatch(session);
       const paymentIntentId = getPaymentIntentIdFromSession(session);
       const paymentIntentMetadata =
         session.payment_intent && typeof session.payment_intent === "object"
           ? session.payment_intent.metadata || {}
           : {};
+      const stateMatchResult = evaluateCheckoutStateMatch(session, {
+        paymentIntentMetadata
+      });
       const holdForStateMismatch = !stateMatchResult.stateMatch;
 
       if (paymentIntentId) {
@@ -1989,7 +1997,9 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         const shipmentPostageCentsRaw = readMetadataInteger(paymentIntentMetadata, "fulfillment_postage_cents");
         const shipmentPostageCents =
           Number.isFinite(shipmentPostageCentsRaw) && shipmentPostageCentsRaw >= 0 ? shipmentPostageCentsRaw : 0;
-        const stateMatchResult = evaluateCheckoutStateMatch(session);
+        const stateMatchResult = evaluateCheckoutStateMatch(session, {
+          paymentIntentMetadata
+        });
         const customerState = stateMatchResult.selectedState;
         const shippingState = stateMatchResult.shippingState || stateMatchResult.shippingStateRaw || "";
         const shippingCountry = stateMatchResult.shippingCountry;
@@ -2247,6 +2257,95 @@ app.post("/api/admin/orders/:id/save-address", requireAdmin, async (req, res) =>
   }
 });
 
+app.post("/api/admin/orders/:id/use-shipping-state", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(orderId, {
+      expand: ["payment_intent"]
+    });
+    if (!session || session.payment_status !== "paid") {
+      return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const sessionSelectedState = normalizeUsStateCode(session.metadata?.customer_state);
+    if (sessionSelectedState) {
+      return res.status(409).json({
+        error: `Checkout state is already set to ${sessionSelectedState}.`
+      });
+    }
+
+    const paymentIntentId = getPaymentIntentIdFromSession(session);
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: "This order has no payment intent to update." });
+    }
+
+    const paymentIntentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+    const stateMatchResult = evaluateCheckoutStateMatch(session, {
+      paymentIntentMetadata
+    });
+    const shippingState = stateMatchResult.shippingState;
+    if (stateMatchResult.shippingCountry !== "US" || !shippingState) {
+      return res.status(400).json({
+        error: "Shipping address must include a valid U.S. state to use this fix."
+      });
+    }
+
+    let sessionMetadataUpdated = false;
+    try {
+      const metadata = {
+        ...(session.metadata || {}),
+        customer_state: shippingState
+      };
+      await stripe.checkout.sessions.update(orderId, { metadata });
+      sessionMetadataUpdated = true;
+    } catch (error) {
+      console.warn(`Could not update checkout session metadata for ${orderId}: ${String(error?.message || error)}`);
+    }
+
+    const currentStatus = normalizeFulfillmentStatus(paymentIntentMetadata.fulfillment_status);
+    await stripe.paymentIntents.update(paymentIntentId, {
+      metadata: {
+        ...paymentIntentMetadata,
+        fulfillment_status: currentStatus === "shipped" ? "shipped" : "pending",
+        fulfillment_hold_reason: "",
+        fulfillment_selected_state_override: shippingState,
+        fulfillment_selected_state: shippingState,
+        fulfillment_shipping_state: shippingState,
+        fulfillment_shipping_country: "US",
+        fulfillment_state_match: "true",
+        fulfillment_state_mismatch_reason: ""
+      }
+    });
+
+    return res.json({
+      ok: true,
+      orderId,
+      selectedState: shippingState,
+      shippingState,
+      sessionMetadataUpdated,
+      message: sessionMetadataUpdated
+        ? `Order state fixed to ${shippingState}.`
+        : `Order unblocked with ${shippingState} via payment metadata fallback.`
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not apply shipping-state fix: ${details}` : "Could not apply shipping-state fix right now."
+    });
+  }
+});
+
 app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
   if (!requireStripe(res)) {
     return;
@@ -2265,7 +2364,13 @@ app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
       return res.status(404).json({ error: "Paid order not found." });
     }
 
-    const stateMatchResult = evaluateCheckoutStateMatch(session);
+    const paymentIntentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+    const stateMatchResult = evaluateCheckoutStateMatch(session, {
+      paymentIntentMetadata
+    });
     if (!stateMatchResult.stateMatch) {
       return res.status(409).json({
         error: `Cannot create USPS label: ${buildStateMismatchErrorMessage(stateMatchResult)}`
@@ -2289,10 +2394,6 @@ app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
       declaredValueDollars: req.body?.declaredValueDollars
     });
 
-    const paymentIntentMetadata =
-      session.payment_intent && typeof session.payment_intent === "object"
-        ? session.payment_intent.metadata || {}
-        : {};
     const nextTrackingNumber = String(
       labelResult.trackingNumber || paymentIntentMetadata.fulfillment_tracking_number || ""
     )
@@ -2382,7 +2483,13 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
       return res.status(404).json({ error: "Paid order not found." });
     }
 
-    const stateMatchResult = evaluateCheckoutStateMatch(session);
+    const currentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+    const stateMatchResult = evaluateCheckoutStateMatch(session, {
+      paymentIntentMetadata: currentMetadata
+    });
     if (!stateMatchResult.stateMatch) {
       return res.status(409).json({
         error: `Cannot mark shipped: ${buildStateMismatchErrorMessage(stateMatchResult)}`
@@ -2394,10 +2501,6 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "This order has no payment intent to update." });
     }
 
-    const currentMetadata =
-      session.payment_intent && typeof session.payment_intent === "object"
-        ? session.payment_intent.metadata || {}
-        : {};
     const carrier =
       carrierRaw !== undefined
         ? String(carrierRaw || "").trim().slice(0, 80)
@@ -2839,7 +2942,9 @@ app.get("/api/order/:sessionId", async (req, res) => {
   }
 
   try {
-    const session = await stripe.checkout.sessions.retrieve(req.params.sessionId);
+    const session = await stripe.checkout.sessions.retrieve(req.params.sessionId, {
+      expand: ["payment_intent"]
+    });
     if (!session || session.payment_status !== "paid") {
       return res.status(404).json({ error: "Order not found." });
     }
@@ -2856,7 +2961,13 @@ app.get("/api/order/:sessionId", async (req, res) => {
       lineItems = parseLineItemsFromMetadata(session.metadata);
     }
     const totals = computeOrderTotals(session, lineItems);
-    const stateMatchResult = evaluateCheckoutStateMatch(session);
+    const paymentIntentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+    const stateMatchResult = evaluateCheckoutStateMatch(session, {
+      paymentIntentMetadata
+    });
 
     return res.json({
       id: session.id,
