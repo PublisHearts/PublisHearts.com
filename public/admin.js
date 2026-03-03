@@ -333,6 +333,9 @@ function renderHealth(health) {
   const appUrl = String(health.appUrl || "").trim() || "(not set)";
   const smtpHost = String(health.smtpHost || "").trim() || "(not set)";
   const nonTaxStates = Array.isArray(health.manualNonTaxStates) ? health.manualNonTaxStates.join(", ") : "";
+  const uspsConfigured = health.uspsConfigured === true;
+  const uspsMissing = Array.isArray(health.uspsMissingConfig) ? health.uspsMissingConfig.join(", ") : "";
+  const uspsBaseUrl = String(health.uspsApiBaseUrl || "").trim() || "(not set)";
 
   adminHealthEl.innerHTML = `
     <article class="admin-health-card">
@@ -354,6 +357,12 @@ function renderHealth(health) {
       <p><strong>Commit:</strong> ${escapeHtml(deployLabel)}</p>
       <p><strong>App URL:</strong> ${escapeHtml(appUrl)}</p>
       <p><strong>Status:</strong> ${health.status === "ok" ? "OK" : "Unknown"}</p>
+    </article>
+    <article class="admin-health-card">
+      <h3>Shipping API</h3>
+      <p><strong>USPS labels:</strong> ${uspsConfigured ? "Configured" : "Missing config"}</p>
+      <p><strong>USPS base URL:</strong> ${escapeHtml(uspsBaseUrl)}</p>
+      <p><strong>Missing fields:</strong> ${escapeHtml(uspsMissing || "(none)")}</p>
     </article>
   `;
 }
@@ -447,6 +456,24 @@ function renderOrders(payload) {
     const shipped = String(order.fulfillmentStatus || "pending") === "shipped";
     const fulfillmentLabel = shipped ? "Shipped" : "Needs Fulfillment";
     const shipDate = order.shippedAt ? formatDateTime(order.shippedAt) : "";
+    const labelId = String(order.shipmentLabelId || "").trim();
+    const labelUrl = String(order.shipmentLabelUrl || "").trim();
+    const postageCentsRaw = Number(order.shipmentPostageCents);
+    const hasPostage = Number.isFinite(postageCentsRaw) && postageCentsRaw > 0;
+    const shippingWeightRaw = Number(order.shippingWeightLbs);
+    const shippingWeightLabel =
+      Number.isFinite(shippingWeightRaw) && shippingWeightRaw > 0 ? `${shippingWeightRaw.toFixed(2)} lb` : "Unknown";
+    const shippingBillableWeightRaw = Number(order.shippingBillableWeightLbs);
+    const shippingBillableWeightLabel =
+      Number.isFinite(shippingBillableWeightRaw) && shippingBillableWeightRaw > 0
+        ? `${shippingBillableWeightRaw.toFixed(2)} lb`
+        : "Unknown";
+    const shippingZoneRaw = Number(order.shippingZone);
+    const shippingZoneLabel =
+      Number.isFinite(shippingZoneRaw) && shippingZoneRaw >= 1 && shippingZoneRaw <= 8
+        ? `Zone ${Math.round(shippingZoneRaw)}`
+        : "Unknown";
+    const uspsButtonLabel = labelId || labelUrl ? "Recreate USPS Label" : "Create USPS Label";
 
     return `<article class="admin-order-card">
       <div class="row-between">
@@ -460,6 +487,7 @@ function renderOrders(payload) {
         order.customerTaxExemptByState ? '(no-sales-tax state)' : ""
       }</p>
       <p><strong>Ship to:</strong> ${escapeHtml(order.shippingName || "Unknown")} - ${escapeHtml(order.shippingAddress || "No address")}</p>
+      <p><strong>Weight:</strong> ${escapeHtml(shippingWeightLabel)} actual | ${escapeHtml(shippingBillableWeightLabel)} billable | <strong>Zone:</strong> ${escapeHtml(shippingZoneLabel)}</p>
       <p><strong>Units:</strong> ${order.unitsTotal || 0} | <strong>Items:</strong> ${formatMoney(order.amountSubtotal || 0)} | <strong>Shipping:</strong> ${formatMoney(order.amountShipping || 0)} | <strong>Tax:</strong> ${formatMoney(order.amountTax || 0)}</p>
       <p><strong>Items ordered:</strong> ${itemSummary}</p>
       ${
@@ -471,10 +499,19 @@ function renderOrders(payload) {
             }</p>`
           : ""
       }
+      ${
+        labelUrl
+          ? `<p><strong>USPS Label:</strong> <a class="inline-link" href="${escapeHtml(labelUrl)}" target="_blank" rel="noopener noreferrer">Open Label</a></p>`
+          : ""
+      }
+      ${labelId ? `<p><strong>USPS Label ID:</strong> ${escapeHtml(labelId)}</p>` : ""}
+      ${hasPostage ? `<p><strong>USPS Postage:</strong> ${formatMoney(postageCentsRaw)}</p>` : ""}
       ${order.shipmentCarrier ? `<p><strong>Carrier:</strong> ${escapeHtml(order.shipmentCarrier)}</p>` : ""}
       <p><strong>Past orders by this customer:</strong> ${pastOrders}</p>
       <p><strong>Customer total orders:</strong> ${order.customerOrdersCount || 1}</p>
       <div class="admin-card-actions">
+        <button class="ghost-btn" type="button" data-action="create-usps-label" data-id="${escapeHtml(order.id)}">${uspsButtonLabel}</button>
+        <button class="ghost-btn" type="button" data-action="save-shipping-address" data-id="${escapeHtml(order.id)}">Save Address</button>
         ${
           shipped
             ? `<button class="ghost-btn" type="button" data-action="resend-shipped-email" data-id="${escapeHtml(order.id)}">Resend Shipment Email</button>
@@ -846,6 +883,82 @@ ordersEl?.addEventListener("click", async (event) => {
   const action = button.dataset.action;
   const orderId = String(button.dataset.id || "").trim();
   if (!orderId || state.ordersBusy) {
+    return;
+  }
+  const selectedOrder = Array.isArray(state.ordersPayload?.orders)
+    ? state.ordersPayload.orders.find((order) => order.id === orderId)
+    : null;
+
+  if (action === "save-shipping-address") {
+    setOrdersBusy(true);
+    setOrdersMessage("Saving shipping address to address book...");
+    try {
+      await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/save-address`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+      setOrdersMessage(`Address saved for order ${orderId}.`);
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setOrdersMessage(error.message || "Could not save shipping address.", true);
+    } finally {
+      setOrdersBusy(false);
+    }
+    return;
+  }
+
+  if (action === "create-usps-label") {
+    const suggestedWeight = Number(selectedOrder?.shippingWeightLbs);
+    const defaultWeight = Number.isFinite(suggestedWeight) && suggestedWeight > 0 ? suggestedWeight : 1;
+    const weightInput = window.prompt("Package weight in lbs:", defaultWeight.toFixed(2));
+    if (weightInput === null) {
+      return;
+    }
+
+    const parsedWeight = Number.parseFloat(String(weightInput || "").trim());
+    if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) {
+      setOrdersMessage("Enter a valid package weight in pounds.", true);
+      return;
+    }
+
+    const mailClassInput = window.prompt("USPS mail class:", "USPS_GROUND_ADVANTAGE");
+    if (mailClassInput === null) {
+      return;
+    }
+
+    setOrdersBusy(true);
+    setOrdersMessage("Creating USPS label and saving address...");
+    try {
+      const result = await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/usps-label`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          weightLbs: parsedWeight,
+          mailClass: String(mailClassInput || "").trim().toUpperCase()
+        })
+      });
+      await loadOrders();
+      setOrdersMessage(
+        result.labelUrl
+          ? `USPS label created for ${orderId}. Open "USPS Label" on the order card.`
+          : `USPS label created for ${orderId}.`
+      );
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setOrdersMessage(error.message || "Could not create USPS label.", true);
+    } finally {
+      setOrdersBusy(false);
+    }
     return;
   }
 

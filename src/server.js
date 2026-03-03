@@ -31,6 +31,12 @@ import {
   getSiteSettings,
   updateSiteSettings
 } from "./data/siteSettingsStore.js";
+import {
+  AddressBookValidationError,
+  ensureAddressBookStore,
+  listAddressBookEntries,
+  upsertAddressBookEntry
+} from "./data/addressBookStore.js";
 
 dotenv.config();
 const execFileAsync = promisify(execFile);
@@ -110,27 +116,104 @@ const githubRepoOwner = (process.env.GITHUB_REPO_OWNER || "PublisHearts").trim()
 const githubBranch = (process.env.GITHUB_BRANCH || "main").trim() || "main";
 const githubAuthorName = (process.env.GITHUB_AUTHOR_NAME || "PublisHearts Admin Bot").trim();
 const githubAuthorEmail = (process.env.GITHUB_AUTHOR_EMAIL || "admin@publishearts.com").trim();
-const parsedShippingWeightPerUnitLbs = Number.parseFloat(String(process.env.SHIPPING_WEIGHT_PER_UNIT_LBS || "1.5"));
-const shippingWeightPerUnitLbs =
-  Number.isFinite(parsedShippingWeightPerUnitLbs) && parsedShippingWeightPerUnitLbs > 0
-    ? parsedShippingWeightPerUnitLbs
+const parsedShippingBaseWeightLbs = Number.parseFloat(
+  String(process.env.SHIPPING_BASE_WEIGHT_LBS || process.env.SHIPPING_WEIGHT_PER_UNIT_LBS || "1.5")
+);
+const shippingBaseWeightLbs =
+  Number.isFinite(parsedShippingBaseWeightLbs) && parsedShippingBaseWeightLbs > 0
+    ? parsedShippingBaseWeightLbs
     : 1.5;
-const parsedShippingMinimumDollars = Number.parseFloat(String(process.env.SHIPPING_MIN_FEE || "10"));
+const parsedShippingAdditionalWeightPerUnitLbs = Number.parseFloat(
+  String(process.env.SHIPPING_ADDITIONAL_WEIGHT_PER_UNIT_LBS || "1.0")
+);
+const shippingAdditionalWeightPerUnitLbs =
+  Number.isFinite(parsedShippingAdditionalWeightPerUnitLbs) && parsedShippingAdditionalWeightPerUnitLbs > 0
+    ? parsedShippingAdditionalWeightPerUnitLbs
+    : 1;
+const parsedShippingMinimumDollars = Number.parseFloat(String(process.env.SHIPPING_MIN_FEE || "0"));
 const shippingMinimumCents =
   Number.isFinite(parsedShippingMinimumDollars) && parsedShippingMinimumDollars >= 0
     ? Math.round(parsedShippingMinimumDollars * 100)
-    : 1000;
-const uspsGroundAdvantageZone1Cents = [
-  885, 1000, 1045, 1090, 1135, 1180, 1225, 1270, 1315, 1360, 1405, 1450, 1495, 1540, 1585, 1630, 1675, 1720, 1765,
-  1810, 2220, 2280, 2340, 2400, 2460, 2520, 2580, 2640, 2700, 2760, 2820, 2880, 2940, 3000, 3060, 3120, 3180, 3240,
-  3300, 3360, 3420, 3475, 3530, 3585, 3640, 3695, 3750, 3805, 3860, 3915, 3970, 4025, 4080, 4135, 4190, 4245, 4300,
-  4355, 4410, 4465, 4520, 4575, 5620, 5660, 5700, 5740, 5780, 5820, 5875, 5935
-];
+    : 0;
+const shippingRateTableDefault =
+  "1.5:11.92,2:12.90,3:14.58,4:16.68,5:17.77,10:23.50";
+const shippingRateTableRaw =
+  String(process.env.USPS_GROUND_ADVANTAGE_RATE_TABLE || "").trim() || shippingRateTableDefault;
+const uspsGroundAdvantageRatePoints = parseShippingRateTable(shippingRateTableRaw);
+const shippingZoneScaleDefault = "1:0.7424,2:0.7718,3:0.7928,4:0.8221,5:0.8515,6:0.8809,7:0.9262,8:1";
+const shippingZoneScaleRaw =
+  String(process.env.USPS_GROUND_ADVANTAGE_ZONE_SCALE || "").trim() || shippingZoneScaleDefault;
+const uspsGroundAdvantageZoneScale = parseShippingZoneScale(shippingZoneScaleRaw);
+const shippingStateZoneMapDefault =
+  "NY:1,CT:2,NJ:2,PA:2,MA:2,RI:2,VT:2,NH:2,DE:2,MD:2,DC:2,ME:3,VA:3,WV:3,OH:3,NC:3,SC:4,GA:4,TN:4,KY:4,IN:4,MI:4,IL:4,AL:5,FL:5,MS:5,WI:5,MN:5,IA:5,MO:5,AR:5,LA:5,ND:6,SD:6,NE:6,KS:6,OK:6,TX:6,NM:6,CO:6,WY:6,MT:7,ID:7,UT:7,AZ:7,NV:7,WA:8,OR:8,CA:8,AK:8,HI:8";
+const shippingStateZoneMapRaw =
+  String(process.env.USPS_STATE_ZONE_MAP || "").trim() || shippingStateZoneMapDefault;
+const uspsStateZoneMap = parseShippingStateZoneMap(shippingStateZoneMapRaw);
+const parsedShippingDefaultZone = Number.parseInt(String(process.env.USPS_DEFAULT_ZONE || "8"), 10);
+const shippingDefaultZone =
+  Number.isFinite(parsedShippingDefaultZone) && parsedShippingDefaultZone >= 1 && parsedShippingDefaultZone <= 8
+    ? parsedShippingDefaultZone
+    : 8;
 const parsedShippingCountries = (process.env.ALLOWED_SHIPPING_COUNTRIES || "US")
   .split(",")
   .map((country) => country.trim().toUpperCase())
   .filter((country) => /^[A-Z]{2}$/.test(country));
 const allowedShippingCountries = parsedShippingCountries.length > 0 ? parsedShippingCountries : ["US"];
+const uspsApiBaseUrl = ((process.env.USPS_API_BASE_URL || "").trim() || "https://apis.usps.com").replace(/\/$/, "");
+const uspsOauthUrl =
+  (process.env.USPS_OAUTH_URL || "").trim() || `${uspsApiBaseUrl}/oauth2/v3/token`;
+const uspsPaymentAuthorizationUrl =
+  (process.env.USPS_PAYMENT_AUTH_URL || "").trim() || `${uspsApiBaseUrl}/payments/v3/payment-authorization`;
+const uspsLabelUrl =
+  (process.env.USPS_LABEL_URL || "").trim() || `${uspsApiBaseUrl}/labels/v3/label`;
+const uspsTrackingBaseUrl =
+  (process.env.USPS_TRACKING_URL_BASE || "").trim() ||
+  "https://tools.usps.com/go/TrackConfirmAction?tLabels=";
+const uspsClientId = String(process.env.USPS_CLIENT_ID || "").trim();
+const uspsClientSecret = String(process.env.USPS_CLIENT_SECRET || "").trim();
+const uspsCrid = String(process.env.USPS_CRID || "").trim();
+const uspsMid = String(process.env.USPS_MID || "").trim();
+const uspsManifestMid = String(process.env.USPS_MANIFEST_MID || "").trim() || uspsMid;
+const uspsAccountType = String(process.env.USPS_ACCOUNT_TYPE || "EPS").trim().toUpperCase();
+const uspsAccountNumber = String(process.env.USPS_ACCOUNT_NUMBER || "").trim();
+const uspsFromName = String(process.env.USPS_FROM_NAME || "").trim();
+const uspsFromCompany = String(process.env.USPS_FROM_COMPANY || "").trim();
+const uspsFromAddress1 = String(process.env.USPS_FROM_ADDRESS1 || "").trim();
+const uspsFromAddress2 = String(process.env.USPS_FROM_ADDRESS2 || "").trim();
+const uspsFromCity = String(process.env.USPS_FROM_CITY || "").trim();
+const uspsFromState = String(process.env.USPS_FROM_STATE || "").trim().toUpperCase();
+const uspsFromZip5 = String(process.env.USPS_FROM_ZIP5 || "").trim();
+const uspsFromZip4 = String(process.env.USPS_FROM_ZIP4 || "").trim();
+const uspsDefaultMailClass = String(process.env.USPS_DEFAULT_MAIL_CLASS || "USPS_GROUND_ADVANTAGE")
+  .trim()
+  .toUpperCase();
+const uspsDefaultRateIndicator = String(process.env.USPS_DEFAULT_RATE_INDICATOR || "SP")
+  .trim()
+  .toUpperCase();
+const uspsDefaultProcessingCategory = String(process.env.USPS_DEFAULT_PROCESSING_CATEGORY || "MACHINABLE")
+  .trim()
+  .toUpperCase();
+const parsedUspsDefaultLengthInches = Number.parseFloat(String(process.env.USPS_DEFAULT_PKG_LENGTH_IN || "9"));
+const uspsDefaultLengthInches =
+  Number.isFinite(parsedUspsDefaultLengthInches) && parsedUspsDefaultLengthInches > 0
+    ? parsedUspsDefaultLengthInches
+    : 9;
+const parsedUspsDefaultWidthInches = Number.parseFloat(String(process.env.USPS_DEFAULT_PKG_WIDTH_IN || "6"));
+const uspsDefaultWidthInches =
+  Number.isFinite(parsedUspsDefaultWidthInches) && parsedUspsDefaultWidthInches > 0
+    ? parsedUspsDefaultWidthInches
+    : 6;
+const parsedUspsDefaultHeightInches = Number.parseFloat(String(process.env.USPS_DEFAULT_PKG_HEIGHT_IN || "2"));
+const uspsDefaultHeightInches =
+  Number.isFinite(parsedUspsDefaultHeightInches) && parsedUspsDefaultHeightInches > 0
+    ? parsedUspsDefaultHeightInches
+    : 2;
+const uspsDefaultImageType = String(process.env.USPS_LABEL_IMAGE_TYPE || "PDF")
+  .trim()
+  .toUpperCase();
+const uspsDefaultLabelType = String(process.env.USPS_LABEL_TYPE || "4X6LABEL")
+  .trim()
+  .toUpperCase();
 
 const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : null;
 const app = express();
@@ -195,6 +278,11 @@ function parseLineItemsFromMetadata(metadata = {}) {
 
 function readMetadataInteger(metadata, key) {
   const parsed = Number.parseInt(String(metadata?.[key] ?? ""), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readMetadataFloat(metadata, key) {
+  const parsed = Number.parseFloat(String(metadata?.[key] ?? ""));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -338,25 +426,307 @@ function getTaxRuntimeStatus() {
   return "off";
 }
 
-function getUspsGroundAdvantageRetailCents(weightLbs) {
-  const billableLbs = Math.max(1, Math.ceil(Number(weightLbs) || 0));
-  if (billableLbs <= uspsGroundAdvantageZone1Cents.length) {
-    return uspsGroundAdvantageZone1Cents[billableLbs - 1];
+function parseShippingRateTable(rawTable) {
+  const fallback = [
+    { weightLbs: 1.5, cents: 1192 },
+    { weightLbs: 2, cents: 1290 },
+    { weightLbs: 3, cents: 1458 },
+    { weightLbs: 4, cents: 1668 },
+    { weightLbs: 5, cents: 1777 },
+    { weightLbs: 10, cents: 2350 }
+  ];
+  const points = String(rawTable || "")
+    .split(",")
+    .map((segment) => String(segment || "").trim())
+    .filter(Boolean)
+    .map((segment) => {
+      const [weightRaw, dollarsRaw] = segment.split(":");
+      const weightLbs = Number.parseFloat(String(weightRaw || "").trim());
+      const dollars = Number.parseFloat(String(dollarsRaw || "").trim());
+      if (!Number.isFinite(weightLbs) || !Number.isFinite(dollars) || weightLbs <= 0 || dollars <= 0) {
+        return null;
+      }
+      return {
+        weightLbs: Number(weightLbs.toFixed(2)),
+        cents: Math.round(dollars * 100)
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.weightLbs - right.weightLbs);
+
+  const deduped = [];
+  for (const point of points) {
+    const previous = deduped[deduped.length - 1];
+    if (previous && Math.abs(previous.weightLbs - point.weightLbs) < 0.0001) {
+      deduped[deduped.length - 1] = point;
+      continue;
+    }
+    deduped.push(point);
   }
 
-  const lastRate = uspsGroundAdvantageZone1Cents[uspsGroundAdvantageZone1Cents.length - 1];
-  const extraLbs = billableLbs - uspsGroundAdvantageZone1Cents.length;
-  return lastRate + extraLbs * 60;
+  return deduped.length > 0 ? deduped : fallback;
 }
 
-function calculateShippingFromUnits(shippableUnits) {
+function parseShippingZoneScale(rawScale) {
+  const fallback = {
+    1: 0.7424,
+    2: 0.7718,
+    3: 0.7928,
+    4: 0.8221,
+    5: 0.8515,
+    6: 0.8809,
+    7: 0.9262,
+    8: 1
+  };
+  const parsed = String(rawScale || "")
+    .split(",")
+    .map((segment) => String(segment || "").trim())
+    .filter(Boolean)
+    .reduce((accumulator, segment) => {
+      const [zoneRaw, multiplierRaw] = segment.split(":");
+      const zone = Number.parseInt(String(zoneRaw || "").trim(), 10);
+      const multiplier = Number.parseFloat(String(multiplierRaw || "").trim());
+      if (!Number.isFinite(zone) || zone < 1 || zone > 8) {
+        return accumulator;
+      }
+      if (!Number.isFinite(multiplier) || multiplier <= 0) {
+        return accumulator;
+      }
+      accumulator[zone] = Number(multiplier.toFixed(4));
+      return accumulator;
+    }, {});
+
+  return Object.keys(parsed).length > 0
+    ? {
+        ...fallback,
+        ...parsed
+      }
+    : fallback;
+}
+
+function parseShippingStateZoneMap(rawMap) {
+  const fallback = {
+    NY: 1,
+    CT: 2,
+    NJ: 2,
+    PA: 2,
+    MA: 2,
+    RI: 2,
+    VT: 2,
+    NH: 2,
+    DE: 2,
+    MD: 2,
+    DC: 2,
+    ME: 3,
+    VA: 3,
+    WV: 3,
+    OH: 3,
+    NC: 3,
+    SC: 4,
+    GA: 4,
+    TN: 4,
+    KY: 4,
+    IN: 4,
+    MI: 4,
+    IL: 4,
+    AL: 5,
+    FL: 5,
+    MS: 5,
+    WI: 5,
+    MN: 5,
+    IA: 5,
+    MO: 5,
+    AR: 5,
+    LA: 5,
+    ND: 6,
+    SD: 6,
+    NE: 6,
+    KS: 6,
+    OK: 6,
+    TX: 6,
+    NM: 6,
+    CO: 6,
+    WY: 6,
+    MT: 7,
+    ID: 7,
+    UT: 7,
+    AZ: 7,
+    NV: 7,
+    WA: 8,
+    OR: 8,
+    CA: 8,
+    AK: 8,
+    HI: 8
+  };
+  const parsed = String(rawMap || "")
+    .split(",")
+    .map((segment) => String(segment || "").trim())
+    .filter(Boolean)
+    .reduce((accumulator, segment) => {
+      const [stateRaw, zoneRaw] = segment.split(":");
+      const stateCode = String(stateRaw || "")
+        .trim()
+        .toUpperCase();
+      const zone = Number.parseInt(String(zoneRaw || "").trim(), 10);
+      if (!usStateCodes.has(stateCode)) {
+        return accumulator;
+      }
+      if (!Number.isFinite(zone) || zone < 1 || zone > 8) {
+        return accumulator;
+      }
+      accumulator[stateCode] = zone;
+      return accumulator;
+    }, {});
+
+  return Object.keys(parsed).length > 0
+    ? {
+        ...fallback,
+        ...parsed
+      }
+    : fallback;
+}
+
+function normalizeShippingZone(zoneValue, fallback = shippingDefaultZone) {
+  const parsed = Number.parseInt(String(zoneValue ?? ""), 10);
+  if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 8) {
+    return parsed;
+  }
+  return fallback;
+}
+
+function calculateShippableWeightLbs(shippableUnits) {
   const units = Math.max(0, Number(shippableUnits) || 0);
   if (units <= 0) {
     return 0;
   }
-  const totalWeightLbs = units * shippingWeightPerUnitLbs;
-  const weightBasedCents = getUspsGroundAdvantageRetailCents(totalWeightLbs);
-  return Math.max(shippingMinimumCents, weightBasedCents);
+  const calculated = shippingBaseWeightLbs + Math.max(0, units - 1) * shippingAdditionalWeightPerUnitLbs;
+  return Number(calculated.toFixed(2));
+}
+
+function getBillableShippingWeightLbs(actualWeightLbs) {
+  const weight = Math.max(0, Number(actualWeightLbs) || 0);
+  if (weight <= 0) {
+    return 0;
+  }
+  if (weight <= shippingBaseWeightLbs) {
+    return Number(shippingBaseWeightLbs.toFixed(2));
+  }
+
+  // USPS "Weight Not Over" behavior for pounds is tiered, not interpolated.
+  return Math.ceil(weight);
+}
+
+function getShippingZoneMultiplier(zoneNumber) {
+  const zone = normalizeShippingZone(zoneNumber);
+  const multiplier = Number(uspsGroundAdvantageZoneScale?.[zone]);
+  if (Number.isFinite(multiplier) && multiplier > 0) {
+    return multiplier;
+  }
+  return 1;
+}
+
+function getShippingZoneForState(stateCode) {
+  const normalizedState = normalizeUsStateCode(stateCode);
+  if (!normalizedState) {
+    return shippingDefaultZone;
+  }
+  if (uspsFromState && normalizedState === uspsFromState) {
+    return 1;
+  }
+  const mappedZone = normalizeShippingZone(uspsStateZoneMap?.[normalizedState], 0);
+  return mappedZone > 0 ? mappedZone : shippingDefaultZone;
+}
+
+function getUspsGroundAdvantageRetailBaseCents(weightLbs) {
+  const billableWeight = getBillableShippingWeightLbs(weightLbs);
+  if (billableWeight <= 0) {
+    return 0;
+  }
+  const points = uspsGroundAdvantageRatePoints;
+  if (!Array.isArray(points) || points.length === 0) {
+    return 0;
+  }
+  if (billableWeight <= points[0].weightLbs) {
+    return points[0].cents;
+  }
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const next = points[index];
+    if (billableWeight <= next.weightLbs) {
+      if (Math.abs(billableWeight - next.weightLbs) < 0.0001) {
+        return next.cents;
+      }
+      const span = Math.max(0.1, next.weightLbs - previous.weightLbs);
+      const ratio = (billableWeight - previous.weightLbs) / span;
+      return Math.round(previous.cents + ratio * (next.cents - previous.cents));
+    }
+  }
+
+  if (points.length === 1) {
+    return points[0].cents;
+  }
+  const last = points[points.length - 1];
+  const prior = points[points.length - 2];
+  const span = Math.max(0.1, last.weightLbs - prior.weightLbs);
+  const slope = Math.max(1, (last.cents - prior.cents) / span);
+  const overweightLbs = billableWeight - last.weightLbs;
+  return Math.round(last.cents + overweightLbs * slope);
+}
+
+function getUspsGroundAdvantageRetailCents(weightLbs, zoneNumber = shippingDefaultZone) {
+  const baseCents = getUspsGroundAdvantageRetailBaseCents(weightLbs);
+  if (baseCents <= 0) {
+    return 0;
+  }
+  const zoneMultiplier = getShippingZoneMultiplier(zoneNumber);
+  const zoneAdjustedCents = Math.max(0, Math.round(baseCents * zoneMultiplier));
+  if (shippingMinimumCents > 0) {
+    return Math.max(shippingMinimumCents, zoneAdjustedCents);
+  }
+  return zoneAdjustedCents;
+}
+
+function calculateShippingFromUnits(shippableUnits, customerState) {
+  const totalWeightLbs = calculateShippableWeightLbs(shippableUnits);
+  const shippingZone = getShippingZoneForState(customerState);
+  const shippingZoneMultiplier = getShippingZoneMultiplier(shippingZone);
+  const shippingBillableWeightLbs = getBillableShippingWeightLbs(totalWeightLbs);
+  if (totalWeightLbs <= 0) {
+    return {
+      shippingCents: 0,
+      shippingWeightLbs: 0,
+      shippingBillableWeightLbs: 0,
+      shippingZone,
+      shippingZoneMultiplier,
+      shippingBaseRateCents: 0
+    };
+  }
+  const shippingBaseRateCents = getUspsGroundAdvantageRetailBaseCents(totalWeightLbs);
+  const shippingCents = getUspsGroundAdvantageRetailCents(totalWeightLbs, shippingZone);
+  return {
+    shippingCents,
+    shippingWeightLbs: totalWeightLbs,
+    shippingBillableWeightLbs,
+    shippingZone,
+    shippingZoneMultiplier,
+    shippingBaseRateCents
+  };
+}
+
+function getPublicShippingEstimateConfig() {
+  return {
+    baseWeightLbs: Number(shippingBaseWeightLbs.toFixed(2)),
+    additionalWeightPerUnitLbs: Number(shippingAdditionalWeightPerUnitLbs.toFixed(2)),
+    minimumCents: shippingMinimumCents,
+    defaultZone: shippingDefaultZone,
+    fromState: uspsFromState || "",
+    ratePoints: uspsGroundAdvantageRatePoints.map((point) => ({
+      weightLbs: Number(point.weightLbs),
+      cents: Number(point.cents)
+    })),
+    zoneScale: { ...uspsGroundAdvantageZoneScale },
+    stateZoneMap: { ...uspsStateZoneMap }
+  };
 }
 
 function getAppUrl(req) {
@@ -519,6 +889,510 @@ function parseImageUrlList(raw, { defaultEmpty = false } = {}) {
     .filter(Boolean);
 }
 
+function getUspsMissingConfigFields() {
+  const checks = [
+    ["USPS_CLIENT_ID", uspsClientId],
+    ["USPS_CLIENT_SECRET", uspsClientSecret],
+    ["USPS_CRID", uspsCrid],
+    ["USPS_MID", uspsMid],
+    ["USPS_ACCOUNT_NUMBER", uspsAccountNumber],
+    ["USPS_FROM_NAME", uspsFromName],
+    ["USPS_FROM_ADDRESS1", uspsFromAddress1],
+    ["USPS_FROM_CITY", uspsFromCity],
+    ["USPS_FROM_STATE", uspsFromState],
+    ["USPS_FROM_ZIP5", uspsFromZip5]
+  ];
+  return checks.filter(([, value]) => !String(value || "").trim()).map(([name]) => name);
+}
+
+function isUspsConfigured() {
+  return getUspsMissingConfigFields().length === 0;
+}
+
+function normalizeIsoCountry(value, fallback = "US") {
+  const code = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (/^[A-Z]{2}$/.test(code)) {
+    return code;
+  }
+  return fallback;
+}
+
+function cleanNumericPostalCode(value, maxLength = 10) {
+  const text = String(value || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .slice(0, maxLength);
+  return text;
+}
+
+function buildZipCode(zip5, zip4 = "") {
+  const normalizedZip5 = cleanNumericPostalCode(zip5, 10);
+  const splitFromZip5 = normalizedZip5.split("-");
+  const left = splitFromZip5[0] || "";
+  const right = cleanNumericPostalCode(zip4 || splitFromZip5[1] || "", 4);
+  if (left && right) {
+    return `${left}-${right}`;
+  }
+  return left;
+}
+
+function splitPersonName(fullName, fallbackFirstName = "Customer") {
+  const value = String(fullName || "").trim().replace(/\s+/g, " ");
+  if (!value) {
+    return {
+      firstName: fallbackFirstName,
+      lastName: ""
+    };
+  }
+
+  const parts = value.split(" ");
+  if (parts.length === 1) {
+    return {
+      firstName: parts[0].slice(0, 40),
+      lastName: ""
+    };
+  }
+
+  return {
+    firstName: parts[0].slice(0, 40),
+    lastName: parts
+      .slice(1)
+      .join(" ")
+      .slice(0, 40)
+  };
+}
+
+function parsePositiveNumber(value, fallback, { min = 0.01, max = 9999 } = {}) {
+  const parsed = Number.parseFloat(String(value ?? ""));
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function deriveOrderWeightLbs(session) {
+  const metadata = session?.metadata || {};
+  const metadataWeight = readMetadataFloat(metadata, "shipping_weight_lbs");
+  if (Number.isFinite(metadataWeight) && metadataWeight > 0) {
+    return Number(metadataWeight.toFixed(2));
+  }
+
+  const shippableUnits = readMetadataInteger(metadata, "shippable_units");
+  if (Number.isFinite(shippableUnits) && shippableUnits > 0) {
+    return calculateShippableWeightLbs(shippableUnits);
+  }
+
+  const unitsTotal = readMetadataInteger(metadata, "units_total");
+  if (Number.isFinite(unitsTotal) && unitsTotal > 0) {
+    return calculateShippableWeightLbs(unitsTotal);
+  }
+
+  return Number(shippingBaseWeightLbs.toFixed(2));
+}
+
+function getOrderShippingAddress(session) {
+  const shippingDetails = session?.shipping_details || {};
+  const shippingAddress = shippingDetails?.address || {};
+  const shippingName = String(shippingDetails?.name || session?.customer_details?.name || "").trim();
+  const shippingEmail = String(session?.customer_details?.email || session?.customer_email || "").trim().toLowerCase();
+  const shippingPhone = String(session?.customer_details?.phone || "").trim();
+
+  return {
+    name: shippingName,
+    email: shippingEmail,
+    phone: shippingPhone,
+    line1: String(shippingAddress?.line1 || "").trim(),
+    line2: String(shippingAddress?.line2 || "").trim(),
+    city: String(shippingAddress?.city || "").trim(),
+    state: String(shippingAddress?.state || "").trim().toUpperCase(),
+    postalCode: String(shippingAddress?.postal_code || "").trim().toUpperCase(),
+    country: normalizeIsoCountry(shippingAddress?.country, "US")
+  };
+}
+
+function buildAddressBookInputFromSession(session) {
+  return {
+    orderId: String(session?.id || "").trim(),
+    ...getOrderShippingAddress(session)
+  };
+}
+
+async function saveOrderAddressToBook(session) {
+  const input = buildAddressBookInputFromSession(session);
+  return upsertAddressBookEntry(input);
+}
+
+function buildUspsTrackingUrl(trackingNumber) {
+  const value = String(trackingNumber || "").trim();
+  if (!value) {
+    return "";
+  }
+  return `${uspsTrackingBaseUrl}${encodeURIComponent(value)}`;
+}
+
+function buildUspsFromAddress() {
+  const sourceName = uspsFromName || uspsFromCompany || "Shipper";
+  const name = splitPersonName(sourceName, "Shipper");
+  return {
+    firstName: name.firstName,
+    lastName: name.lastName,
+    firm: uspsFromCompany || "",
+    streetAddress: uspsFromAddress1,
+    secondaryAddress: uspsFromAddress2 || "",
+    city: uspsFromCity,
+    state: uspsFromState,
+    ZIPCode: buildZipCode(uspsFromZip5, uspsFromZip4)
+  };
+}
+
+function buildUspsToAddress(session) {
+  const shipping = getOrderShippingAddress(session);
+  const name = splitPersonName(shipping.name, "Customer");
+  return {
+    firstName: name.firstName,
+    lastName: name.lastName,
+    streetAddress: shipping.line1,
+    secondaryAddress: shipping.line2 || "",
+    city: shipping.city,
+    state: shipping.state,
+    ZIPCode: buildZipCode(shipping.postalCode)
+  };
+}
+
+function buildUspsLabelRequestPayload(session, options = {}) {
+  const defaultWeightLbs = deriveOrderWeightLbs(session);
+  const weightLbs = parsePositiveNumber(options.weightLbs, defaultWeightLbs, { min: 0.1, max: 70 });
+  const lengthInches = parsePositiveNumber(options.lengthInches, uspsDefaultLengthInches, { min: 1, max: 48 });
+  const widthInches = parsePositiveNumber(options.widthInches, uspsDefaultWidthInches, { min: 1, max: 48 });
+  const heightInches = parsePositiveNumber(options.heightInches, uspsDefaultHeightInches, { min: 1, max: 48 });
+  const mailClass = String(options.mailClass || uspsDefaultMailClass)
+    .trim()
+    .toUpperCase();
+  const rateIndicator = String(options.rateIndicator || uspsDefaultRateIndicator)
+    .trim()
+    .toUpperCase();
+  const processingCategory = String(options.processingCategory || uspsDefaultProcessingCategory)
+    .trim()
+    .toUpperCase();
+  const declaredValueDollars = parsePositiveNumber(
+    options.declaredValueDollars,
+    Math.max(1, Number(session?.amount_total || 0) / 100),
+    { min: 0.01, max: 10000 }
+  );
+  const mailingDate = new Date().toISOString().slice(0, 10);
+
+  return {
+    imageInfo: {
+      imageType: uspsDefaultImageType,
+      labelType: uspsDefaultLabelType,
+      receiptOption: "NONE",
+      suppressPostage: false,
+      suppressMailDate: false,
+      returnLabel: false
+    },
+    toAddress: buildUspsToAddress(session),
+    fromAddress: buildUspsFromAddress(),
+    packageDescription: {
+      mailClass,
+      rateIndicator,
+      weightUOM: "lb",
+      weight: Number(weightLbs.toFixed(2)),
+      dimensionsUOM: "in",
+      length: Number(lengthInches.toFixed(2)),
+      width: Number(widthInches.toFixed(2)),
+      height: Number(heightInches.toFixed(2)),
+      processingCategory,
+      mailingDate,
+      destinationEntryFacilityType: "NONE",
+      packageOptions: {
+        packageValue: Number(declaredValueDollars.toFixed(2))
+      }
+    }
+  };
+}
+
+async function parseRemotePayload(response) {
+  const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+  return response.text();
+}
+
+async function requestUspsAccessToken() {
+  const response = await fetch(uspsOauthUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      client_id: uspsClientId,
+      client_secret: uspsClientSecret,
+      grant_type: "client_credentials"
+    })
+  });
+
+  const payload = await parseRemotePayload(response);
+  if (!response.ok) {
+    const details =
+      typeof payload === "string"
+        ? payload
+        : payload?.error_description || payload?.error || payload?.message || "OAuth request failed.";
+    throw new Error(`USPS OAuth failed: ${String(details || "").slice(0, 400)}`);
+  }
+
+  const token = String(payload?.access_token || "").trim();
+  if (!token) {
+    throw new Error("USPS OAuth succeeded but returned no access token.");
+  }
+
+  return token;
+}
+
+async function requestUspsPaymentAuthorizationToken(accessToken) {
+  const role = {
+    CRID: uspsCrid,
+    MID: uspsMid,
+    manifestMID: uspsManifestMid,
+    accountType: uspsAccountType,
+    accountNumber: uspsAccountNumber
+  };
+  const response = await fetch(uspsPaymentAuthorizationUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      roles: [
+        {
+          roleName: "PAYER",
+          ...role
+        },
+        {
+          roleName: "LABEL_OWNER",
+          ...role
+        }
+      ]
+    })
+  });
+
+  const payload = await parseRemotePayload(response);
+  if (!response.ok) {
+    const details =
+      typeof payload === "string"
+        ? payload
+        : payload?.error_description || payload?.error || payload?.message || "Payment auth failed.";
+    throw new Error(`USPS payment authorization failed: ${String(details || "").slice(0, 400)}`);
+  }
+
+  const token = String(payload?.paymentAuthorizationToken || "").trim();
+  if (!token) {
+    throw new Error("USPS payment authorization succeeded but returned no token.");
+  }
+  return token;
+}
+
+function parseMultipartBoundary(contentType = "") {
+  const boundaryMatch = String(contentType).match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  return String(boundaryMatch?.[1] || boundaryMatch?.[2] || "").trim();
+}
+
+function parseMultipartParts(buffer, contentType = "") {
+  const boundary = parseMultipartBoundary(contentType);
+  if (!boundary) {
+    return [];
+  }
+
+  const delimiter = `--${boundary}`;
+  const source = buffer.toString("latin1");
+  const chunks = source.split(delimiter);
+  const parts = [];
+
+  for (const chunk of chunks) {
+    if (!chunk || chunk === "--" || chunk === "--\r\n") {
+      continue;
+    }
+
+    let segment = chunk;
+    if (segment.startsWith("\r\n")) {
+      segment = segment.slice(2);
+    }
+    if (segment.endsWith("\r\n")) {
+      segment = segment.slice(0, -2);
+    }
+    if (segment.endsWith("--")) {
+      segment = segment.slice(0, -2);
+    }
+
+    const headerEnd = segment.indexOf("\r\n\r\n");
+    if (headerEnd < 0) {
+      continue;
+    }
+
+    const rawHeaders = segment.slice(0, headerEnd);
+    let bodyValue = segment.slice(headerEnd + 4);
+    if (bodyValue.endsWith("\r\n")) {
+      bodyValue = bodyValue.slice(0, -2);
+    }
+
+    const headers = {};
+    for (const line of rawHeaders.split("\r\n")) {
+      const index = line.indexOf(":");
+      if (index <= 0) {
+        continue;
+      }
+      const key = line.slice(0, index).trim().toLowerCase();
+      const value = line.slice(index + 1).trim();
+      headers[key] = value;
+    }
+
+    const disposition = String(headers["content-disposition"] || "");
+    const nameMatch = disposition.match(/name="([^"]+)"/i);
+    const filenameMatch = disposition.match(/filename="([^"]+)"/i);
+    parts.push({
+      name: String(nameMatch?.[1] || "").trim(),
+      filename: String(filenameMatch?.[1] || "").trim(),
+      contentType: String(headers["content-type"] || "").trim(),
+      body: Buffer.from(bodyValue, "latin1")
+    });
+  }
+
+  return parts;
+}
+
+async function saveUspsLabelToUploads(orderId, labelBuffer, contentType = "") {
+  if (!labelBuffer || labelBuffer.length === 0) {
+    return "";
+  }
+  const safeOrderId = String(orderId || "order")
+    .replace(/[^a-z0-9_-]/gi, "-")
+    .slice(0, 48);
+  const lowerContentType = String(contentType || "").toLowerCase();
+  const extension = lowerContentType.includes("zpl")
+    ? ".zpl"
+    : lowerContentType.includes("png")
+      ? ".png"
+      : ".pdf";
+  const filename = `${Date.now()}-${safeOrderId}-${randomUUID().slice(0, 8)}${extension}`;
+  const filePath = path.join(uploadsDir, filename);
+  await fs.mkdir(uploadsDir, { recursive: true });
+  await fs.writeFile(filePath, labelBuffer);
+  return `/uploads/${filename}`;
+}
+
+async function extractUspsLabelResult(orderId, responseBuffer, contentType = "") {
+  const lowerContentType = String(contentType || "").toLowerCase();
+  let metadata = {};
+  let labelUrl = "";
+
+  if (lowerContentType.includes("application/json")) {
+    try {
+      metadata = JSON.parse(responseBuffer.toString("utf8"));
+    } catch {
+      metadata = {};
+    }
+    const encoded = String(metadata?.labelImage || metadata?.labelImageBase64 || "").trim();
+    if (encoded) {
+      try {
+        labelUrl = await saveUspsLabelToUploads(orderId, Buffer.from(encoded, "base64"), "application/pdf");
+      } catch {
+        labelUrl = "";
+      }
+    }
+  } else if (lowerContentType.includes("multipart/")) {
+    const parts = parseMultipartParts(responseBuffer, contentType);
+    const metadataPart = parts.find((part) => part.name === "labelMetadata");
+    if (metadataPart && metadataPart.body?.length > 0) {
+      try {
+        metadata = JSON.parse(metadataPart.body.toString("utf8"));
+      } catch {
+        metadata = {};
+      }
+    }
+    const labelImagePart = parts.find((part) => part.name === "labelImage");
+    if (labelImagePart && labelImagePart.body?.length > 0) {
+      labelUrl = await saveUspsLabelToUploads(orderId, labelImagePart.body, labelImagePart.contentType);
+    }
+  } else {
+    const plain = responseBuffer.toString("utf8");
+    try {
+      metadata = JSON.parse(plain);
+    } catch {
+      metadata = {};
+    }
+  }
+
+  if (!labelUrl) {
+    labelUrl = String(
+      metadata?.labelUrl || metadata?.labelURL || metadata?.labelImageUrl || metadata?.labelImageURL || ""
+    ).trim();
+  }
+  const trackingNumber = String(
+    metadata?.trackingNumber || metadata?.trackingNo || metadata?.trackingID || metadata?.impb || ""
+  ).trim();
+  const trackingUrl = String(metadata?.trackingUrl || metadata?.trackingURL || "").trim() || buildUspsTrackingUrl(trackingNumber);
+  const labelId = String(metadata?.labelId || metadata?.labelID || metadata?.evsLabelId || trackingNumber || "").trim();
+  const postageValue = Number.parseFloat(
+    String(metadata?.totalPostage || metadata?.postage || metadata?.postageAmount || "")
+  );
+  const postageCents = Number.isFinite(postageValue) ? Math.max(0, Math.round(postageValue * 100)) : null;
+
+  return {
+    labelId,
+    labelUrl,
+    trackingNumber,
+    trackingUrl,
+    postageCents,
+    metadata
+  };
+}
+
+async function createUspsLabelForSession(session, options = {}) {
+  const missing = getUspsMissingConfigFields();
+  if (missing.length > 0) {
+    throw new Error(`USPS is not configured. Missing: ${missing.join(", ")}`);
+  }
+
+  const shipping = getOrderShippingAddress(session);
+  if (!shipping.line1 || !shipping.city || !shipping.state || !shipping.postalCode) {
+    throw new Error("Order has no complete shipping address.");
+  }
+
+  const accessToken = await requestUspsAccessToken();
+  const paymentAuthorizationToken = await requestUspsPaymentAuthorizationToken(accessToken);
+  const payload = buildUspsLabelRequestPayload(session, options);
+
+  const response = await fetch(uspsLabelUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "X-Payment-Authorization-Token": paymentAuthorizationToken,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const responseBuffer = Buffer.from(await response.arrayBuffer());
+  const contentType = String(response.headers.get("content-type") || "");
+  if (!response.ok) {
+    const details = responseBuffer.toString("utf8").slice(0, 600);
+    throw new Error(`USPS label request failed (${response.status}): ${details || "Unknown USPS error."}`);
+  }
+
+  const label = await extractUspsLabelResult(session.id, responseBuffer, contentType);
+  if (!label.labelUrl && !label.trackingNumber && !label.labelId) {
+    throw new Error("USPS returned an unexpected label response.");
+  }
+
+  return {
+    ...label,
+    request: payload
+  };
+}
+
 function extractSiteSettingsChanges(req) {
   const removeLogo = String(req.body?.removeLogo || "").toLowerCase() === "true";
   const removeBanner = String(req.body?.removeBanner || "").toLowerCase() === "true";
@@ -642,6 +1516,14 @@ function maskSecrets(text) {
     output = output.split(githubPushToken).join("***");
     output = output.split(encodeURIComponent(githubPushToken)).join("***");
   }
+  if (uspsClientSecret) {
+    output = output.split(uspsClientSecret).join("***");
+    output = output.split(encodeURIComponent(uspsClientSecret)).join("***");
+  }
+  if (stripeSecretKey) {
+    output = output.split(stripeSecretKey).join("***");
+    output = output.split(encodeURIComponent(stripeSecretKey)).join("***");
+  }
   return output;
 }
 
@@ -684,16 +1566,24 @@ async function pathExists(targetPath) {
 async function syncPublishContent(targetRoot) {
   const sourceProducts = path.join(process.cwd(), "data/products.json");
   const sourceSettings = path.join(process.cwd(), "data/site-settings.json");
+  const sourceAddressBook = path.join(process.cwd(), "data/address-book.json");
   const sourceUploads = path.join(process.cwd(), "public/uploads");
 
   const targetProducts = path.join(targetRoot, "data/products.json");
   const targetSettings = path.join(targetRoot, "data/site-settings.json");
+  const targetAddressBook = path.join(targetRoot, "data/address-book.json");
   const targetUploads = path.join(targetRoot, "public/uploads");
 
   await fs.mkdir(path.dirname(targetProducts), { recursive: true });
   await fs.mkdir(path.dirname(targetSettings), { recursive: true });
+  await fs.mkdir(path.dirname(targetAddressBook), { recursive: true });
   await fs.copyFile(sourceProducts, targetProducts);
   await fs.copyFile(sourceSettings, targetSettings);
+  if (await pathExists(sourceAddressBook)) {
+    await fs.copyFile(sourceAddressBook, targetAddressBook);
+  } else {
+    await fs.writeFile(targetAddressBook, "[]\n", "utf8");
+  }
 
   await fs.rm(targetUploads, { recursive: true, force: true });
   await fs.mkdir(path.dirname(targetUploads), { recursive: true });
@@ -722,7 +1612,15 @@ async function publishAdminSnapshot(commitMessageInput = "") {
   const hasLocalGit = await pathExists(localGitDir);
 
   if (hasLocalGit) {
-    await runGit(["add", "-A", "--", "data/products.json", "data/site-settings.json", "public/uploads"]);
+    await runGit([
+      "add",
+      "-A",
+      "--",
+      "data/products.json",
+      "data/site-settings.json",
+      "data/address-book.json",
+      "public/uploads"
+    ]);
 
     const stagedCheck = await runGit(["diff", "--cached", "--quiet", "--"], { allowNonZero: true });
     if (stagedCheck.code === 0) {
@@ -761,9 +1659,12 @@ async function publishAdminSnapshot(commitMessageInput = "") {
     await runGit(["checkout", "-B", githubBranch, "FETCH_HEAD"], { cwd: tempDir });
 
     await syncPublishContent(tempDir);
-    await runGit(["add", "-A", "--", "data/products.json", "data/site-settings.json", "public/uploads"], {
-      cwd: tempDir
-    });
+    await runGit(
+      ["add", "-A", "--", "data/products.json", "data/site-settings.json", "data/address-book.json", "public/uploads"],
+      {
+        cwd: tempDir
+      }
+    );
 
     const stagedCheck = await runGit(["diff", "--cached", "--quiet", "--"], {
       allowNonZero: true,
@@ -890,7 +1791,10 @@ if (path.resolve(uploadsDir) !== path.resolve(path.join(publicDir, "uploads"))) 
 
 app.get("/api/site-settings", async (req, res) => {
   const settings = await getSiteSettings();
-  res.json(settings);
+  res.json({
+    ...settings,
+    shippingEstimate: getPublicShippingEstimateConfig()
+  });
 });
 
 app.get("/api/products", async (req, res) => {
@@ -921,11 +1825,15 @@ app.get("/api/admin/products", requireAdmin, async (req, res) => {
 
 app.get("/api/admin/site-settings", requireAdmin, async (req, res) => {
   const settings = await getSiteSettings();
-  res.json(settings);
+  res.json({
+    ...settings,
+    shippingEstimate: getPublicShippingEstimateConfig()
+  });
 });
 
 app.get("/api/admin/health", requireAdmin, (req, res) => {
   const emailHealth = getEmailHealth();
+  const uspsMissingConfig = getUspsMissingConfigFields();
   const deployCommitRaw = (
     process.env.RENDER_GIT_COMMIT ||
     process.env.GIT_COMMIT ||
@@ -946,6 +1854,9 @@ app.get("/api/admin/health", requireAdmin, (req, res) => {
     manualSalesTaxRatePercent,
     manualSalesTaxApplyToShipping,
     manualNonTaxStates: Array.from(manualNonTaxStates),
+    uspsConfigured: isUspsConfigured(),
+    uspsMissingConfig,
+    uspsApiBaseUrl,
     appUrl: (process.env.APP_URL || "").trim(),
     deployCommit,
     deployCommitRaw
@@ -990,6 +1901,11 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         const shipmentTrackingNumber = String(paymentIntentMetadata.fulfillment_tracking_number || "").trim();
         const shipmentTrackingUrl = String(paymentIntentMetadata.fulfillment_tracking_url || "").trim();
         const shipmentNote = String(paymentIntentMetadata.fulfillment_note || "").trim();
+        const shipmentLabelId = String(paymentIntentMetadata.fulfillment_label_id || "").trim();
+        const shipmentLabelUrl = String(paymentIntentMetadata.fulfillment_label_url || "").trim();
+        const shipmentPostageCentsRaw = readMetadataInteger(paymentIntentMetadata, "fulfillment_postage_cents");
+        const shipmentPostageCents =
+          Number.isFinite(shipmentPostageCentsRaw) && shipmentPostageCentsRaw >= 0 ? shipmentPostageCentsRaw : 0;
         const customerState = normalizeUsStateCode(metadata.customer_state);
         const customerTaxExemptByState =
           String(metadata.customer_tax_exempt_by_state || "")
@@ -1004,6 +1920,26 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           Number.isFinite(unitsFromMetadata) && unitsFromMetadata > 0
             ? unitsFromMetadata
             : cartEntries.reduce((sum, entry) => sum + (entry.quantity || 0), 0);
+        const shippableUnitsFromMetadata = readMetadataInteger(metadata, "shippable_units");
+        const shippableUnits =
+          Number.isFinite(shippableUnitsFromMetadata) && shippableUnitsFromMetadata > 0
+            ? shippableUnitsFromMetadata
+            : unitsTotal;
+        const shippingWeightFromMetadata = readMetadataFloat(metadata, "shipping_weight_lbs");
+        const shippingWeightLbs =
+          Number.isFinite(shippingWeightFromMetadata) && shippingWeightFromMetadata > 0
+            ? Number(shippingWeightFromMetadata.toFixed(2))
+            : calculateShippableWeightLbs(Math.max(1, shippableUnits));
+        const shippingBillableWeightFromMetadata = readMetadataFloat(metadata, "shipping_billable_weight_lbs");
+        const shippingBillableWeightLbs =
+          Number.isFinite(shippingBillableWeightFromMetadata) && shippingBillableWeightFromMetadata > 0
+            ? Number(shippingBillableWeightFromMetadata.toFixed(2))
+            : getBillableShippingWeightLbs(shippingWeightLbs);
+        const shippingZoneFromMetadata = readMetadataInteger(metadata, "shipping_zone");
+        const shippingZone = normalizeShippingZone(
+          shippingZoneFromMetadata,
+          getShippingZoneForState(customerState)
+        );
 
         const customerEmail = String(session.customer_details?.email || session.customer_email || "").trim();
         const customerName = String(
@@ -1026,6 +1962,10 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           amountTax: totals.amountTax,
           amountTotal: totals.amountTotal,
           unitsTotal,
+          shippableUnits,
+          shippingWeightLbs,
+          shippingBillableWeightLbs,
+          shippingZone,
           items: cartEntries,
           fulfillmentStatus,
           shippedAt,
@@ -1034,6 +1974,9 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           shipmentTrackingNumber,
           shipmentTrackingUrl,
           shipmentNote,
+          shipmentLabelId,
+          shipmentLabelUrl,
+          shipmentPostageCents,
           customerState,
           customerTaxExemptByState,
           paymentIntentId,
@@ -1084,6 +2027,10 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         amountTax: order.amountTax,
         amountTotal: order.amountTotal,
         unitsTotal: order.unitsTotal,
+        shippableUnits: order.shippableUnits,
+        shippingWeightLbs: order.shippingWeightLbs,
+        shippingBillableWeightLbs: order.shippingBillableWeightLbs,
+        shippingZone: order.shippingZone,
         items: order.items,
         fulfillmentStatus: order.fulfillmentStatus,
         shippedAt: order.shippedAt,
@@ -1092,6 +2039,9 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         shipmentTrackingNumber: order.shipmentTrackingNumber,
         shipmentTrackingUrl: order.shipmentTrackingUrl,
         shipmentNote: order.shipmentNote,
+        shipmentLabelId: order.shipmentLabelId,
+        shipmentLabelUrl: order.shipmentLabelUrl,
+        shipmentPostageCents: order.shipmentPostageCents,
         customerState: order.customerState,
         customerTaxExemptByState: order.customerTaxExemptByState,
         paymentIntentId: order.paymentIntentId,
@@ -1130,6 +2080,159 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
     const details = typeof error?.message === "string" ? error.message : "";
     return res.status(500).json({
       error: details ? `Could not load orders: ${details}` : "Could not load orders right now."
+    });
+  }
+});
+
+app.get("/api/admin/address-book", requireAdmin, async (req, res) => {
+  const parsedLimit = Number.parseInt(String(req.query?.limit ?? ""), 10);
+  const limit = Number.isFinite(parsedLimit) ? Math.min(500, Math.max(1, parsedLimit)) : 200;
+  try {
+    const entries = await listAddressBookEntries(limit);
+    return res.json({
+      count: entries.length,
+      entries
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not load address book: ${details}` : "Could not load address book right now."
+    });
+  }
+});
+
+app.post("/api/admin/orders/:id/save-address", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(orderId);
+    if (!session || session.payment_status !== "paid") {
+      return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const entry = await saveOrderAddressToBook(session);
+    return res.json({
+      ok: true,
+      entry
+    });
+  } catch (error) {
+    if (error instanceof AddressBookValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not save address: ${details}` : "Could not save address right now."
+    });
+  }
+});
+
+app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(orderId, {
+      expand: ["payment_intent"]
+    });
+    if (!session || session.payment_status !== "paid") {
+      return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const paymentIntentId = getPaymentIntentIdFromSession(session);
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: "This order has no payment intent to update." });
+    }
+
+    const savedAddress = await saveOrderAddressToBook(session);
+    const labelResult = await createUspsLabelForSession(session, {
+      weightLbs: req.body?.weightLbs,
+      mailClass: req.body?.mailClass,
+      rateIndicator: req.body?.rateIndicator,
+      processingCategory: req.body?.processingCategory,
+      lengthInches: req.body?.lengthInches,
+      widthInches: req.body?.widthInches,
+      heightInches: req.body?.heightInches,
+      declaredValueDollars: req.body?.declaredValueDollars
+    });
+
+    const paymentIntentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+    const nextTrackingNumber = String(
+      labelResult.trackingNumber || paymentIntentMetadata.fulfillment_tracking_number || ""
+    )
+      .trim()
+      .slice(0, 140);
+    const nextTrackingUrl = String(
+      labelResult.trackingUrl || paymentIntentMetadata.fulfillment_tracking_url || ""
+    )
+      .trim()
+      .slice(0, 500);
+    const nextCarrier = String(
+      labelResult.trackingNumber || labelResult.labelId || labelResult.labelUrl
+        ? "USPS"
+        : paymentIntentMetadata.fulfillment_carrier || ""
+    )
+      .trim()
+      .slice(0, 80);
+    const nextLabelId = String(labelResult.labelId || "").trim().slice(0, 140);
+    const nextLabelUrl = String(labelResult.labelUrl || "").trim().slice(0, 500);
+    const nextPostageCents = Number.isFinite(labelResult.postageCents) ? Math.max(0, Number(labelResult.postageCents)) : null;
+
+    await stripe.paymentIntents.update(paymentIntentId, {
+      metadata: {
+        ...paymentIntentMetadata,
+        fulfillment_carrier: nextCarrier,
+        fulfillment_tracking_number: nextTrackingNumber,
+        fulfillment_tracking_url: nextTrackingUrl,
+        fulfillment_label_id: nextLabelId,
+        fulfillment_label_url: nextLabelUrl,
+        fulfillment_postage_cents:
+          nextPostageCents !== null
+            ? String(nextPostageCents)
+            : String(paymentIntentMetadata.fulfillment_postage_cents || "")
+      }
+    });
+
+    return res.json({
+      ok: true,
+      orderId: session.id,
+      addressSaved: true,
+      addressBookEntry: savedAddress,
+      carrier: nextCarrier,
+      trackingNumber: nextTrackingNumber,
+      trackingUrl: nextTrackingUrl,
+      labelId: nextLabelId,
+      labelUrl: nextLabelUrl,
+      postageCents: nextPostageCents
+    });
+  } catch (error) {
+    const details = maskSecrets(typeof error?.message === "string" ? error.message : "");
+    if (error instanceof AddressBookValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (details.includes("USPS is not configured")) {
+      return res.status(503).json({ error: details });
+    }
+    if (details.includes("shipping address")) {
+      return res.status(400).json({ error: details });
+    }
+    return res.status(500).json({
+      error: details ? `Could not create USPS label: ${details}` : "Could not create USPS label right now."
     });
   }
 });
@@ -1509,8 +2612,13 @@ app.post("/api/create-checkout-session", async (req, res) => {
     });
   }
 
-  const shippingTotal = calculateShippingFromUnits(shippableUnits);
-  const shippingWeightLbs = Number((shippableUnits * shippingWeightPerUnitLbs).toFixed(2));
+  const shippingEstimate = calculateShippingFromUnits(shippableUnits, customerState);
+  const shippingTotal = shippingEstimate.shippingCents;
+  const shippingWeightLbs = shippingEstimate.shippingWeightLbs;
+  const shippingBillableWeightLbs = shippingEstimate.shippingBillableWeightLbs;
+  const shippingZone = shippingEstimate.shippingZone;
+  const shippingZoneMultiplier = shippingEstimate.shippingZoneMultiplier;
+  const shippingBaseRateCents = shippingEstimate.shippingBaseRateCents;
   const salesTaxExemptByState = manualNonTaxStates.has(customerState);
   const taxBase = itemsSubtotal + (manualSalesTaxApplyToShipping ? shippingTotal : 0);
   const manualSalesTaxTotal = manualSalesTaxEnabled && !salesTaxExemptByState
@@ -1524,7 +2632,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
         unit_amount: shippingTotal,
         product_data: {
           name: "Shipping",
-          description: `USPS Ground Advantage (est.) - ${shippingWeightLbs} lb`
+          description: `USPS Ground Advantage (est.) - Zone ${shippingZone}, ${shippingBillableWeightLbs} lb billable`
         }
       },
       quantity: 1
@@ -1572,6 +2680,10 @@ app.post("/api/create-checkout-session", async (req, res) => {
         units_total: String(unitsTotal),
         shippable_units: String(shippableUnits),
         shipping_weight_lbs: String(shippingWeightLbs),
+        shipping_billable_weight_lbs: String(shippingBillableWeightLbs),
+        shipping_zone: String(shippingZone),
+        shipping_zone_multiplier: String(shippingZoneMultiplier),
+        shipping_base_rate_cents: String(shippingBaseRateCents),
         items_subtotal_cents: String(itemsSubtotal),
         shipping_total_cents: String(shippingTotal),
         manual_sales_tax_rate_pct: String(manualSalesTaxRatePercent),
@@ -1675,6 +2787,7 @@ app.get("*", (req, res) => {
 async function start() {
   await ensureProductStore();
   await ensureSiteSettingsStore();
+  await ensureAddressBookStore();
   await fs.mkdir(uploadsDir, { recursive: true });
 
   app.listen(port, () => {
