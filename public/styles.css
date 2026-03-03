@@ -200,6 +200,7 @@ body {
 }
 
 .hero-banner {
+  position: relative;
   margin-bottom: 1rem;
   border-radius: 16px;
   overflow: hidden;
@@ -246,31 +247,52 @@ h1 {
 }
 
 .home-sold-counter {
-  margin: 0.9rem 0 0;
-  display: inline-flex;
+  position: absolute;
+  top: clamp(0.45rem, 2.2vw, 1rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  width: min(920px, calc(100% - 1.1rem));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: baseline;
-  gap: 0.35rem;
-  padding: 0.35rem 0.7rem;
-  border: 1px solid #e5ceb6;
+  gap: 0.45rem;
+  padding: clamp(0.48rem, 1.6vw, 0.8rem) clamp(0.7rem, 2.6vw, 1.2rem);
+  border: 2px solid rgba(201, 112, 80, 0.45);
   border-radius: 999px;
-  background: #fff9f2;
+  background: rgba(255, 249, 242, 0.95);
+  backdrop-filter: blur(4px);
   color: #7f2f18;
   font-weight: 700;
+  text-align: center;
+  box-shadow: 0 10px 24px rgba(127, 47, 24, 0.18);
 }
 
-.home-sold-counter span {
+.home-sold-counter-prefix {
+  font-size: clamp(0.95rem, 2.2vw, 1.2rem);
+  letter-spacing: 0.02em;
+}
+
+.home-sold-counter span#home-sold-counter-value {
   display: inline-block;
-  min-width: 2ch;
+  min-width: 2.4ch;
   font-family: "Fraunces", serif;
-  font-size: clamp(1.05rem, 2.8vw, 1.35rem);
+  font-size: clamp(1.5rem, 4.8vw, 2.6rem);
   line-height: 1;
+  color: #ad4f2d;
+}
+
+.home-sold-counter-suffix {
+  font-size: clamp(0.95rem, 2.2vw, 1.2rem);
+  letter-spacing: 0.01em;
 }
 
 .home-sold-counter.is-empty {
-  opacity: 0.78;
+  opacity: 0.9;
 }
 
-.home-sold-counter.is-animating span {
+.home-sold-counter.is-animating span#home-sold-counter-value {
   animation: sold-slide 240ms ease-out;
 }
 
