@@ -838,6 +838,7 @@ function renderOrders(payload) {
         </button>
         <button class="ghost-btn" type="button" data-action="edit-shipping-address" data-id="${escapeHtml(order.id)}">Edit Address</button>
         <button class="ghost-btn" type="button" data-action="save-shipping-address" data-id="${escapeHtml(order.id)}">Save Address</button>
+        <button class="danger-btn" type="button" data-action="exclude-order" data-id="${escapeHtml(order.id)}">Remove Refunded Order</button>
         ${
           shipped
             ? `<button class="ghost-btn" type="button" data-action="resend-shipped-email" data-id="${escapeHtml(order.id)}">Resend Shipment Email</button>
@@ -1315,6 +1316,40 @@ ordersEl?.addEventListener("click", async (event) => {
         return;
       }
       setOrdersMessage(error.message || "Could not save shipping address.", true);
+    } finally {
+      setOrdersBusy(false);
+    }
+    return;
+  }
+
+  if (action === "exclude-order") {
+    const confirmed = window.confirm(
+      "Remove this refunded order from Admin lists and sold counters?\n\nThis does not delete it from Stripe."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setOrdersBusy(true);
+    setOrdersMessage("Removing refunded order...");
+    try {
+      await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/exclude`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          reason: "refunded"
+        })
+      });
+      await loadOrders();
+      setOrdersMessage(`Order ${orderId} removed from counters and admin list.`);
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setOrdersMessage(error.message || "Could not remove refunded order.", true);
     } finally {
       setOrdersBusy(false);
     }

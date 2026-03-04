@@ -37,6 +37,13 @@ import {
   listAddressBookEntries,
   upsertAddressBookEntry
 } from "./data/addressBookStore.js";
+import {
+  OrderExclusionValidationError,
+  ensureOrderExclusionStore,
+  excludeOrder,
+  listOrderExclusions,
+  restoreExcludedOrder
+} from "./data/orderExclusionStore.js";
 
 dotenv.config();
 const execFileAsync = promisify(execFile);
@@ -242,6 +249,10 @@ const soldCopiesCacheState = {
   inFlightPromise: null
 };
 
+function invalidateSoldCopiesCache() {
+  soldCopiesCacheState.updatedAtMs = 0;
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "../public");
@@ -440,6 +451,12 @@ async function fetchSoldCopiesStatsFromStripe() {
     };
   }
 
+  const excludedOrderIds = new Set(
+    (await listOrderExclusions())
+      .map((entry) => String(entry?.orderId || "").trim())
+      .filter(Boolean)
+  );
+
   let soldCopies = 0;
   let paidOrders = 0;
   let scannedSessions = 0;
@@ -463,6 +480,10 @@ async function fetchSoldCopiesStatsFromStripe() {
 
     for (const session of sessions) {
       if (session?.payment_status !== "paid") {
+        continue;
+      }
+      const sessionId = String(session?.id || "").trim();
+      if (sessionId && excludedOrderIds.has(sessionId)) {
         continue;
       }
       paidOrders += 1;
@@ -1773,22 +1794,30 @@ async function syncPublishContent(targetRoot) {
   const sourceProducts = path.join(process.cwd(), "data/products.json");
   const sourceSettings = path.join(process.cwd(), "data/site-settings.json");
   const sourceAddressBook = path.join(process.cwd(), "data/address-book.json");
+  const sourceOrderExclusions = path.join(process.cwd(), "data/order-exclusions.json");
   const sourceUploads = path.join(process.cwd(), "public/uploads");
 
   const targetProducts = path.join(targetRoot, "data/products.json");
   const targetSettings = path.join(targetRoot, "data/site-settings.json");
   const targetAddressBook = path.join(targetRoot, "data/address-book.json");
+  const targetOrderExclusions = path.join(targetRoot, "data/order-exclusions.json");
   const targetUploads = path.join(targetRoot, "public/uploads");
 
   await fs.mkdir(path.dirname(targetProducts), { recursive: true });
   await fs.mkdir(path.dirname(targetSettings), { recursive: true });
   await fs.mkdir(path.dirname(targetAddressBook), { recursive: true });
+  await fs.mkdir(path.dirname(targetOrderExclusions), { recursive: true });
   await fs.copyFile(sourceProducts, targetProducts);
   await fs.copyFile(sourceSettings, targetSettings);
   if (await pathExists(sourceAddressBook)) {
     await fs.copyFile(sourceAddressBook, targetAddressBook);
   } else {
     await fs.writeFile(targetAddressBook, "[]\n", "utf8");
+  }
+  if (await pathExists(sourceOrderExclusions)) {
+    await fs.copyFile(sourceOrderExclusions, targetOrderExclusions);
+  } else {
+    await fs.writeFile(targetOrderExclusions, "[]\n", "utf8");
   }
 
   await fs.rm(targetUploads, { recursive: true, force: true });
@@ -1825,6 +1854,7 @@ async function publishAdminSnapshot(commitMessageInput = "") {
       "data/products.json",
       "data/site-settings.json",
       "data/address-book.json",
+      "data/order-exclusions.json",
       "public/uploads"
     ]);
 
@@ -2137,11 +2167,20 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
       expand: ["data.payment_intent"]
     });
     const rawSessions = Array.isArray(response?.data) ? response.data : [];
+    const excludedOrderIds = new Set(
+      (await listOrderExclusions())
+        .map((entry) => String(entry?.orderId || "").trim())
+        .filter(Boolean)
+    );
     const paidSessions = paidOnly
       ? rawSessions.filter((session) => session.payment_status === "paid")
       : rawSessions;
+    const visibleSessions = paidSessions.filter((session) => {
+      const sessionId = String(session?.id || "").trim();
+      return !sessionId || !excludedOrderIds.has(sessionId);
+    });
 
-    const normalizedOrders = paidSessions
+    const normalizedOrders = visibleSessions
       .map((session) => {
         const totals = computeOrderTotals(session, []);
         const metadata = session.metadata || {};
@@ -2370,6 +2409,7 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
       fetchedAt: new Date().toISOString(),
       paidOnly,
       count: orders.length,
+      excludedCount: Math.max(0, paidSessions.length - visibleSessions.length),
       orders,
       customers
     });
@@ -2377,6 +2417,58 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
     const details = typeof error?.message === "string" ? error.message : "";
     return res.status(500).json({
       error: details ? `Could not load orders: ${details}` : "Could not load orders right now."
+    });
+  }
+});
+
+app.post("/api/admin/orders/:id/exclude", requireAdmin, async (req, res) => {
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  try {
+    const reason = String(req.body?.reason || "refunded").trim() || "refunded";
+    const entry = await excludeOrder(orderId, { reason });
+    invalidateSoldCopiesCache();
+    return res.json({
+      ok: true,
+      entry
+    });
+  } catch (error) {
+    if (error instanceof OrderExclusionValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not remove order: ${details}` : "Could not remove order right now."
+    });
+  }
+});
+
+app.delete("/api/admin/orders/:id/exclude", requireAdmin, async (req, res) => {
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  try {
+    const restored = await restoreExcludedOrder(orderId);
+    if (!restored) {
+      return res.status(404).json({ error: "Order was not excluded." });
+    }
+    invalidateSoldCopiesCache();
+    return res.json({
+      ok: true,
+      restored: true
+    });
+  } catch (error) {
+    if (error instanceof OrderExclusionValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not restore order: ${details}` : "Could not restore order right now."
     });
   }
 });
@@ -3316,6 +3408,7 @@ async function start() {
   await ensureProductStore();
   await ensureSiteSettingsStore();
   await ensureAddressBookStore();
+  await ensureOrderExclusionStore();
   await fs.mkdir(uploadsDir, { recursive: true });
 
   app.listen(port, () => {
