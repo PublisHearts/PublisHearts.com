@@ -79,6 +79,7 @@ const siteInputs = {
 
 const ADMIN_KEY = "publishearts_admin_password_v1";
 const SHIPPO_MANUAL_LABEL_URL = "https://apps.goshippo.com/orders";
+const SHIPPO_ORDER_EXPORT_VERSION = "SHIPPO_ORDER_EXPORT_V1";
 
 const state = {
   adminPassword: window.localStorage.getItem(ADMIN_KEY) || "",
@@ -408,6 +409,93 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function sanitizeExportValue(value) {
+  return String(value ?? "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function formatAmountForExport(cents) {
+  return ((Number(cents) || 0) / 100).toFixed(2);
+}
+
+function downloadTextFile(filename, text) {
+  const blob = new Blob([String(text || "")], { type: "text/plain;charset=utf-8" });
+  const objectUrl = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(objectUrl);
+}
+
+function safeExportFilename(orderId) {
+  const safeOrderId = String(orderId || "order")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 60);
+  return `shippo-order-${safeOrderId || "order"}.txt`;
+}
+
+function buildShippoOrderExportText(order) {
+  const createdAtRaw = Number(order?.createdAt);
+  const createdAtIso =
+    Number.isFinite(createdAtRaw) && createdAtRaw > 0 ? new Date(createdAtRaw * 1000).toISOString() : "";
+  const shippingWeightRaw = Number(order?.shippingWeightLbs);
+  const shippingWeight =
+    Number.isFinite(shippingWeightRaw) && shippingWeightRaw > 0 ? shippingWeightRaw.toFixed(2) : "";
+  const billableWeightRaw = Number(order?.shippingBillableWeightLbs);
+  const billableWeight =
+    Number.isFinite(billableWeightRaw) && billableWeightRaw > 0 ? billableWeightRaw.toFixed(2) : "";
+  const items = Array.isArray(order?.items) ? order.items : [];
+  const lines = [
+    SHIPPO_ORDER_EXPORT_VERSION,
+    `EXPORTED_AT=${new Date().toISOString()}`,
+    `ORDER_ID=${sanitizeExportValue(order?.id)}`,
+    `ORDER_DATE_ISO=${sanitizeExportValue(createdAtIso)}`,
+    `FULFILLMENT_STATUS=${sanitizeExportValue(order?.fulfillmentStatus || "pending")}`,
+    `CURRENCY=${sanitizeExportValue(String(order?.currency || "usd").toUpperCase())}`,
+    `AMOUNT_SUBTOTAL=${formatAmountForExport(order?.amountSubtotal)}`,
+    `AMOUNT_SHIPPING=${formatAmountForExport(order?.amountShipping)}`,
+    `AMOUNT_TAX=${formatAmountForExport(order?.amountTax)}`,
+    `AMOUNT_TOTAL=${formatAmountForExport(order?.amountTotal)}`,
+    `UNITS_TOTAL=${Math.max(0, Number(order?.unitsTotal) || 0)}`,
+    `SHIPPABLE_UNITS=${Math.max(0, Number(order?.shippableUnits) || 0)}`,
+    `PACKAGE_WEIGHT_AMOUNT=${sanitizeExportValue(shippingWeight)}`,
+    "PACKAGE_WEIGHT_UNIT=lb",
+    `PACKAGE_BILLABLE_WEIGHT_AMOUNT=${sanitizeExportValue(billableWeight)}`,
+    "PACKAGE_BILLABLE_WEIGHT_UNIT=lb",
+    `SHIPPING_ZONE=${Math.max(0, Number(order?.shippingZone) || 0)}`,
+    `CUSTOMER_NAME=${sanitizeExportValue(order?.customerName)}`,
+    `CUSTOMER_EMAIL=${sanitizeExportValue(order?.customerEmail)}`,
+    `CUSTOMER_PHONE=${sanitizeExportValue(order?.customerPhone)}`,
+    `SHIP_TO_NAME=${sanitizeExportValue(order?.shippingName)}`,
+    `SHIP_TO_LINE1=${sanitizeExportValue(order?.shippingAddressLine1)}`,
+    `SHIP_TO_LINE2=${sanitizeExportValue(order?.shippingAddressLine2)}`,
+    `SHIP_TO_CITY=${sanitizeExportValue(order?.shippingCity)}`,
+    `SHIP_TO_STATE=${sanitizeExportValue(order?.shippingState)}`,
+    `SHIP_TO_POSTAL_CODE=${sanitizeExportValue(order?.shippingPostalCode)}`,
+    `SHIP_TO_COUNTRY=${sanitizeExportValue(order?.shippingCountry || "US")}`,
+    `ITEM_COUNT=${items.length}`
+  ];
+
+  items.forEach((item, index) => {
+    const itemNumber = index + 1;
+    lines.push(`ITEM_${itemNumber}_NAME=${sanitizeExportValue(item?.name)}`);
+    lines.push(`ITEM_${itemNumber}_QUANTITY=${Math.max(0, Number(item?.quantity) || 0)}`);
+  });
+
+  lines.push("SHIPPO_RATE_SELECTION=cheapest");
+  lines.push("SHIPPO_LABEL_ACTION=save_only");
+  lines.push("SHIPPO_PURCHASE_LABEL=no");
+  return lines.join("\n");
+}
+
 function buildShippoManualLabelTemplate(order) {
   const shippingWeightRaw = Number(order?.shippingWeightLbs);
   const shippingWeight =
@@ -674,6 +762,9 @@ function renderOrders(payload) {
         <button class="ghost-btn" type="button" data-action="create-usps-label" data-id="${escapeHtml(order.id)}" ${
           blockedForStateMismatch ? "disabled title=\"Fix state mismatch first\"" : ""
         }>${uspsButtonLabel}</button>
+        <button class="ghost-btn" type="button" data-action="export-shippo-order-txt" data-id="${escapeHtml(order.id)}">
+          Export Shipping TXT
+        </button>
         <button class="ghost-btn" type="button" data-action="edit-shipping-address" data-id="${escapeHtml(order.id)}">Edit Address</button>
         <button class="ghost-btn" type="button" data-action="save-shipping-address" data-id="${escapeHtml(order.id)}">Save Address</button>
         ${
@@ -1221,6 +1312,23 @@ ordersEl?.addEventListener("click", async (event) => {
       setOrdersMessage(error.message || "Could not open Shippo label flow.", true);
     } finally {
       setOrdersBusy(false);
+    }
+    return;
+  }
+
+  if (action === "export-shippo-order-txt") {
+    if (!selectedOrder) {
+      setOrdersMessage("Order details are missing. Refresh and try again.", true);
+      return;
+    }
+
+    try {
+      const exportText = buildShippoOrderExportText(selectedOrder);
+      const filename = safeExportFilename(selectedOrder.id);
+      downloadTextFile(filename, exportText);
+      setOrdersMessage(`Exported ${filename}.`);
+    } catch (error) {
+      setOrdersMessage(error.message || "Could not export shipping TXT.", true);
     }
     return;
   }
