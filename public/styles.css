@@ -777,6 +777,82 @@ h1 {
 .admin-panel {
   display: grid;
   gap: 1rem;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.admin-panel > :not(.admin-edition-frame) {
+  grid-column: 2;
+}
+
+.admin-edition-frame {
+  grid-column: 1;
+  grid-row: 1 / span 20;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.7rem;
+  position: sticky;
+  top: 0.9rem;
+  max-height: calc(100vh - 1.8rem);
+  overflow: auto;
+}
+
+.admin-edition-frame h2 {
+  margin: 0;
+}
+
+.admin-edition-frame p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.admin-edition-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.admin-edition-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffefb;
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.admin-edition-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.admin-edition-card p {
+  margin: 0;
+}
+
+.admin-edition-buyers {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.22rem;
+}
+
+.admin-edition-buyers li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.admin-edition-buyers li span {
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.admin-edition-buyer-count {
+  color: #5e2410;
 }
 
 .admin-section {
@@ -1223,6 +1299,21 @@ h1 {
 
   .admin-toolbar {
     flex-direction: column;
+  }
+
+  .admin-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-panel > :not(.admin-edition-frame) {
+    grid-column: 1;
+  }
+
+  .admin-edition-frame {
+    grid-column: 1;
+    grid-row: auto;
+    position: static;
+    max-height: none;
   }
 
   .order-grid {

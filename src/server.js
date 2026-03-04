@@ -167,6 +167,10 @@ const parsedShippingCountries = (process.env.ALLOWED_SHIPPING_COUNTRIES || "US")
   .map((country) => country.trim().toUpperCase())
   .filter((country) => /^[A-Z]{2}$/.test(country));
 const allowedShippingCountries = parsedShippingCountries.length > 0 ? parsedShippingCountries : ["US"];
+const soldCounterExcludedKeywords = (process.env.SOLD_COUNTER_EXCLUDED_KEYWORDS || "mineral kit")
+  .split(",")
+  .map((entry) => String(entry || "").trim().toLowerCase())
+  .filter(Boolean);
 const uspsApiBaseUrl = ((process.env.USPS_API_BASE_URL || "").trim() || "https://apis.usps.com").replace(/\/$/, "");
 const uspsOauthUrl =
   (process.env.USPS_OAUTH_URL || "").trim() || `${uspsApiBaseUrl}/oauth2/v3/token`;
@@ -429,6 +433,47 @@ function parseCartSummaryEntries(metadata = {}) {
     });
 }
 
+function normalizeCounterItemName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function isCounterBookItemName(value) {
+  const normalized = normalizeCounterItemName(value);
+  if (!normalized) {
+    return false;
+  }
+  if (normalized === "shipping" || normalized === "sales tax" || normalized === "tax") {
+    return false;
+  }
+  if (soldCounterExcludedKeywords.some((keyword) => normalized.includes(keyword))) {
+    return false;
+  }
+  return true;
+}
+
+function calculateBookUnitsFromCartEntries(entries) {
+  const safeEntries = Array.isArray(entries) ? entries : [];
+  return safeEntries.reduce((sum, entry) => {
+    if (!isCounterBookItemName(entry?.name)) {
+      return sum;
+    }
+    return sum + Math.max(0, Number(entry?.quantity) || 0);
+  }, 0);
+}
+
+function shouldCountProductTowardBookCounter(product) {
+  if (!product || typeof product !== "object") {
+    return false;
+  }
+  if (product.excludeFromBookCounter === true || product.countTowardBookCounter === false) {
+    return false;
+  }
+  return isCounterBookItemName(product.title);
+}
+
 function calculateUnitsTotalFromSessionMetadata(session) {
   const metadata = session?.metadata || {};
   const unitsFromMetadata = readMetadataInteger(metadata, "units_total");
@@ -440,6 +485,16 @@ function calculateUnitsTotalFromSessionMetadata(session) {
     return name !== "shipping" && name !== "sales tax" && name !== "tax";
   });
   return cartEntries.reduce((sum, entry) => sum + (Number(entry.quantity) || 0), 0);
+}
+
+function calculateBookUnitsTotalFromSessionMetadata(session) {
+  const metadata = session?.metadata || {};
+  const bookUnitsFromMetadata = readMetadataInteger(metadata, "book_units_total");
+  if (Number.isFinite(bookUnitsFromMetadata) && bookUnitsFromMetadata >= 0) {
+    return bookUnitsFromMetadata;
+  }
+  const cartEntries = parseCartSummaryEntries(metadata);
+  return calculateBookUnitsFromCartEntries(cartEntries);
 }
 
 async function fetchSoldCopiesStatsFromStripe() {
@@ -487,7 +542,7 @@ async function fetchSoldCopiesStatsFromStripe() {
         continue;
       }
       paidOrders += 1;
-      soldCopies += calculateUnitsTotalFromSessionMetadata(session);
+      soldCopies += calculateBookUnitsTotalFromSessionMetadata(session);
     }
 
     scannedSessions += sessions.length;
@@ -2228,6 +2283,11 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           Number.isFinite(unitsFromMetadata) && unitsFromMetadata > 0
             ? unitsFromMetadata
             : cartEntries.reduce((sum, entry) => sum + (entry.quantity || 0), 0);
+        const bookUnitsFromMetadata = readMetadataInteger(metadata, "book_units_total");
+        const bookUnitsTotal =
+          Number.isFinite(bookUnitsFromMetadata) && bookUnitsFromMetadata >= 0
+            ? bookUnitsFromMetadata
+            : calculateBookUnitsFromCartEntries(cartEntries);
         const shippableUnitsFromMetadata = readMetadataInteger(metadata, "shippable_units");
         const shippableUnits =
           Number.isFinite(shippableUnitsFromMetadata) && shippableUnitsFromMetadata > 0
@@ -2280,6 +2340,7 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           amountTax: totals.amountTax,
           amountTotal: totals.amountTotal,
           unitsTotal,
+          bookUnitsTotal,
           shippableUnits,
           shippingWeightLbs,
           shippingBillableWeightLbs,
@@ -2354,6 +2415,7 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         amountTax: order.amountTax,
         amountTotal: order.amountTotal,
         unitsTotal: order.unitsTotal,
+        bookUnitsTotal: order.bookUnitsTotal,
         shippableUnits: order.shippableUnits,
         shippingWeightLbs: order.shippingWeightLbs,
         shippingBillableWeightLbs: order.shippingBillableWeightLbs,
@@ -3181,6 +3243,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
   const lineItems = [];
   const cartSummaryParts = [];
   let unitsTotal = 0;
+  let bookUnitsTotal = 0;
   let shippableUnits = 0;
   let itemsSubtotal = 0;
   for (const item of cart) {
@@ -3200,6 +3263,9 @@ app.post("/api/create-checkout-session", async (req, res) => {
 
     const quantity = Math.max(1, Math.min(10, Number.parseInt(item.quantity, 10) || 1));
     unitsTotal += quantity;
+    if (shouldCountProductTowardBookCounter(product)) {
+      bookUnitsTotal += quantity;
+    }
     itemsSubtotal += product.priceCents * quantity;
     if (product.shippingEnabled === true) {
       shippableUnits += quantity;
@@ -3284,6 +3350,7 @@ app.post("/api/create-checkout-session", async (req, res) => {
       metadata: {
         storefront: "publishearts.com",
         units_total: String(unitsTotal),
+        book_units_total: String(bookUnitsTotal),
         shippable_units: String(shippableUnits),
         shipping_weight_lbs: String(shippingWeightLbs),
         shipping_billable_weight_lbs: String(shippingBillableWeightLbs),

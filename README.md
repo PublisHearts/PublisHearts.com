@@ -56,6 +56,7 @@ Optional:
 - `MANUAL_SALES_TAX_APPLY_TO_SHIPPING` (`true` or `false`, defaults to `false`)
 - `MANUAL_NON_TAX_STATES` (defaults to `AK,DE,MT,NH,OR`; manual tax skipped for these states)
 - `SHIPPING_MIN_FEE` (defaults to `10.00`; checkout shipping is never below `$10.00`)
+- `SOLD_COUNTER_EXCLUDED_KEYWORDS` (defaults to `mineral kit`; comma-separated product title keywords excluded from sold-copy counters)
 - `SHIPPING_BASE_WEIGHT_LBS` (defaults to `1.5`, first shippable unit)
 - `SHIPPING_ADDITIONAL_WEIGHT_PER_UNIT_LBS` (defaults to `1.0`, each extra unit after first)
 - `USPS_GROUND_ADVANTAGE_RATE_TABLE` (comma-separated `lbs:dollars` "Weight Not Over" tiers)
@@ -109,12 +110,15 @@ From the dashboard you can:
 - Product data is saved to `data/products.json` by default.
 - Storefront settings are saved to `data/site-settings.json` by default.
 - Address book entries are saved to `data/address-book.json` by default.
+- Refunded/hidden order exclusions are saved to `data/order-exclusions.json` by default.
 - Uploaded files are saved to `public/uploads` by default.
 
 For production, use persistent storage paths if your host supports disks:
 
 - `PRODUCTS_FILE=/var/data/products.json`
 - `SITE_SETTINGS_FILE=/var/data/site-settings.json`
+- `ADDRESS_BOOK_FILE=/var/data/address-book.json`
+- `ORDER_EXCLUSIONS_FILE=/var/data/order-exclusions.json`
 - `UPLOADS_DIR=/var/data/uploads`
 
 ## Stripe webhook

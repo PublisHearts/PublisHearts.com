@@ -43,6 +43,7 @@ const soldCounterValueEl = document.getElementById("admin-sold-counter-value");
 const soldCounterKickerEl = document.getElementById("admin-sold-kicker");
 const soldCounterLabelEl = document.getElementById("admin-sold-counter-label");
 const soldCounterNoteEl = document.getElementById("admin-sold-counter-note");
+const editionBoardEl = document.getElementById("admin-edition-board");
 
 const siteSettingsForm = document.getElementById("site-settings-form");
 const designMessageEl = document.getElementById("design-message");
@@ -371,7 +372,133 @@ function buildEditionBreakdown(totalCopies, maxSegments = 8) {
   return parts.join(" | ");
 }
 
+function formatEditionWindowTitle(value) {
+  const edition = Math.max(1, Math.round(Number(value) || 1));
+  const words = {
+    1: "First",
+    2: "Second",
+    3: "Third",
+    4: "Fourth",
+    5: "Fifth",
+    6: "Sixth",
+    7: "Seventh",
+    8: "Eighth",
+    9: "Ninth",
+    10: "Tenth"
+  };
+  const ordinalWord = words[edition] || formatEditionOrdinal(edition);
+  return `The ${ordinalWord} 50`;
+}
+
+function buildEditionBuyerBuckets(orders) {
+  const safeOrders = Array.isArray(orders) ? [...orders] : [];
+  const chronologicalOrders = safeOrders.sort((left, right) => {
+    const leftCreatedAt = Number(left?.createdAt) || 0;
+    const rightCreatedAt = Number(right?.createdAt) || 0;
+    return leftCreatedAt - rightCreatedAt;
+  });
+
+  const buckets = [];
+  let currentEdition = 1;
+  let copiesUsedInEdition = 0;
+  let buyerMap = new Map();
+
+  const flushCurrentEdition = () => {
+    const buyers = Array.from(buyerMap.entries())
+      .map(([name, units]) => ({
+        name,
+        units
+      }))
+      .sort((left, right) => {
+        if (right.units !== left.units) {
+          return right.units - left.units;
+        }
+        return left.name.localeCompare(right.name);
+      });
+
+    buckets.push({
+      editionNumber: currentEdition,
+      unitsInEdition: copiesUsedInEdition,
+      buyers
+    });
+  };
+
+  for (const order of chronologicalOrders) {
+    let remainingUnits = Math.max(0, Math.round(Number(getOrderUnits(order)) || 0));
+    if (remainingUnits <= 0) {
+      continue;
+    }
+
+    const buyerName = String(order?.customerName || order?.shippingName || order?.customerEmail || "Unknown customer").trim();
+
+    while (remainingUnits > 0) {
+      const openSpots = COPIES_PER_EDITION - copiesUsedInEdition;
+      if (openSpots <= 0) {
+        flushCurrentEdition();
+        currentEdition += 1;
+        copiesUsedInEdition = 0;
+        buyerMap = new Map();
+        continue;
+      }
+
+      const unitsToAllocate = Math.min(openSpots, remainingUnits);
+      buyerMap.set(buyerName, (buyerMap.get(buyerName) || 0) + unitsToAllocate);
+      copiesUsedInEdition += unitsToAllocate;
+      remainingUnits -= unitsToAllocate;
+
+      if (copiesUsedInEdition >= COPIES_PER_EDITION) {
+        flushCurrentEdition();
+        currentEdition += 1;
+        copiesUsedInEdition = 0;
+        buyerMap = new Map();
+      }
+    }
+  }
+
+  if (copiesUsedInEdition > 0 || buckets.length === 0) {
+    flushCurrentEdition();
+  }
+
+  return buckets;
+}
+
+function renderEditionBoard(orders) {
+  if (!editionBoardEl) {
+    return;
+  }
+
+  const buckets = buildEditionBuyerBuckets(orders);
+  editionBoardEl.innerHTML = buckets
+    .map((bucket) => {
+      const buyersHtml =
+        bucket.buyers.length > 0
+          ? `<ul class="admin-edition-buyers">
+              ${bucket.buyers
+                .map(
+                  (buyer) => `<li>
+                    <span>${escapeHtml(buyer.name)}</span>
+                    <strong class="admin-edition-buyer-count">${formatWholeNumber(buyer.units)}</strong>
+                  </li>`
+                )
+                .join("")}
+            </ul>`
+          : `<p class="cart-item-sub">No book orders in this edition yet.</p>`;
+
+      return `<article class="admin-edition-card">
+        <h3>${escapeHtml(formatEditionWindowTitle(bucket.editionNumber))}</h3>
+        <p>${formatWholeNumber(bucket.unitsInEdition)} / ${COPIES_PER_EDITION} copies</p>
+        ${buyersHtml}
+      </article>`;
+    })
+    .join("");
+}
+
 function getOrderUnits(order) {
+  const bookUnitsTotal = Number(order?.bookUnitsTotal);
+  if (Number.isFinite(bookUnitsTotal) && bookUnitsTotal >= 0) {
+    return bookUnitsTotal;
+  }
+
   const unitsTotal = Number(order?.unitsTotal);
   if (Number.isFinite(unitsTotal) && unitsTotal > 0) {
     return unitsTotal;
@@ -675,6 +802,7 @@ function renderOrders(payload) {
   const allOrders = Array.isArray(payload?.orders) ? payload.orders : [];
   const allCustomers = Array.isArray(payload?.customers) ? payload.customers : [];
   updateSoldCounter(allOrders);
+  renderEditionBoard(allOrders);
   const query = String(ordersSearchInput?.value || "")
     .trim()
     .toLowerCase();
