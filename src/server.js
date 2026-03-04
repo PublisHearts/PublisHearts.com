@@ -2756,6 +2756,7 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
   const trackingUrlRaw = req.body?.trackingUrl;
   const noteRaw = req.body?.note;
   const resendEmail = parseBooleanFlag(req.body?.resendEmail, false) === true;
+  const overrideStateMismatch = parseBooleanFlag(req.body?.overrideStateMismatch, false) === true;
 
   try {
     const session = await stripe.checkout.sessions.retrieve(orderId, {
@@ -2772,7 +2773,7 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
     const stateMatchResult = evaluateCheckoutStateMatch(session, {
       paymentIntentMetadata: currentMetadata
     });
-    if (!stateMatchResult.stateMatch) {
+    if (!stateMatchResult.stateMatch && !overrideStateMismatch) {
       return res.status(409).json({
         error: `Cannot mark shipped: ${buildStateMismatchErrorMessage(stateMatchResult)}`
       });
