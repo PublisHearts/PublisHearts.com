@@ -440,6 +440,51 @@ function normalizeCounterItemName(value) {
     .replace(/\s+/g, " ");
 }
 
+function normalizeCounterWord(value) {
+  const cleaned = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  if (!cleaned) {
+    return "";
+  }
+  if (cleaned.endsWith("ies") && cleaned.length > 4) {
+    return `${cleaned.slice(0, -3)}y`;
+  }
+  if (cleaned.endsWith("s") && cleaned.length > 3) {
+    return cleaned.slice(0, -1);
+  }
+  return cleaned;
+}
+
+function buildCounterWordSet(value) {
+  const tokens = String(value || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .map((token) => normalizeCounterWord(token))
+    .filter(Boolean);
+  return new Set(tokens);
+}
+
+function matchesExcludedCounterKeyword(itemName, keyword) {
+  const normalizedName = normalizeCounterItemName(itemName);
+  const normalizedKeyword = normalizeCounterItemName(keyword);
+  if (!normalizedName || !normalizedKeyword) {
+    return false;
+  }
+  if (normalizedName.includes(normalizedKeyword)) {
+    return true;
+  }
+
+  const itemWords = buildCounterWordSet(normalizedName);
+  const keywordWords = Array.from(buildCounterWordSet(normalizedKeyword));
+  if (itemWords.size === 0 || keywordWords.length === 0) {
+    return false;
+  }
+
+  return keywordWords.every((word) => itemWords.has(word));
+}
+
 function isCounterBookItemName(value) {
   const normalized = normalizeCounterItemName(value);
   if (!normalized) {
@@ -448,7 +493,7 @@ function isCounterBookItemName(value) {
   if (normalized === "shipping" || normalized === "sales tax" || normalized === "tax") {
     return false;
   }
-  if (soldCounterExcludedKeywords.some((keyword) => normalized.includes(keyword))) {
+  if (soldCounterExcludedKeywords.some((keyword) => matchesExcludedCounterKeyword(normalized, keyword))) {
     return false;
   }
   return true;
