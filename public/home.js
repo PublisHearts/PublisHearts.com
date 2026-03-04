@@ -22,10 +22,16 @@ const footerLeft = document.getElementById("footer-left");
 const footerRight = document.getElementById("footer-right");
 const comingSoonGrid = document.getElementById("coming-soon-grid");
 const homeSoldCounter = document.getElementById("home-sold-counter");
+const homeSoldCounterPrefix = document.getElementById("home-sold-counter-prefix");
 const homeSoldCounterValue = document.getElementById("home-sold-counter-value");
+const homeSoldCounterSuffix = document.getElementById("home-sold-counter-suffix");
+const homeSoldCounterBreakdown = document.getElementById("home-sold-counter-breakdown");
 
 let homeSoldCurrentValue = 0;
 let homeSoldAnimationFrame = 0;
+let homeSoldCurrentEdition = 1;
+
+const COPIES_PER_EDITION = 50;
 
 function setText(el, value) {
   const text = String(value || "").trim();
@@ -54,6 +60,56 @@ function formatWholeNumber(value) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0
   }).format(Math.max(0, Math.round(Number(value) || 0)));
+}
+
+function formatEditionOrdinal(value) {
+  const edition = Math.max(1, Math.round(Number(value) || 1));
+  const mod100 = edition % 100;
+  const mod10 = edition % 10;
+  let suffix = "th";
+  if (mod100 < 11 || mod100 > 13) {
+    if (mod10 === 1) {
+      suffix = "st";
+    } else if (mod10 === 2) {
+      suffix = "nd";
+    } else if (mod10 === 3) {
+      suffix = "rd";
+    }
+  }
+  return `${edition}${suffix}`;
+}
+
+function getEditionProgress(totalCopies) {
+  const total = Math.max(0, Math.round(Number(totalCopies) || 0));
+  const completedEditions = Math.floor(total / COPIES_PER_EDITION);
+  const currentEdition = completedEditions + 1;
+  const copiesInCurrentEdition = total % COPIES_PER_EDITION;
+  const milestoneReached = total > 0 && copiesInCurrentEdition === 0;
+  return {
+    total,
+    completedEditions,
+    currentEdition,
+    copiesInCurrentEdition,
+    milestoneReached
+  };
+}
+
+function buildEditionBreakdown(totalCopies, maxSegments = 5) {
+  const progress = getEditionProgress(totalCopies);
+  const totalEditions = progress.currentEdition;
+  const startEdition = Math.max(1, totalEditions - maxSegments + 1);
+  const parts = [];
+
+  for (let edition = startEdition; edition <= totalEditions; edition += 1) {
+    const soldInEdition =
+      edition <= progress.completedEditions ? COPIES_PER_EDITION : progress.copiesInCurrentEdition;
+    parts.push(`${formatEditionOrdinal(edition)}: ${formatWholeNumber(soldInEdition)}/${COPIES_PER_EDITION}`);
+  }
+
+  if (startEdition > 1) {
+    return `Earlier editions complete | ${parts.join(" | ")}`;
+  }
+  return parts.join(" | ");
 }
 
 function setHomeSoldCounterValue(value) {
@@ -334,9 +390,32 @@ async function loadSoldCopies() {
   }
   const payload = await response.json();
   const soldCopies = Math.max(0, Math.round(Number(payload?.soldCopies) || 0));
+  const editionProgress = getEditionProgress(soldCopies);
+  if (editionProgress.currentEdition !== homeSoldCurrentEdition) {
+    homeSoldCurrentEdition = editionProgress.currentEdition;
+    homeSoldCurrentValue = 0;
+    setHomeSoldCounterValue(0);
+  }
+
   homeSoldCounter?.classList.remove("hidden");
   homeSoldCounter?.classList.toggle("is-empty", soldCopies <= 0);
-  animateHomeSoldCounter(soldCopies);
+  homeSoldCounter?.classList.toggle("edition-milestone", editionProgress.milestoneReached);
+  if (homeSoldCounterPrefix) {
+    homeSoldCounterPrefix.textContent = editionProgress.milestoneReached
+      ? `${formatEditionOrdinal(editionProgress.completedEditions)} edition complete`
+      : "Live edition counter";
+  }
+  if (homeSoldCounterSuffix) {
+    homeSoldCounterSuffix.textContent = `of ${COPIES_PER_EDITION} copies in ${formatEditionOrdinal(
+      editionProgress.currentEdition
+    )} edition`;
+  }
+  if (homeSoldCounterBreakdown) {
+    homeSoldCounterBreakdown.textContent = `Editions: ${buildEditionBreakdown(soldCopies)} | Total sold: ${formatWholeNumber(
+      soldCopies
+    )}`;
+  }
+  animateHomeSoldCounter(editionProgress.copiesInCurrentEdition);
 }
 
 loadSiteSettings().catch(() => {});

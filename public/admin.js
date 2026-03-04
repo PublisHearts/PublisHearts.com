@@ -40,6 +40,8 @@ const ordersEl = document.getElementById("admin-orders");
 const ordersMessageEl = document.getElementById("orders-message");
 const soldCounterEl = document.getElementById("admin-sold-counter");
 const soldCounterValueEl = document.getElementById("admin-sold-counter-value");
+const soldCounterKickerEl = document.getElementById("admin-sold-kicker");
+const soldCounterLabelEl = document.getElementById("admin-sold-counter-label");
 const soldCounterNoteEl = document.getElementById("admin-sold-counter-note");
 
 const siteSettingsForm = document.getElementById("site-settings-form");
@@ -93,12 +95,14 @@ const state = {
   ordersPayload: null,
   soldCounterValue: 0,
   soldCounterAnimationFrame: 0,
+  soldCounterEdition: 1,
   dragProductId: null,
   dropTargetId: null,
   dropAfter: false
 };
 
 const DEFAULT_SHIPPING_FEE = 5;
+const COPIES_PER_EDITION = 50;
 
 function setMessage(targetEl, message, isError = false) {
   if (!targetEl) {
@@ -317,6 +321,56 @@ function formatWholeNumber(value) {
   }).format(Math.max(0, Math.round(Number(value) || 0)));
 }
 
+function formatEditionOrdinal(value) {
+  const edition = Math.max(1, Math.round(Number(value) || 1));
+  const mod100 = edition % 100;
+  const mod10 = edition % 10;
+  let suffix = "th";
+  if (mod100 < 11 || mod100 > 13) {
+    if (mod10 === 1) {
+      suffix = "st";
+    } else if (mod10 === 2) {
+      suffix = "nd";
+    } else if (mod10 === 3) {
+      suffix = "rd";
+    }
+  }
+  return `${edition}${suffix}`;
+}
+
+function getEditionProgress(totalCopies) {
+  const total = Math.max(0, Math.round(Number(totalCopies) || 0));
+  const completedEditions = Math.floor(total / COPIES_PER_EDITION);
+  const currentEdition = completedEditions + 1;
+  const copiesInCurrentEdition = total % COPIES_PER_EDITION;
+  const milestoneReached = total > 0 && copiesInCurrentEdition === 0;
+  return {
+    total,
+    completedEditions,
+    currentEdition,
+    copiesInCurrentEdition,
+    milestoneReached
+  };
+}
+
+function buildEditionBreakdown(totalCopies, maxSegments = 8) {
+  const progress = getEditionProgress(totalCopies);
+  const totalEditions = progress.currentEdition;
+  const startEdition = Math.max(1, totalEditions - maxSegments + 1);
+  const parts = [];
+
+  for (let edition = startEdition; edition <= totalEditions; edition += 1) {
+    const soldInEdition =
+      edition <= progress.completedEditions ? COPIES_PER_EDITION : progress.copiesInCurrentEdition;
+    parts.push(`${formatEditionOrdinal(edition)}: ${formatWholeNumber(soldInEdition)}/${COPIES_PER_EDITION}`);
+  }
+
+  if (startEdition > 1) {
+    return `Earlier editions complete | ${parts.join(" | ")}`;
+  }
+  return parts.join(" | ");
+}
+
 function getOrderUnits(order) {
   const unitsTotal = Number(order?.unitsTotal);
   if (Number.isFinite(unitsTotal) && unitsTotal > 0) {
@@ -390,13 +444,30 @@ function animateSoldCounter(targetValue) {
 function updateSoldCounter(orders) {
   const orderList = Array.isArray(orders) ? orders : [];
   const soldUnits = orderList.reduce((sum, order) => sum + getOrderUnits(order), 0);
-  animateSoldCounter(soldUnits);
+  const editionProgress = getEditionProgress(soldUnits);
+  if (editionProgress.currentEdition !== state.soldCounterEdition) {
+    state.soldCounterEdition = editionProgress.currentEdition;
+    state.soldCounterValue = 0;
+    setSoldCounterValue(0);
+  }
+
+  animateSoldCounter(editionProgress.copiesInCurrentEdition);
   soldCounterEl?.classList.toggle("is-empty", soldUnits <= 0);
+  soldCounterEl?.classList.toggle("edition-milestone", editionProgress.milestoneReached);
+  if (soldCounterKickerEl) {
+    soldCounterKickerEl.textContent = editionProgress.milestoneReached
+      ? `${formatEditionOrdinal(editionProgress.completedEditions)} edition complete`
+      : `${formatEditionOrdinal(editionProgress.currentEdition)} edition in progress`;
+  }
+  if (soldCounterLabelEl) {
+    soldCounterLabelEl.textContent = `/ ${COPIES_PER_EDITION} copies in ${formatEditionOrdinal(
+      editionProgress.currentEdition
+    )} edition`;
+  }
   if (soldCounterNoteEl) {
-    soldCounterNoteEl.textContent =
-      soldUnits > 0
-        ? `Across ${formatWholeNumber(orderList.length)} paid orders`
-        : "No paid orders yet";
+    soldCounterNoteEl.textContent = `Across ${formatWholeNumber(orderList.length)} paid orders | Editions: ${buildEditionBreakdown(
+      soldUnits
+    )}`;
   }
 }
 

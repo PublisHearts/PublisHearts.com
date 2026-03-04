@@ -289,8 +289,20 @@ h1 {
   letter-spacing: 0.01em;
 }
 
+.home-sold-counter-breakdown {
+  flex-basis: 100%;
+  font-size: clamp(0.72rem, 1.9vw, 0.92rem);
+  font-weight: 600;
+  color: #8b492f;
+}
+
 .home-sold-counter.is-empty {
   opacity: 0.9;
+}
+
+.home-sold-counter.edition-milestone {
+  border-color: rgba(220, 129, 63, 0.78);
+  box-shadow: 0 0 0 2px rgba(229, 153, 91, 0.26), 0 12px 28px rgba(127, 47, 24, 0.24);
 }
 
 .home-sold-counter.is-animating span#home-sold-counter-value {
@@ -1090,6 +1102,13 @@ h1 {
   color: #ad4f2d;
 }
 
+.admin-sold-count-label {
+  font-family: "Manrope", sans-serif;
+  font-size: clamp(0.88rem, 2vw, 1.02rem);
+  font-weight: 600;
+  color: #6d4a37 !important;
+}
+
 .admin-sold-caption {
   margin: 0;
   color: #6d5a4b;
@@ -1097,6 +1116,11 @@ h1 {
 
 .admin-orders-celebration.is-empty {
   filter: saturate(0.75);
+}
+
+.admin-orders-celebration.edition-milestone {
+  border-color: #dd9a47;
+  box-shadow: 0 0 0 2px rgba(229, 164, 93, 0.22), 0 12px 28px rgba(141, 57, 28, 0.12);
 }
 
 .admin-orders-celebration.is-animating .admin-sold-count span {
