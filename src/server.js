@@ -131,10 +131,11 @@ const shippingAdditionalWeightPerUnitLbs =
     ? parsedShippingAdditionalWeightPerUnitLbs
     : 1;
 const parsedShippingMinimumDollars = Number.parseFloat(String(process.env.SHIPPING_MIN_FEE || "0"));
+const shippingHardMinimumCents = 1000;
 const shippingMinimumCents =
   Number.isFinite(parsedShippingMinimumDollars) && parsedShippingMinimumDollars >= 0
-    ? Math.round(parsedShippingMinimumDollars * 100)
-    : 0;
+    ? Math.max(shippingHardMinimumCents, Math.round(parsedShippingMinimumDollars * 100))
+    : shippingHardMinimumCents;
 const shippingRateTableDefault =
   "1.5:11.92,2:12.90,3:14.58,4:16.68,5:17.77,10:23.50";
 const shippingRateTableRaw =
@@ -1186,7 +1187,11 @@ function getOrderShippingAddress(session, options = {}) {
   const shippingStateBase = String(shippingAddress?.state || "").trim().toUpperCase();
   const shippingStateOverride = String(paymentIntentMetadata.fulfillment_shipping_state_override || "").trim().toUpperCase();
   const shippingPostalCodeBase = String(shippingAddress?.postal_code || "").trim().toUpperCase();
-  const shippingPostalCodeOverride = String(paymentIntentMetadata.fulfillment_shipping_postal_code_override || "")
+  const shippingPostalCodeOverride = String(
+    paymentIntentMetadata.fulfillment_shipping_postal_override ||
+      paymentIntentMetadata.fulfillment_shipping_postal_code_override ||
+      ""
+  )
     .trim()
     .toUpperCase();
   const shippingCountryBase = normalizeIsoCountry(shippingAddress?.country, "US");
@@ -2451,7 +2456,7 @@ app.post("/api/admin/orders/:id/edit-shipping-address", requireAdmin, async (req
       fulfillment_shipping_line2_override: shippingLine2,
       fulfillment_shipping_city_override: shippingCity,
       fulfillment_shipping_state_override: shippingState,
-      fulfillment_shipping_postal_code_override: shippingPostalCode,
+      fulfillment_shipping_postal_override: shippingPostalCode,
       fulfillment_shipping_country_override: shippingCountry
     };
     const stateMatchResult = evaluateCheckoutStateMatch(session, {

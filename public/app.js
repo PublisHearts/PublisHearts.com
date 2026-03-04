@@ -44,7 +44,7 @@ const CART_KEY = "publishearts_cart_v1";
 const DEFAULT_SHIPPING_CONFIG = Object.freeze({
   baseWeightLbs: 1.5,
   additionalWeightPerUnitLbs: 1,
-  minimumCents: 0,
+  minimumCents: 1000,
   defaultZone: 8,
   fromState: "NY",
   ratePoints: [

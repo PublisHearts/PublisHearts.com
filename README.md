@@ -55,7 +55,7 @@ Optional:
 - `MANUAL_SALES_TAX_RATE` (defaults to `0`; set percent like `7.25` for manual tax line item)
 - `MANUAL_SALES_TAX_APPLY_TO_SHIPPING` (`true` or `false`, defaults to `false`)
 - `MANUAL_NON_TAX_STATES` (defaults to `AK,DE,MT,NH,OR`; manual tax skipped for these states)
-- `SHIPPING_MIN_FEE` (defaults to `0.00`; set >0 for a checkout shipping floor)
+- `SHIPPING_MIN_FEE` (defaults to `10.00`; checkout shipping is never below `$10.00`)
 - `SHIPPING_BASE_WEIGHT_LBS` (defaults to `1.5`, first shippable unit)
 - `SHIPPING_ADDITIONAL_WEIGHT_PER_UNIT_LBS` (defaults to `1.0`, each extra unit after first)
 - `USPS_GROUND_ADVANTAGE_RATE_TABLE` (comma-separated `lbs:dollars` "Weight Not Over" tiers)
