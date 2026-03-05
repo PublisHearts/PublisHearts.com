@@ -2039,7 +2039,126 @@ async function publishAdminSnapshot(commitMessageInput = "") {
   }
 }
 
-app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), async (req, res) => {
+async function processStripeCheckoutCompletedEvent(eventSession) {
+  if (!stripe) {
+    return;
+  }
+
+  const sessionId = String(eventSession?.id || "").trim();
+  if (!sessionId) {
+    console.warn("checkout.session.completed missing session id");
+    return;
+  }
+
+  try {
+    // Re-fetch the session from Stripe for complete customer/shipping fields.
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ["payment_intent"]
+    });
+    const lineItemsResponse = await stripe.checkout.sessions.listLineItems(session.id, {
+      limit: 100
+    });
+    let lineItems = lineItemsResponse.data.map((item) => ({
+      name: item.description || "Book",
+      quantity: item.quantity || 1,
+      amountTotal: item.amount_total || 0
+    }));
+    if (lineItems.length === 0) {
+      lineItems = parseLineItemsFromMetadata(session.metadata);
+      if (lineItems.length > 0) {
+        console.warn(`Using metadata fallback for line items on session ${session.id}`);
+      }
+    }
+    const totals = computeOrderTotals(session, lineItems);
+    const customerEmail = session.customer_details?.email || session.customer_email || "";
+    const paymentIntentId = getPaymentIntentIdFromSession(session);
+    const paymentIntentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+    const stateMatchResult = evaluateCheckoutStateMatch(session, {
+      paymentIntentMetadata
+    });
+    const holdForStateMismatch = !stateMatchResult.stateMatch;
+
+    if (paymentIntentId) {
+      await stripe.paymentIntents.update(paymentIntentId, {
+        metadata: {
+          ...paymentIntentMetadata,
+          fulfillment_status:
+            holdForStateMismatch
+              ? "pending"
+              : String(paymentIntentMetadata.fulfillment_status || "pending"),
+          fulfillment_hold_reason:
+            holdForStateMismatch
+              ? "state_mismatch"
+              : String(paymentIntentMetadata.fulfillment_hold_reason || ""),
+          fulfillment_selected_state: stateMatchResult.selectedState || "",
+          fulfillment_shipping_state: stateMatchResult.shippingState || stateMatchResult.shippingStateRaw || "",
+          fulfillment_shipping_country: stateMatchResult.shippingCountry || "",
+          fulfillment_state_match: String(stateMatchResult.stateMatch),
+          fulfillment_state_mismatch_reason: holdForStateMismatch ? stateMatchResult.mismatchReason : ""
+        }
+      });
+    }
+
+    if (holdForStateMismatch) {
+      console.warn(`State mismatch hold on order ${session.id}: ${buildStateMismatchErrorMessage(stateMatchResult)}`);
+    }
+
+    const notificationTasks = [];
+
+    if (!customerEmail) {
+      console.warn(`No customer email found for completed session ${session.id}`);
+    } else {
+      notificationTasks.push(
+        sendCustomerReceipt({
+          customerEmail,
+          orderId: session.id,
+          amountSubtotal: totals.amountSubtotal,
+          amountShipping: totals.amountShipping,
+          amountTax: totals.amountTax,
+          amountTotal: totals.amountTotal,
+          currency: session.currency || currency,
+          lineItems,
+          shippingDetails: session.shipping_details || {}
+        })
+          .then(() => {
+            console.log(`Customer receipt sent for session ${session.id} -> ${customerEmail}`);
+          })
+          .catch((error) => {
+            console.error(`Failed to send customer receipt for session ${session.id}:`, error);
+          })
+      );
+    }
+
+    notificationTasks.push(
+      sendOwnerNotification({
+        orderId: session.id,
+        amountSubtotal: totals.amountSubtotal,
+        amountShipping: totals.amountShipping,
+        amountTax: totals.amountTax,
+        amountTotal: totals.amountTotal,
+        currency: session.currency || currency,
+        lineItems,
+        customerDetails: session.customer_details || {},
+        shippingDetails: session.shipping_details || {}
+      })
+        .then(() => {
+          console.log(`Owner notification sent for session ${session.id}`);
+        })
+        .catch((error) => {
+          console.error(`Failed to send owner notification for session ${session.id}:`, error);
+        })
+    );
+
+    await Promise.allSettled(notificationTasks);
+  } catch (error) {
+    console.error("Failed to process checkout completion:", error);
+  }
+}
+
+app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req, res) => {
   if (!stripe) {
     return res.status(500).send("Stripe not configured");
   }
@@ -2058,102 +2177,15 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), asyn
     return res.status(400).send(`Webhook Error: ${error.message}`);
   }
 
+  // Respond immediately so upstream email/Stripe API slowness cannot cause webhook timeouts/retries.
+  res.json({ received: true });
+
   if (event.type === "checkout.session.completed") {
     const eventSession = event.data.object;
-
-    try {
-      // Re-fetch the session from Stripe for complete customer/shipping fields.
-      const session = await stripe.checkout.sessions.retrieve(eventSession.id, {
-        expand: ["payment_intent"]
-      });
-      const lineItemsResponse = await stripe.checkout.sessions.listLineItems(session.id, {
-        limit: 100
-      });
-      let lineItems = lineItemsResponse.data.map((item) => ({
-        name: item.description || "Book",
-        quantity: item.quantity || 1,
-        amountTotal: item.amount_total || 0
-      }));
-      if (lineItems.length === 0) {
-        lineItems = parseLineItemsFromMetadata(session.metadata);
-        if (lineItems.length > 0) {
-          console.warn(`Using metadata fallback for line items on session ${session.id}`);
-        }
-      }
-      const totals = computeOrderTotals(session, lineItems);
-      const customerEmail = session.customer_details?.email || session.customer_email || "";
-      const paymentIntentId = getPaymentIntentIdFromSession(session);
-      const paymentIntentMetadata =
-        session.payment_intent && typeof session.payment_intent === "object"
-          ? session.payment_intent.metadata || {}
-          : {};
-      const stateMatchResult = evaluateCheckoutStateMatch(session, {
-        paymentIntentMetadata
-      });
-      const holdForStateMismatch = !stateMatchResult.stateMatch;
-
-      if (paymentIntentId) {
-        await stripe.paymentIntents.update(paymentIntentId, {
-          metadata: {
-            ...paymentIntentMetadata,
-            fulfillment_status:
-              holdForStateMismatch
-                ? "pending"
-                : String(paymentIntentMetadata.fulfillment_status || "pending"),
-            fulfillment_hold_reason:
-              holdForStateMismatch
-                ? "state_mismatch"
-                : String(paymentIntentMetadata.fulfillment_hold_reason || ""),
-            fulfillment_selected_state: stateMatchResult.selectedState || "",
-            fulfillment_shipping_state: stateMatchResult.shippingState || stateMatchResult.shippingStateRaw || "",
-            fulfillment_shipping_country: stateMatchResult.shippingCountry || "",
-            fulfillment_state_match: String(stateMatchResult.stateMatch),
-            fulfillment_state_mismatch_reason: holdForStateMismatch ? stateMatchResult.mismatchReason : ""
-          }
-        });
-      }
-
-      if (holdForStateMismatch) {
-        console.warn(
-          `State mismatch hold on order ${session.id}: ${buildStateMismatchErrorMessage(stateMatchResult)}`
-        );
-      }
-
-      if (!customerEmail) {
-        console.warn(`No customer email found for completed session ${session.id}`);
-      } else {
-        await sendCustomerReceipt({
-          customerEmail,
-          orderId: session.id,
-          amountSubtotal: totals.amountSubtotal,
-          amountShipping: totals.amountShipping,
-          amountTax: totals.amountTax,
-          amountTotal: totals.amountTotal,
-          currency: session.currency || currency,
-          lineItems,
-          shippingDetails: session.shipping_details || {}
-        });
-        console.log(`Customer receipt sent for session ${session.id} -> ${customerEmail}`);
-      }
-
-      await sendOwnerNotification({
-        orderId: session.id,
-        amountSubtotal: totals.amountSubtotal,
-        amountShipping: totals.amountShipping,
-        amountTax: totals.amountTax,
-        amountTotal: totals.amountTotal,
-        currency: session.currency || currency,
-        lineItems,
-        customerDetails: session.customer_details || {},
-        shippingDetails: session.shipping_details || {}
-      });
-      console.log(`Owner notification sent for session ${session.id}`);
-    } catch (error) {
-      console.error("Failed to process checkout completion:", error);
-    }
+    setImmediate(() => {
+      void processStripeCheckoutCompletedEvent(eventSession);
+    });
   }
-
-  return res.json({ received: true });
 });
 
 app.use(express.json());
