@@ -34,6 +34,7 @@ const refreshHealthBtn = document.getElementById("refresh-health-btn");
 const adminHealthEl = document.getElementById("admin-health");
 const healthMessageEl = document.getElementById("health-message");
 const refreshOrdersBtn = document.getElementById("refresh-orders-btn");
+const exportOrdersCsvBtn = document.getElementById("export-orders-csv-btn");
 const ordersSearchInput = document.getElementById("orders-search");
 const orderCustomersEl = document.getElementById("admin-order-customers");
 const ordersEl = document.getElementById("admin-orders");
@@ -166,6 +167,9 @@ function setOrdersBusy(isBusy) {
   state.ordersBusy = isBusy;
   if (refreshOrdersBtn) {
     refreshOrdersBtn.disabled = isBusy;
+  }
+  if (exportOrdersCsvBtn) {
+    exportOrdersCsvBtn.disabled = isBusy;
   }
 }
 
@@ -390,7 +394,40 @@ function formatEditionWindowTitle(value) {
   return `The ${ordinalWord} 50`;
 }
 
-function buildEditionBuyerBuckets(orders) {
+function formatCopyLabel(units) {
+  const total = Math.max(0, Math.round(Number(units) || 0));
+  return `${formatWholeNumber(total)} ${total === 1 ? "copy" : "copies"}`;
+}
+
+function formatShortOrderLabel(orderId) {
+  const cleanId = String(orderId || "").trim();
+  if (!cleanId) {
+    return "Order";
+  }
+  return cleanId.length > 12 ? `Order ${cleanId.slice(-8)}` : `Order ${cleanId}`;
+}
+
+function getOrderPackagedAt(order) {
+  const packagedAt = Number(order?.packagedAt);
+  if (Number.isFinite(packagedAt) && packagedAt > 0) {
+    return packagedAt;
+  }
+  const shippedAt = Number(order?.shippedAt);
+  if (Number.isFinite(shippedAt) && shippedAt > 0 && String(order?.fulfillmentStatus || "pending") === "shipped") {
+    return shippedAt;
+  }
+  return 0;
+}
+
+function isOrderPackaged(order) {
+  return getOrderPackagedAt(order) > 0;
+}
+
+function getOrderPackageWeightValue(order) {
+  return String(order?.packageWeightValue ?? "").trim();
+}
+
+function buildEditionOrderBuckets(orders) {
   const safeOrders = Array.isArray(orders) ? [...orders] : [];
   const chronologicalOrders = safeOrders.sort((left, right) => {
     const leftCreatedAt = Number(left?.createdAt) || 0;
@@ -401,25 +438,15 @@ function buildEditionBuyerBuckets(orders) {
   const buckets = [];
   let currentEdition = 1;
   let copiesUsedInEdition = 0;
-  let buyerMap = new Map();
+  let packagedUnitsInEdition = 0;
+  let entries = [];
 
   const flushCurrentEdition = () => {
-    const buyers = Array.from(buyerMap.entries())
-      .map(([name, units]) => ({
-        name,
-        units
-      }))
-      .sort((left, right) => {
-        if (right.units !== left.units) {
-          return right.units - left.units;
-        }
-        return left.name.localeCompare(right.name);
-      });
-
     buckets.push({
       editionNumber: currentEdition,
       unitsInEdition: copiesUsedInEdition,
-      buyers
+      packagedUnitsInEdition,
+      entries
     });
   };
 
@@ -430,6 +457,11 @@ function buildEditionBuyerBuckets(orders) {
     }
 
     const buyerName = String(order?.customerName || order?.shippingName || order?.customerEmail || "Unknown customer").trim();
+    const orderId = String(order?.id || "").trim();
+    const packagedAt = getOrderPackagedAt(order);
+    const packaged = packagedAt > 0;
+    const packageWeightValue = getOrderPackageWeightValue(order);
+    const shipped = String(order?.fulfillmentStatus || "pending") === "shipped";
 
     while (remainingUnits > 0) {
       const openSpots = COPIES_PER_EDITION - copiesUsedInEdition;
@@ -437,20 +469,33 @@ function buildEditionBuyerBuckets(orders) {
         flushCurrentEdition();
         currentEdition += 1;
         copiesUsedInEdition = 0;
-        buyerMap = new Map();
+        packagedUnitsInEdition = 0;
+        entries = [];
         continue;
       }
 
       const unitsToAllocate = Math.min(openSpots, remainingUnits);
-      buyerMap.set(buyerName, (buyerMap.get(buyerName) || 0) + unitsToAllocate);
+      entries.push({
+        orderId,
+        buyerName,
+        units: unitsToAllocate,
+        packagedAt,
+        packageWeightValue,
+        isPackaged: packaged,
+        isShipped: shipped
+      });
       copiesUsedInEdition += unitsToAllocate;
+      if (packaged) {
+        packagedUnitsInEdition += unitsToAllocate;
+      }
       remainingUnits -= unitsToAllocate;
 
       if (copiesUsedInEdition >= COPIES_PER_EDITION) {
         flushCurrentEdition();
         currentEdition += 1;
         copiesUsedInEdition = 0;
-        buyerMap = new Map();
+        packagedUnitsInEdition = 0;
+        entries = [];
       }
     }
   }
@@ -467,18 +512,62 @@ function renderEditionBoard(orders) {
     return;
   }
 
-  const buckets = buildEditionBuyerBuckets(orders);
+  const buckets = buildEditionOrderBuckets(orders);
   editionBoardEl.innerHTML = buckets
     .map((bucket) => {
       const buyersHtml =
-        bucket.buyers.length > 0
+        bucket.entries.length > 0
           ? `<ul class="admin-edition-buyers">
-              ${bucket.buyers
+              ${bucket.entries
                 .map(
-                  (buyer) => `<li>
-                    <span>${escapeHtml(buyer.name)}</span>
-                    <strong class="admin-edition-buyer-count">${formatWholeNumber(buyer.units)}</strong>
-                  </li>`
+                  (entry) => {
+                    const statusLabel = entry.isShipped ? "Shipped" : entry.isPackaged ? "Packaged" : "Open";
+                    const metaParts = [formatShortOrderLabel(entry.orderId), formatCopyLabel(entry.units)];
+                    if (entry.isPackaged && entry.packagedAt > 0) {
+                      metaParts.push(`Packed ${formatDateTime(entry.packagedAt)}`);
+                    }
+                    const packagedTitle = entry.isShipped
+                      ? "Already shipped"
+                      : entry.isPackaged
+                        ? "Click to unmark packaged"
+                        : "Click to mark packaged";
+                    return `<li>
+                      <div
+                        class="admin-edition-entry ${entry.isPackaged ? "is-packaged" : ""} ${entry.isShipped ? "is-shipped" : ""}"
+                        data-action="toggle-packaged-order"
+                        data-id="${escapeHtml(entry.orderId)}"
+                        title="${escapeHtml(packagedTitle)}"
+                        role="button"
+                        tabindex="0"
+                        aria-disabled="${entry.isShipped ? "true" : "false"}"
+                      >
+                        <span class="admin-edition-entry-main">
+                          <span class="admin-edition-entry-header">
+                            <span class="admin-edition-entry-name">${escapeHtml(entry.buyerName)}</span>
+                            <label class="admin-edition-weight" data-package-weight-field>
+                              <span class="admin-edition-weight-label">Wt</span>
+                              <input
+                                class="admin-edition-weight-input"
+                                type="number"
+                                inputmode="decimal"
+                                step="0.01"
+                                min="0"
+                                placeholder="0"
+                                value="${escapeHtml(entry.packageWeightValue)}"
+                                data-action="save-package-weight"
+                                data-id="${escapeHtml(entry.orderId)}"
+                              />
+                            </label>
+                          </span>
+                          <span class="admin-edition-entry-meta">${escapeHtml(metaParts.join(" | "))}</span>
+                        </span>
+                        <span class="admin-edition-entry-side">
+                          <strong class="admin-edition-buyer-count">${formatWholeNumber(entry.units)}</strong>
+                          <span class="admin-edition-entry-status">${escapeHtml(statusLabel)}</span>
+                        </span>
+                      </div>
+                    </li>`;
+                  }
                 )
                 .join("")}
             </ul>`
@@ -486,7 +575,7 @@ function renderEditionBoard(orders) {
 
       return `<article class="admin-edition-card">
         <h3>${escapeHtml(formatEditionWindowTitle(bucket.editionNumber))}</h3>
-        <p>${formatWholeNumber(bucket.unitsInEdition)} / ${COPIES_PER_EDITION} copies</p>
+        <p class="admin-edition-progress">${formatWholeNumber(bucket.unitsInEdition)} / ${COPIES_PER_EDITION} copies | ${formatWholeNumber(bucket.packagedUnitsInEdition)} packaged</p>
         ${buyersHtml}
       </article>`;
     })
@@ -618,6 +707,13 @@ function formatAmountForExport(cents) {
   return ((Number(cents) || 0) / 100).toFixed(2);
 }
 
+function toCsvCell(value) {
+  const safeValue = String(value ?? "");
+  const needsQuotes = safeValue.includes('"') || safeValue.includes(",") || safeValue.includes("\n") || safeValue.includes("\r");
+  const escapedValue = safeValue.replace(/"/g, '""');
+  return needsQuotes ? `"${escapedValue}"` : escapedValue;
+}
+
 function downloadTextFile(filename, text) {
   const blob = new Blob([String(text || "")], { type: "text/plain;charset=utf-8" });
   const objectUrl = window.URL.createObjectURL(blob);
@@ -692,6 +788,199 @@ function buildShippoOrderExportText(order) {
   lines.push("SHIPPO_LABEL_ACTION=save_only");
   lines.push("SHIPPO_PURCHASE_LABEL=no");
   return lines.join("\n");
+}
+
+function getOrderSearchQuery() {
+  return String(ordersSearchInput?.value || "").trim().toLowerCase();
+}
+
+function getFilteredOrdersForDisplay(payload) {
+  const allOrders = Array.isArray(payload?.orders) ? payload.orders : [];
+  const allCustomers = Array.isArray(payload?.customers) ? payload.customers : [];
+  const query = getOrderSearchQuery();
+  const matchesSearch = (order) => {
+    if (!query) {
+      return true;
+    }
+    const haystack = [
+      order.id,
+      order.customerName,
+      order.customerEmail,
+      order.customerState,
+      order.shippingName,
+      order.shippingAddress
+    ]
+      .map((value) => String(value || "").toLowerCase())
+      .join(" ");
+    return haystack.includes(query);
+  };
+
+  const orders = allOrders.filter(matchesSearch);
+  const orderCustomerEmails = new Set(
+    orders
+      .map((order) => String(order.customerEmail || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const customers = allCustomers.filter((customer) => {
+    const email = String(customer.email || "")
+      .trim()
+      .toLowerCase();
+    const name = String(customer.name || "")
+      .trim()
+      .toLowerCase();
+    if (!query) {
+      return true;
+    }
+    return email.includes(query) || name.includes(query) || orderCustomerEmails.has(email);
+  });
+
+  return { allOrders, orders, customers, query };
+}
+
+function updateLocalOrderPackagedState(orderId, packagedAt) {
+  if (!Array.isArray(state.ordersPayload?.orders)) {
+    return;
+  }
+
+  const nextPackagedAt = Number.isFinite(Number(packagedAt)) ? Math.max(0, Math.round(Number(packagedAt))) : 0;
+  state.ordersPayload = {
+    ...state.ordersPayload,
+    orders: state.ordersPayload.orders.map((order) => {
+      if (order.id !== orderId) {
+        return order;
+      }
+      return {
+        ...order,
+        packagedAt: nextPackagedAt,
+        packagedAtIso: nextPackagedAt > 0 ? new Date(nextPackagedAt * 1000).toISOString() : ""
+      };
+    })
+  };
+}
+
+function updateLocalOrderPackageWeightValue(orderId, packageWeightValue) {
+  if (!Array.isArray(state.ordersPayload?.orders)) {
+    return;
+  }
+
+  const nextPackageWeightValue = String(packageWeightValue ?? "").trim();
+  state.ordersPayload = {
+    ...state.ordersPayload,
+    orders: state.ordersPayload.orders.map((order) => {
+      if (order.id !== orderId) {
+        return order;
+      }
+      return {
+        ...order,
+        packageWeightValue: nextPackageWeightValue
+      };
+    })
+  };
+}
+
+function getItemsCsvText(items) {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  return normalizedItems
+    .map((item) => {
+      const name = sanitizeExportValue(item?.name);
+      const quantity = Number.isFinite(Number(item?.quantity)) ? Number(item.quantity) : 0;
+      return `${name} x${Math.max(0, quantity)}`;
+    })
+    .join(" | ");
+}
+
+function buildLiveOrdersCsv(orders) {
+  const headers = [
+    "order_id",
+    "created_at_iso",
+    "payment_status",
+    "fulfillment_status",
+    "currency",
+    "amount_subtotal",
+    "amount_shipping",
+    "amount_tax",
+    "amount_total",
+    "units_total",
+    "book_units_total",
+    "shippable_units",
+    "shipping_weight_lbs",
+    "shipping_billable_weight_lbs",
+    "shipping_zone",
+    "customer_name",
+    "customer_email",
+    "customer_phone",
+    "shipping_name",
+    "shipping_line1",
+    "shipping_line2",
+    "shipping_city",
+    "shipping_state",
+    "shipping_postal_code",
+    "shipping_country",
+    "shipping_state_matches_customer_state",
+    "shipping_state_mismatch_reason",
+    "tracking_number",
+    "tracking_url",
+    "carrier",
+    "label_id",
+    "items"
+  ];
+
+  const rows = [headers.map((column) => toCsvCell(column)).join(",")];
+  const safeRows = Array.isArray(orders) ? orders : [];
+
+  for (const order of safeRows) {
+    const shippingWeightLbs = Number(order?.shippingWeightLbs);
+    const billableWeightLbs = Number(order?.shippingBillableWeightLbs);
+    const row = [
+      toCsvCell(order?.id),
+      toCsvCell(order?.createdAtIso || ""),
+      toCsvCell(order?.paymentStatus || "unknown"),
+      toCsvCell(order?.fulfillmentStatus || "pending"),
+      toCsvCell(order?.currency || "usd"),
+      toCsvCell(formatAmountForExport(order?.amountSubtotal)),
+      toCsvCell(formatAmountForExport(order?.amountShipping)),
+      toCsvCell(formatAmountForExport(order?.amountTax)),
+      toCsvCell(formatAmountForExport(order?.amountTotal)),
+      toCsvCell(Number.isFinite(Number(order?.unitsTotal)) ? Math.max(0, Number(order.unitsTotal)) : 0),
+      toCsvCell(
+        Number.isFinite(Number(order?.bookUnitsTotal)) ? Math.max(0, Number(order.bookUnitsTotal)) : 0
+      ),
+      toCsvCell(
+        Number.isFinite(Number(order?.shippableUnits)) ? Math.max(0, Number(order.shippableUnits)) : 0
+      ),
+      toCsvCell(Number.isFinite(shippingWeightLbs) && shippingWeightLbs > 0 ? shippingWeightLbs.toFixed(2) : ""),
+      toCsvCell(
+        Number.isFinite(billableWeightLbs) && billableWeightLbs > 0 ? billableWeightLbs.toFixed(2) : ""
+      ),
+      toCsvCell(Number.isFinite(Number(order?.shippingZone)) ? Number(order.shippingZone) : ""),
+      toCsvCell(order?.customerName),
+      toCsvCell(order?.customerEmail),
+      toCsvCell(order?.customerPhone),
+      toCsvCell(order?.shippingName),
+      toCsvCell(order?.shippingAddressLine1),
+      toCsvCell(order?.shippingAddressLine2),
+      toCsvCell(order?.shippingCity),
+      toCsvCell(order?.shippingState),
+      toCsvCell(order?.shippingPostalCode),
+      toCsvCell(order?.shippingCountry || "US"),
+      toCsvCell(String(order?.shippingStateMatchesCustomerState || false)),
+      toCsvCell(order?.shippingStateMismatchReason),
+      toCsvCell(order?.shipmentTrackingNumber),
+      toCsvCell(order?.shipmentTrackingUrl),
+      toCsvCell(order?.shipmentCarrier),
+      toCsvCell(order?.shipmentLabelId),
+      toCsvCell(getItemsCsvText(order?.items))
+    ];
+    rows.push(row.join(","));
+  }
+
+  return rows.join("\n");
+}
+
+function buildLiveOrdersCsvFilename() {
+  const now = new Date();
+  const utc = now.toISOString().replace(/[:.]/g, "-").replace("T", "-").slice(0, 19);
+  return `publishearts-orders-live-${utc}Z.csv`;
 }
 
 function buildShippoManualLabelTemplate(order) {
@@ -799,48 +1088,9 @@ function renderOrders(payload) {
     return;
   }
 
-  const allOrders = Array.isArray(payload?.orders) ? payload.orders : [];
-  const allCustomers = Array.isArray(payload?.customers) ? payload.customers : [];
+  const { allOrders, orders, customers, query } = getFilteredOrdersForDisplay(payload);
   updateSoldCounter(allOrders);
   renderEditionBoard(allOrders);
-  const query = String(ordersSearchInput?.value || "")
-    .trim()
-    .toLowerCase();
-  const matchesSearch = (order) => {
-    if (!query) {
-      return true;
-    }
-    const haystack = [
-      order.id,
-      order.customerName,
-      order.customerEmail,
-      order.customerState,
-      order.shippingName,
-      order.shippingAddress
-    ]
-      .map((value) => String(value || "").toLowerCase())
-      .join(" ");
-    return haystack.includes(query);
-  };
-
-  const orders = allOrders.filter(matchesSearch);
-  const orderCustomerEmails = new Set(
-    orders
-      .map((order) => String(order.customerEmail || "").trim().toLowerCase())
-      .filter(Boolean)
-  );
-  const customers = allCustomers.filter((customer) => {
-    const email = String(customer.email || "")
-      .trim()
-      .toLowerCase();
-    const name = String(customer.name || "")
-      .trim()
-      .toLowerCase();
-    if (!query) {
-      return true;
-    }
-    return email.includes(query) || name.includes(query) || orderCustomerEmails.has(email);
-  });
 
   if (customers.length > 0) {
     orderCustomersEl.innerHTML = `
@@ -1369,11 +1619,171 @@ refreshOrdersBtn?.addEventListener("click", async () => {
   }
 });
 
+exportOrdersCsvBtn?.addEventListener("click", async () => {
+  if (state.ordersBusy) {
+    return;
+  }
+
+  setOrdersBusy(true);
+  setOrdersMessage("Preparing live CSV export...");
+  try {
+    let payload = state.ordersPayload;
+    if (!payload || !Array.isArray(payload?.orders) || payload.orders.length === 0) {
+      payload = await adminRequest("/api/admin/orders?limit=100");
+      state.ordersPayload = payload;
+      renderOrders(payload);
+    }
+
+    const { orders, query } = getFilteredOrdersForDisplay(payload);
+    if (orders.length === 0) {
+      setOrdersMessage(query ? "No orders matched your search to export." : "No paid orders to export.", true);
+      return;
+    }
+
+    const csv = buildLiveOrdersCsv(orders);
+    const filename = buildLiveOrdersCsvFilename();
+    downloadTextFile(filename, csv);
+    setOrdersMessage(`Exported ${orders.length} order(s) to ${filename}.`);
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setOrdersMessage(error.message || "Could not export live CSV.", true);
+  } finally {
+    setOrdersBusy(false);
+  }
+});
+
 ordersSearchInput?.addEventListener("input", () => {
   if (!state.ordersPayload) {
     return;
   }
   renderOrders(state.ordersPayload);
+});
+
+editionBoardEl?.addEventListener("click", async (event) => {
+  if (event.target.closest("[data-package-weight-field]")) {
+    return;
+  }
+
+  const row = event.target.closest("[data-action='toggle-packaged-order']");
+  if (!row) {
+    return;
+  }
+
+  const orderId = String(row.dataset.id || "").trim();
+  if (!orderId || state.ordersBusy) {
+    return;
+  }
+
+  const selectedOrder = Array.isArray(state.ordersPayload?.orders)
+    ? state.ordersPayload.orders.find((order) => order.id === orderId)
+    : null;
+  if (!selectedOrder) {
+    setOrdersMessage("Order details are missing. Refresh and try again.", true);
+    return;
+  }
+
+  if (String(selectedOrder.fulfillmentStatus || "pending") === "shipped") {
+    setOrdersMessage(`Order ${orderId} is already shipped, so it stays marked packaged.`);
+    return;
+  }
+
+  const nextPackaged = !isOrderPackaged(selectedOrder);
+  setOrdersBusy(true);
+  setOrdersMessage(nextPackaged ? `Marking order ${orderId} packaged...` : `Removing packaged mark from order ${orderId}...`);
+  try {
+    const result = await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/package`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        packaged: nextPackaged
+      })
+    });
+    updateLocalOrderPackagedState(orderId, result.packagedAt);
+    setOrdersMessage(nextPackaged ? `Order ${orderId} marked packaged.` : `Packaged mark removed for order ${orderId}.`);
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setOrdersMessage(error.message || "Could not update packaged state.", true);
+  } finally {
+    setOrdersBusy(false);
+    if (state.ordersPayload) {
+      renderOrders(state.ordersPayload);
+    }
+  }
+});
+
+editionBoardEl?.addEventListener("keydown", (event) => {
+  if (event.target.closest("[data-package-weight-field]")) {
+    return;
+  }
+
+  const row = event.target.closest("[data-action='toggle-packaged-order']");
+  if (!row) {
+    return;
+  }
+
+  if (event.key !== "Enter" && event.key !== " ") {
+    return;
+  }
+
+  event.preventDefault();
+  row.click();
+});
+
+editionBoardEl?.addEventListener("change", async (event) => {
+  const input = event.target.closest("input[data-action='save-package-weight']");
+  if (!input) {
+    return;
+  }
+
+  if (input.validity && !input.validity.valid) {
+    input.reportValidity?.();
+    return;
+  }
+
+  const orderId = String(input.dataset.id || "").trim();
+  if (!orderId || state.ordersBusy) {
+    return;
+  }
+
+  const nextValue = String(input.value || "").trim();
+  setOrdersBusy(true);
+  setOrdersMessage(nextValue ? `Saving package weight for order ${orderId}...` : `Clearing package weight for order ${orderId}...`);
+  try {
+    const result = await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/package-weight`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        value: nextValue
+      })
+    });
+    updateLocalOrderPackageWeightValue(orderId, result.packageWeightValue);
+    setOrdersMessage(
+      result.packageWeightValue
+        ? `Saved package weight value ${result.packageWeightValue} for order ${orderId}.`
+        : `Cleared package weight value for order ${orderId}.`
+    );
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setOrdersMessage(error.message || "Could not update package weight value.", true);
+  } finally {
+    setOrdersBusy(false);
+    if (state.ordersPayload) {
+      renderOrders(state.ordersPayload);
+    }
+  }
 });
 
 ordersEl?.addEventListener("click", async (event) => {

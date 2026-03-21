@@ -324,6 +324,21 @@ function readMetadataFloat(metadata, key) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizePackageWeightValue(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "";
+  }
+  if (!/^\d+(\.\d{1,2})?$/.test(text)) {
+    return null;
+  }
+  const parsed = Number.parseFloat(text);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 9999) {
+    return null;
+  }
+  return String(Number(parsed.toFixed(2)));
+}
+
 function normalizeFulfillmentStatus(value) {
   const text = String(value || "")
     .trim()
@@ -2327,6 +2342,11 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
             : {};
         const fulfillmentStatus = normalizeFulfillmentStatus(paymentIntentMetadata.fulfillment_status);
         const shippedAt = readMetadataInteger(paymentIntentMetadata, "fulfillment_shipped_at") || 0;
+        const packagedAt = readMetadataInteger(paymentIntentMetadata, "fulfillment_packaged_at") || shippedAt || 0;
+        const packageWeightValueRaw = normalizePackageWeightValue(
+          paymentIntentMetadata.fulfillment_package_weight_value
+        );
+        const packageWeightValue = packageWeightValueRaw === null ? "" : packageWeightValueRaw;
         const shipmentCarrier = String(paymentIntentMetadata.fulfillment_carrier || "").trim();
         const shipmentTrackingNumber = String(paymentIntentMetadata.fulfillment_tracking_number || "").trim();
         const shipmentTrackingUrl = String(paymentIntentMetadata.fulfillment_tracking_url || "").trim();
@@ -2426,6 +2446,9 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           fulfillmentStatus,
           shippedAt,
           shippedAtIso: shippedAt > 0 ? new Date(shippedAt * 1000).toISOString() : "",
+          packagedAt,
+          packagedAtIso: packagedAt > 0 ? new Date(packagedAt * 1000).toISOString() : "",
+          packageWeightValue,
           shipmentCarrier,
           shipmentTrackingNumber,
           shipmentTrackingUrl,
@@ -2501,6 +2524,9 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         fulfillmentStatus: order.fulfillmentStatus,
         shippedAt: order.shippedAt,
         shippedAtIso: order.shippedAtIso,
+        packagedAt: order.packagedAt,
+        packagedAtIso: order.packagedAtIso,
+        packageWeightValue: order.packageWeightValue,
         shipmentCarrier: order.shipmentCarrier,
         shipmentTrackingNumber: order.shipmentTrackingNumber,
         shipmentTrackingUrl: order.shipmentTrackingUrl,
@@ -3045,6 +3071,7 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
       metadata: {
         fulfillment_status: "shipped",
         fulfillment_shipped_at: String(shippedAtUnix),
+        fulfillment_packaged_at: String(readMetadataInteger(currentMetadata, "fulfillment_packaged_at") || shippedAtUnix),
         fulfillment_carrier: carrier,
         fulfillment_tracking_number: trackingNumber,
         fulfillment_tracking_url: trackingUrl,
@@ -3096,6 +3123,110 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
     const details = typeof error?.message === "string" ? error.message : "";
     return res.status(500).json({
       error: details ? `Could not mark shipped: ${details}` : "Could not mark shipped right now."
+    });
+  }
+});
+
+app.post("/api/admin/orders/:id/package", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  const packaged = parseBooleanFlag(req.body?.packaged, true) === true;
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(orderId, {
+      expand: ["payment_intent"]
+    });
+    if (!session || session.payment_status !== "paid") {
+      return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const paymentIntentId = getPaymentIntentIdFromSession(session);
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: "This order has no payment intent to update." });
+    }
+
+    const currentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+    const packagedAtUnix = packaged ? Math.floor(Date.now() / 1000) : 0;
+
+    await stripe.paymentIntents.update(paymentIntentId, {
+      metadata: {
+        ...currentMetadata,
+        fulfillment_packaged_at: packaged ? String(packagedAtUnix) : ""
+      }
+    });
+
+    return res.json({
+      ok: true,
+      packaged,
+      packagedAt: packagedAtUnix,
+      packagedAtIso: packagedAtUnix > 0 ? new Date(packagedAtUnix * 1000).toISOString() : ""
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not update packaged state: ${details}` : "Could not update packaged state right now."
+    });
+  }
+});
+
+app.post("/api/admin/orders/:id/package-weight", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  const packageWeightValue = normalizePackageWeightValue(req.body?.value);
+  if (packageWeightValue === null) {
+    return res.status(400).json({ error: "Enter a valid number with up to 2 decimals." });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(orderId, {
+      expand: ["payment_intent"]
+    });
+    if (!session || session.payment_status !== "paid") {
+      return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const paymentIntentId = getPaymentIntentIdFromSession(session);
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: "This order has no payment intent to update." });
+    }
+
+    const currentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+
+    await stripe.paymentIntents.update(paymentIntentId, {
+      metadata: {
+        ...currentMetadata,
+        fulfillment_package_weight_value: packageWeightValue
+      }
+    });
+
+    return res.json({
+      ok: true,
+      packageWeightValue
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not update package weight value: ${details}` : "Could not update package weight value right now."
     });
   }
 });
