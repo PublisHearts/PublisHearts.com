@@ -59,9 +59,25 @@ async function ensureTapPermissions() {
     return;
   }
 
-  const permissionError = await requestNeededAndroidPermissions({ accessFineLocation: true });
-  if (permissionError) {
-    throw new Error(permissionError.message || "Tap to Pay permissions were not granted on this device.");
+  const permissionResult = await requestNeededAndroidPermissions({
+    accessFineLocation: {
+      title: "Location Permission",
+      message: "PublisHearts POS needs location access for Tap to Pay payments.",
+      buttonPositive: "Allow"
+    }
+  });
+  if (permissionResult?.error) {
+    const permissionNames = [...new Set(Object.keys(permissionResult.error).map((permission) => {
+      if (permission.includes("ACCESS_FINE_LOCATION")) {
+        return "Location";
+      }
+      if (permission.includes("BLUETOOTH")) {
+        return "Nearby devices";
+      }
+      return permission;
+    }))];
+    const permissionLabel = permissionNames.join(" and ");
+    throw new Error(`Tap to Pay needs ${permissionLabel} permission${permissionNames.length === 1 ? "" : "s"} on this device.`);
   }
 }
 
