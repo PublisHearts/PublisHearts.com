@@ -13,7 +13,7 @@
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body class="admin-page">
+  <body class="admin-page" data-page-mode="fulfillment">
     <header class="site-header">
       <div class="container row-between">
         <a class="brand" href="/">
@@ -23,6 +23,7 @@
         <div class="header-actions">
           <a class="ghost-btn ghost-link" href="/admin">Admin</a>
           <a class="ghost-btn ghost-link" href="/pos">POS</a>
+          <a class="ghost-btn ghost-link" href="/completed-orders">Completed</a>
           <button id="fulfillment-logout-btn" class="ghost-btn hidden" type="button">Log out</button>
         </div>
       </div>
@@ -62,6 +63,7 @@
             <button id="fulfillment-open-shippo-btn" class="ghost-btn" type="button">Open Shippo</button>
             <button id="fulfillment-refresh-btn" class="ghost-btn" type="button">Refresh Orders</button>
             <button id="fulfillment-export-shippo-csv-btn" class="primary-btn" type="button">Export Shippo CSV</button>
+            <a class="ghost-btn ghost-link" href="/completed-orders">Completed Orders</a>
           </div>
         </div>
 

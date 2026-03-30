@@ -26,6 +26,7 @@ const taxTotalEl = document.getElementById("pos-tax-total");
 const grandTotalEl = document.getElementById("pos-grand-total");
 const summaryNoteEl = document.getElementById("pos-summary-note");
 const checkoutBtn = document.getElementById("pos-checkout-btn");
+const cashBtn = document.getElementById("pos-cash-btn");
 const clearBtn = document.getElementById("pos-clear-btn");
 const newSaleBtn = document.getElementById("pos-new-sale-btn");
 const printBtn = document.getElementById("pos-print-btn");
@@ -202,12 +203,23 @@ function setPosMessage(message, isError = false) {
   setMessage(posMessageEl, message, isError);
 }
 
+function canRecordCashSale() {
+  return state.health?.taxMode !== "stripe_automatic";
+}
+
+function syncActionButtons() {
+  checkoutBtn.disabled = state.busy;
+  if (cashBtn) {
+    cashBtn.disabled = state.busy || !canRecordCashSale();
+  }
+  clearBtn.disabled = state.busy;
+  newSaleBtn.disabled = state.busy;
+  refreshBtn.disabled = state.busy;
+}
+
 function setBusy(isBusy) {
   state.busy = isBusy;
-  checkoutBtn.disabled = isBusy;
-  clearBtn.disabled = isBusy;
-  newSaleBtn.disabled = isBusy;
-  refreshBtn.disabled = isBusy;
+  syncActionButtons();
   searchInput.disabled = isBusy;
   stateSelect.disabled = isBusy;
   needsShippingInput.disabled = isBusy;
@@ -233,6 +245,33 @@ function formatMoney(amountCents = 0) {
     style: "currency",
     currency: "USD"
   }).format((Number(amountCents) || 0) / 100);
+}
+
+function parseMoneyToCents(value) {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[$,\s]/g, "");
+  if (!normalized) {
+    return null;
+  }
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {
+    return Number.NaN;
+  }
+  return Math.round(Number.parseFloat(normalized) * 100);
+}
+
+function formatPaymentMethodLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "cash") {
+    return "Cash";
+  }
+  if (normalized === "card") {
+    return "Card";
+  }
+  if (normalized) {
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  }
+  return "Card";
 }
 
 function formatIsoDateTime(value) {
@@ -626,6 +665,16 @@ function clearDraft() {
   window.sessionStorage.removeItem(POS_DRAFT_KEY);
 }
 
+function resetSaleAfterSuccess() {
+  window.sessionStorage.removeItem(POS_DRAFT_KEY);
+  state.cart = new Map();
+  needsShippingInput.checked = false;
+  stateSelect.value = getDefaultState();
+  clearShippingForm();
+  syncShippingFieldsVisibility();
+  renderAll();
+}
+
 function getFilteredProducts() {
   const query = String(searchInput.value || "").trim().toLowerCase();
   return state.products.filter((product) => {
@@ -698,6 +747,22 @@ function getManualTaxEstimateCents(subtotalCents, shippingCents) {
   }
   const base = subtotalCents + (state.health.manualSalesTaxApplyToShipping ? shippingCents : 0);
   return Math.max(0, Math.round(base * (ratePercent / 100)));
+}
+
+function getSummaryTotals() {
+  const subtotalCents = getSubtotalCents();
+  const shippingCents = getShippingEstimateCents();
+  const taxMode = state.health?.taxMode || "off";
+  const manualTaxCents = getManualTaxEstimateCents(subtotalCents, shippingCents);
+  const exactTotal = taxMode !== "stripe_automatic";
+
+  return {
+    taxMode,
+    subtotalCents,
+    shippingCents,
+    taxCents: exactTotal ? manualTaxCents : null,
+    amountTotalCents: exactTotal ? subtotalCents + shippingCents + manualTaxCents : null
+  };
 }
 
 function renderCatalog() {
@@ -779,30 +844,28 @@ function syncHintCopy() {
 }
 
 function renderSummary() {
-  const subtotalCents = getSubtotalCents();
-  const shippingCents = getShippingEstimateCents();
-  const manualTaxCents = getManualTaxEstimateCents(subtotalCents, shippingCents);
-  const estimatedBaseTotal = subtotalCents + shippingCents;
+  const summary = getSummaryTotals();
+  const estimatedBaseTotal = summary.subtotalCents + summary.shippingCents;
 
-  itemsSubtotalEl.textContent = formatMoney(subtotalCents);
-  shippingTotalEl.textContent = formatMoney(shippingCents);
+  itemsSubtotalEl.textContent = formatMoney(summary.subtotalCents);
+  shippingTotalEl.textContent = formatMoney(summary.shippingCents);
 
-  if (!state.health || state.health.taxMode === "stripe_automatic") {
+  if (!state.health || summary.taxMode === "stripe_automatic") {
     taxTotalEl.textContent = "Calculated by Stripe";
     grandTotalEl.textContent = `${formatMoney(estimatedBaseTotal)} + tax`;
     summaryNoteEl.textContent = needsShippingInput.checked
-      ? "Shipping is estimated here. Stripe calculates the final tax at checkout."
-      : "No shipping line will be added. Stripe calculates the final tax at checkout.";
-  } else if (state.health.taxMode === "manual") {
-    taxTotalEl.textContent = formatMoney(manualTaxCents);
-    grandTotalEl.textContent = formatMoney(estimatedBaseTotal + manualTaxCents);
+      ? "Shipping is estimated here. Stripe calculates the final tax at checkout, so cash checkout stays disabled."
+      : "No shipping line will be added. Stripe calculates the final tax at checkout, so cash checkout stays disabled.";
+  } else if (summary.taxMode === "manual") {
+    taxTotalEl.textContent = formatMoney(summary.taxCents);
+    grandTotalEl.textContent = formatMoney(summary.amountTotalCents);
     summaryNoteEl.textContent = `Manual tax mode is active (${Number(state.health.manualSalesTaxRatePercent || 0).toFixed(
       2
-    )}%).`;
+    )}%). Cash sales use this exact total.`;
   } else {
     taxTotalEl.textContent = formatMoney(0);
-    grandTotalEl.textContent = formatMoney(estimatedBaseTotal);
-    summaryNoteEl.textContent = "Tax is off for this local estimate.";
+    grandTotalEl.textContent = formatMoney(summary.amountTotalCents ?? estimatedBaseTotal);
+    summaryNoteEl.textContent = "Tax is off for this local estimate. Cash sales use the exact total shown here.";
   }
 }
 
@@ -823,6 +886,9 @@ function renderReceipt(order) {
   const customerName =
     String(order.customerName || order.shippingDetails?.name || "Customer").trim() || "Customer";
   const shippingAddress = order.shippingRequired === false ? "No shipping required" : formatAddress(order.shippingDetails?.address);
+  const paymentMethodLabel = formatPaymentMethodLabel(order.paymentMethod);
+  const cashReceivedCents = Number(order.cashReceivedCents);
+  const cashChangeDueCents = Number(order.cashChangeDueCents);
 
   receiptEl.innerHTML = `
     <div class="pos-receipt-brand">
@@ -834,6 +900,17 @@ function renderReceipt(order) {
       <p><strong>Date:</strong> ${escapeHtml(formatIsoDateTime(order.createdAtIso))}</p>
       <p><strong>Customer:</strong> ${escapeHtml(customerName)}</p>
       <p><strong>Email:</strong> ${escapeHtml(order.customerEmail || "Not provided")}</p>
+      <p><strong>Payment:</strong> ${escapeHtml(paymentMethodLabel)}</p>
+      ${
+        Number.isFinite(cashReceivedCents) && cashReceivedCents > 0
+          ? `<p><strong>Cash Received:</strong> ${escapeHtml(formatMoney(cashReceivedCents))}</p>`
+          : ""
+      }
+      ${
+        Number.isFinite(cashChangeDueCents) && cashChangeDueCents > 0
+          ? `<p><strong>Change Due:</strong> ${escapeHtml(formatMoney(cashChangeDueCents))}</p>`
+          : ""
+      }
       <p><strong>Fulfillment:</strong> ${order.shippingRequired === false ? "In-person / no shipping" : "Ship this order"}</p>
       <p><strong>Ship To:</strong> ${escapeHtml(shippingAddress)}</p>
     </div>
@@ -868,6 +945,7 @@ function renderAll() {
   renderCatalog();
   renderCart();
   renderSummary();
+  syncActionButtons();
 }
 
 async function loadProducts() {
@@ -948,13 +1026,7 @@ async function handleReturnFromStripe() {
     if (posState === "success" && sessionId) {
       await loadReceiptOrder(sessionId);
       setPosMessage(`POS payment completed for ${sessionId}. Receipt loaded below.`);
-      window.sessionStorage.removeItem(POS_DRAFT_KEY);
-      state.cart = new Map();
-      needsShippingInput.checked = false;
-      stateSelect.value = getDefaultState();
-      clearShippingForm();
-      syncShippingFieldsVisibility();
-      renderAll();
+      resetSaleAfterSuccess();
     } else if (posState === "cancel") {
       setPosMessage("Stripe checkout was canceled. Your draft sale is still on the page.");
     }
@@ -1104,6 +1176,20 @@ newSaleBtn.addEventListener("click", () => {
   setPosMessage("Ready for a new sale.");
 });
 
+function promptCashReceivedCents(totalCents) {
+  const promptValue = window.prompt(
+    `Cash received for this sale? Leave blank to use the exact total (${formatMoney(totalCents)}).`,
+    ((Number(totalCents) || 0) / 100).toFixed(2)
+  );
+  if (promptValue === null) {
+    return null;
+  }
+  if (!String(promptValue || "").trim()) {
+    return totalCents;
+  }
+  return parseMoneyToCents(promptValue);
+}
+
 checkoutBtn.addEventListener("click", async () => {
   if (state.busy) {
     return;
@@ -1156,6 +1242,90 @@ checkoutBtn.addEventListener("click", async () => {
       return;
     }
     setPosMessage(error.message || "Could not open Stripe checkout.", true);
+    setBusy(false);
+  }
+});
+
+cashBtn?.addEventListener("click", async () => {
+  if (state.busy) {
+    return;
+  }
+
+  const cart = getCartRows().map((item) => ({
+    id: item.id,
+    quantity: item.quantity
+  }));
+  if (cart.length === 0) {
+    setPosMessage("Add at least one book before recording a cash sale.", true);
+    return;
+  }
+  if (!stateSelect.value) {
+    setPosMessage("Choose a state before recording a cash sale.", true);
+    return;
+  }
+
+  const summary = getSummaryTotals();
+  if (!canRecordCashSale() || !Number.isFinite(summary.amountTotalCents)) {
+    setPosMessage(
+      "Cash POS needs an exact tax total. Switch Stripe automatic tax off or use manual tax mode before recording cash sales.",
+      true
+    );
+    return;
+  }
+
+  let shippingInfo = null;
+  try {
+    shippingInfo = validateShippingForm();
+  } catch (error) {
+    setPosMessage(error.message || "Enter the shipping details before recording a cash sale.", true);
+    return;
+  }
+
+  const cashReceivedCents = promptCashReceivedCents(summary.amountTotalCents);
+  if (cashReceivedCents === null) {
+    return;
+  }
+  if (!Number.isFinite(cashReceivedCents)) {
+    setPosMessage("Enter a valid cash amount received.", true);
+    return;
+  }
+  if (cashReceivedCents < summary.amountTotalCents) {
+    setPosMessage("Cash received must be at least the total due.", true);
+    return;
+  }
+
+  setBusy(true);
+  setPosMessage("Recording cash sale...");
+  try {
+    saveDraft();
+    const result = await adminRequest("/api/admin/pos/create-cash-sale", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        cart,
+        customerState: stateSelect.value,
+        needsShipping: needsShippingInput.checked,
+        shippingInfo,
+        cashReceivedCents
+      })
+    });
+    renderReceipt(result?.order || null);
+    resetSaleAfterSuccess();
+    const changeDueCents = Math.max(0, cashReceivedCents - summary.amountTotalCents);
+    setPosMessage(
+      changeDueCents > 0
+        ? `Cash sale recorded. Change due: ${formatMoney(changeDueCents)}.`
+        : "Cash sale recorded."
+    );
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setPosMessage(error.message || "Could not record cash sale.", true);
+  } finally {
     setBusy(false);
   }
 });

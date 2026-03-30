@@ -44,6 +44,14 @@ import {
   listOrderExclusions,
   restoreExcludedOrder
 } from "./data/orderExclusionStore.js";
+import {
+  ManualOrderValidationError,
+  createManualOrder,
+  ensureManualOrderStore,
+  findManualOrderById,
+  listManualOrders,
+  updateManualOrder
+} from "./data/manualOrderStore.js";
 
 dotenv.config();
 const execFileAsync = promisify(execFile);
@@ -573,12 +581,27 @@ function getSessionOrderSource(session, options = {}) {
   return raw || "storefront";
 }
 
-function getShippingNotRequiredErrorMessage(session, options = {}) {
-  const orderSource = getSessionOrderSource(session, options);
-  if (orderSource === "admin_pos") {
+function getShippingNotRequiredErrorMessageForOrderSource(orderSource) {
+  const normalized = String(orderSource || "").trim().toLowerCase();
+  if (normalized === "admin_pos") {
     return "This admin POS order was checked out without shipping.";
   }
   return "This order does not require shipping.";
+}
+
+function getShippingNotRequiredErrorMessage(session, options = {}) {
+  return getShippingNotRequiredErrorMessageForOrderSource(getSessionOrderSource(session, options));
+}
+
+function parseCashReceivedCents(value, fallbackCents) {
+  if (value === undefined || value === null || value === "") {
+    return fallbackCents;
+  }
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return parsed;
 }
 
 function isCheckoutValidationErrorMessage(message) {
@@ -609,6 +632,7 @@ async function buildCheckoutSessionCartDetails(cart, customerState, options = {}
 
   const shippingRequired = options?.shippingRequired !== false;
   const lineItems = [];
+  const items = [];
   const cartSummaryParts = [];
   let unitsTotal = 0;
   let bookUnitsTotal = 0;
@@ -640,6 +664,13 @@ async function buildCheckoutSessionCartDetails(cart, customerState, options = {}
       shippableUnits += quantity;
     }
     cartSummaryParts.push(`${product.title} x${quantity}`);
+    items.push({
+      productId: product.id,
+      name: product.title,
+      quantity,
+      unitAmount: product.priceCents,
+      amountTotal: product.priceCents * quantity
+    });
     lineItems.push({
       price_data: {
         currency,
@@ -700,7 +731,21 @@ async function buildCheckoutSessionCartDetails(cart, customerState, options = {}
 
   return {
     customerState: normalizedCustomerState,
+    items,
     lineItems,
+    unitsTotal,
+    bookUnitsTotal,
+    shippableUnits: effectiveShippableUnits,
+    amountSubtotal: itemsSubtotal,
+    shippingTotal,
+    manualSalesTaxTotal,
+    amountTotal: itemsSubtotal + shippingTotal + manualSalesTaxTotal,
+    shippingWeightLbs,
+    shippingBillableWeightLbs,
+    shippingZone,
+    shippingZoneMultiplier,
+    shippingBaseRateCents,
+    customerTaxExemptByState: salesTaxExemptByState,
     metadata: {
       storefront: "publishearts.com",
       units_total: String(unitsTotal),
@@ -843,14 +888,6 @@ function calculateBookUnitsTotalFromSessionMetadata(session) {
 }
 
 async function fetchSoldCopiesStatsFromStripe() {
-  if (!stripe) {
-    return {
-      soldCopies: 0,
-      paidOrders: 0,
-      updatedAtMs: Date.now()
-    };
-  }
-
   const excludedOrderIds = new Set(
     (await listOrderExclusions())
       .map((entry) => String(entry?.orderId || "").trim())
@@ -859,41 +896,56 @@ async function fetchSoldCopiesStatsFromStripe() {
 
   let soldCopies = 0;
   let paidOrders = 0;
-  let scannedSessions = 0;
-  let hasMore = true;
-  let startingAfter = "";
-
-  while (hasMore && scannedSessions < publicSoldCopiesMaxSessions) {
-    const remaining = publicSoldCopiesMaxSessions - scannedSessions;
-    const listParams = {
-      limit: Math.min(100, remaining)
-    };
-    if (startingAfter) {
-      listParams.starting_after = startingAfter;
+  const manualOrders = (await listManualOrders()).map((order) => normalizeManualOrderRecord(order)).filter(Boolean);
+  for (const order of manualOrders) {
+    if (order.paymentStatus !== "paid") {
+      continue;
     }
-
-    const response = await stripe.checkout.sessions.list(listParams);
-    const sessions = Array.isArray(response?.data) ? response.data : [];
-    if (sessions.length === 0) {
-      break;
+    const orderId = String(order.id || "").trim();
+    if (orderId && excludedOrderIds.has(orderId)) {
+      continue;
     }
+    paidOrders += 1;
+    soldCopies += Math.max(0, Number(order.bookUnitsTotal) || 0);
+  }
 
-    for (const session of sessions) {
-      if (session?.payment_status !== "paid") {
-        continue;
+  if (stripe) {
+    let scannedSessions = 0;
+    let hasMore = true;
+    let startingAfter = "";
+
+    while (hasMore && scannedSessions < publicSoldCopiesMaxSessions) {
+      const remaining = publicSoldCopiesMaxSessions - scannedSessions;
+      const listParams = {
+        limit: Math.min(100, remaining)
+      };
+      if (startingAfter) {
+        listParams.starting_after = startingAfter;
       }
-      const sessionId = String(session?.id || "").trim();
-      if (sessionId && excludedOrderIds.has(sessionId)) {
-        continue;
-      }
-      paidOrders += 1;
-      soldCopies += calculateBookUnitsTotalFromSessionMetadata(session);
-    }
 
-    scannedSessions += sessions.length;
-    const lastSession = sessions[sessions.length - 1];
-    startingAfter = String(lastSession?.id || "").trim();
-    hasMore = Boolean(response?.has_more) && Boolean(startingAfter);
+      const response = await stripe.checkout.sessions.list(listParams);
+      const sessions = Array.isArray(response?.data) ? response.data : [];
+      if (sessions.length === 0) {
+        break;
+      }
+
+      for (const session of sessions) {
+        if (session?.payment_status !== "paid") {
+          continue;
+        }
+        const sessionId = String(session?.id || "").trim();
+        if (sessionId && excludedOrderIds.has(sessionId)) {
+          continue;
+        }
+        paidOrders += 1;
+        soldCopies += calculateBookUnitsTotalFromSessionMetadata(session);
+      }
+
+      scannedSessions += sessions.length;
+      const lastSession = sessions[sessions.length - 1];
+      startingAfter = String(lastSession?.id || "").trim();
+      hasMore = Boolean(response?.has_more) && Boolean(startingAfter);
+    }
   }
 
   return {
@@ -951,6 +1003,20 @@ function formatAddressLine(address) {
     .map((part) => String(part || "").trim())
     .filter(Boolean)
     .join(", ");
+}
+
+function buildManualShippingAddressLabel(shipping) {
+  if (!shipping || typeof shipping !== "object") {
+    return "";
+  }
+  return formatAddressLine({
+    line1: shipping.line1,
+    line2: shipping.line2,
+    city: shipping.city,
+    state: shipping.state,
+    postal_code: shipping.postalCode,
+    country: shipping.country
+  });
 }
 
 function isShippingLineItem(item) {
@@ -1015,6 +1081,401 @@ function computeOrderTotals(session, lineItems = []) {
     amountTax,
     amountTotal
   };
+}
+
+function normalizeManualOrderItems(rawItems = []) {
+  const safeItems = Array.isArray(rawItems) ? rawItems : [];
+  return safeItems
+    .map((item) => {
+      const name = String(item?.name || item?.title || "Book")
+        .trim()
+        .slice(0, 220);
+      if (!name) {
+        return null;
+      }
+      const quantity = Math.max(1, Math.min(100, Number.parseInt(item?.quantity, 10) || 1));
+      const unitAmountRaw = Number(item?.unitAmount ?? item?.unit_amount ?? item?.priceCents ?? 0);
+      const unitAmount = Number.isFinite(unitAmountRaw) ? Math.max(0, Math.round(unitAmountRaw)) : 0;
+      const amountTotalRaw = Number(item?.amountTotal ?? item?.amount_total ?? unitAmount * quantity);
+      const amountTotal = Number.isFinite(amountTotalRaw) ? Math.max(0, Math.round(amountTotalRaw)) : unitAmount * quantity;
+      return {
+        productId: String(item?.productId || item?.id || "").trim(),
+        name,
+        quantity,
+        unitAmount,
+        amountTotal
+      };
+    })
+    .filter(Boolean);
+}
+
+function evaluateManualOrderStateMatch({ customerState, shippingRequired = true, shippingDetails } = {}) {
+  const selectedState = normalizeUsStateCode(customerState);
+  if (shippingRequired === false) {
+    return {
+      selectedState,
+      selectedStateSource: selectedState ? "manual_order" : "",
+      shippingState: "",
+      shippingStateRaw: "",
+      shippingCountry: "US",
+      stateMatch: true,
+      mismatchReason: ""
+    };
+  }
+
+  const shippingCountry = normalizeIsoCountry(shippingDetails?.country, "US");
+  const shippingStateRaw = String(shippingDetails?.state || "")
+    .trim()
+    .toUpperCase();
+  const shippingState = normalizeUsStateCode(shippingStateRaw);
+  const stateMatch =
+    Boolean(selectedState) &&
+    shippingCountry === "US" &&
+    Boolean(shippingState) &&
+    selectedState === shippingState;
+
+  let mismatchReason = "";
+  if (!stateMatch) {
+    if (!selectedState) {
+      mismatchReason = "Checkout state selection is missing.";
+    } else if (shippingCountry !== "US") {
+      mismatchReason = `Shipping country ${shippingCountry || "Unknown"} is not supported for state-based shipping.`;
+    } else if (!shippingState) {
+      mismatchReason = `Shipping state "${shippingStateRaw || "Unknown"}" is invalid or missing.`;
+    } else {
+      mismatchReason = `Selected state ${selectedState} does not match shipping state ${shippingState}.`;
+    }
+  }
+
+  return {
+    selectedState,
+    selectedStateSource: selectedState ? "manual_order" : "",
+    shippingState,
+    shippingStateRaw,
+    shippingCountry,
+    stateMatch,
+    mismatchReason
+  };
+}
+
+function normalizeManualOrderRecord(rawOrder) {
+  const id = String(rawOrder?.id || "").trim();
+  if (!id) {
+    return null;
+  }
+
+  const shippingRequired = rawOrder?.shippingRequired !== false;
+  const items = normalizeManualOrderItems(rawOrder?.items);
+  const createdAtRaw = Number.parseInt(String(rawOrder?.createdAt ?? rawOrder?.created_at ?? ""), 10);
+  const createdAt =
+    Number.isFinite(createdAtRaw) && createdAtRaw > 0
+      ? createdAtRaw
+      : Math.max(1, Math.floor(Date.parse(String(rawOrder?.createdAtIso || "")) / 1000) || Math.floor(Date.now() / 1000));
+  const customerState = normalizeUsStateCode(rawOrder?.customerState);
+  const shippingInput = shippingRequired
+    ? normalizeCheckoutShippingInput(
+        rawOrder?.shippingDetails || {
+          name: rawOrder?.shippingName,
+          email: rawOrder?.customerEmail,
+          phone: rawOrder?.customerPhone,
+          line1: rawOrder?.shippingAddressLine1,
+          line2: rawOrder?.shippingAddressLine2,
+          city: rawOrder?.shippingCity,
+          state: rawOrder?.shippingState,
+          postalCode: rawOrder?.shippingPostalCode,
+          country: rawOrder?.shippingCountry || "US"
+        },
+        ""
+      )
+    : null;
+  const stateMatchResult = evaluateManualOrderStateMatch({
+    customerState,
+    shippingRequired,
+    shippingDetails: shippingInput
+  });
+  const unitsTotalRaw = Number(rawOrder?.unitsTotal);
+  const unitsTotal =
+    Number.isFinite(unitsTotalRaw) && unitsTotalRaw >= 0
+      ? Math.round(unitsTotalRaw)
+      : items.reduce((sum, item) => sum + (item.quantity || 0), 0);
+  const bookUnitsTotalRaw = Number(rawOrder?.bookUnitsTotal);
+  const bookUnitsTotal =
+    Number.isFinite(bookUnitsTotalRaw) && bookUnitsTotalRaw >= 0
+      ? Math.round(bookUnitsTotalRaw)
+      : calculateBookUnitsFromCartEntries(items);
+  const shippableUnitsRaw = Number(rawOrder?.shippableUnits);
+  const shippableUnits =
+    !shippingRequired
+      ? 0
+      : Number.isFinite(shippableUnitsRaw) && shippableUnitsRaw >= 0
+        ? Math.round(shippableUnitsRaw)
+        : unitsTotal;
+  const amountSubtotalRaw = Number(rawOrder?.amountSubtotal);
+  const amountSubtotal =
+    Number.isFinite(amountSubtotalRaw) && amountSubtotalRaw >= 0
+      ? Math.round(amountSubtotalRaw)
+      : items.reduce((sum, item) => sum + (item.amountTotal || 0), 0);
+  const amountShippingRaw = Number(rawOrder?.amountShipping);
+  const amountShipping =
+    Number.isFinite(amountShippingRaw) && amountShippingRaw >= 0
+      ? Math.round(amountShippingRaw)
+      : shippingRequired
+        ? calculateShippingFromUnits(shippableUnits, customerState || stateMatchResult.shippingState).shippingCents
+        : 0;
+  const amountTaxRaw = Number(rawOrder?.amountTax);
+  const amountTax = Number.isFinite(amountTaxRaw) && amountTaxRaw >= 0 ? Math.round(amountTaxRaw) : 0;
+  const amountTotalRaw = Number(rawOrder?.amountTotal);
+  const amountTotal =
+    Number.isFinite(amountTotalRaw) && amountTotalRaw >= 0
+      ? Math.round(amountTotalRaw)
+      : amountSubtotal + amountShipping + amountTax;
+  const shippingWeightRaw = Number(rawOrder?.shippingWeightLbs);
+  const shippingWeightLbs =
+    !shippingRequired
+      ? 0
+      : Number.isFinite(shippingWeightRaw) && shippingWeightRaw > 0
+        ? Number(shippingWeightRaw.toFixed(2))
+        : calculateShippableWeightLbs(Math.max(1, shippableUnits));
+  const shippingBillableWeightRaw = Number(rawOrder?.shippingBillableWeightLbs);
+  const shippingBillableWeightLbs =
+    !shippingRequired
+      ? 0
+      : Number.isFinite(shippingBillableWeightRaw) && shippingBillableWeightRaw > 0
+        ? Number(shippingBillableWeightRaw.toFixed(2))
+        : getBillableShippingWeightLbs(shippingWeightLbs);
+  const shippingZoneRaw = Number.parseInt(String(rawOrder?.shippingZone ?? ""), 10);
+  const shippingZone = shippingRequired
+    ? normalizeShippingZone(shippingZoneRaw, getShippingZoneForState(customerState || stateMatchResult.shippingState))
+    : 0;
+  const shippedAtRaw = Number.parseInt(String(rawOrder?.shippedAt ?? ""), 10);
+  const shippedAt = Number.isFinite(shippedAtRaw) && shippedAtRaw > 0 ? shippedAtRaw : 0;
+  const packagedAtRaw = Number.parseInt(String(rawOrder?.packagedAt ?? ""), 10);
+  const packagedAt = Number.isFinite(packagedAtRaw) && packagedAtRaw > 0 ? packagedAtRaw : shippedAt || 0;
+  const packageWeightValueRaw = normalizePackageWeightValue(rawOrder?.packageWeightValue);
+  const packageWeightValue = packageWeightValueRaw === null ? "" : packageWeightValueRaw;
+  const paymentMethod = String(rawOrder?.paymentMethod || "cash")
+    .trim()
+    .toLowerCase() || "cash";
+  const rawCashReceivedCents = Number(rawOrder?.cashReceivedCents);
+  const cashReceivedCents =
+    paymentMethod === "cash" && Number.isFinite(rawCashReceivedCents) && rawCashReceivedCents >= amountTotal
+      ? Math.round(rawCashReceivedCents)
+      : paymentMethod === "cash"
+        ? amountTotal
+        : 0;
+  const cashChangeDueCents = paymentMethod === "cash" ? Math.max(0, cashReceivedCents - amountTotal) : 0;
+  const customerEmail = String(rawOrder?.customerEmail || shippingInput?.email || "")
+    .trim()
+    .toLowerCase();
+  const customerPhone = String(rawOrder?.customerPhone || shippingInput?.phone || "").trim();
+  const customerName = String(
+    rawOrder?.customerName || shippingInput?.name || (shippingRequired ? "Customer" : "Walk-in Customer")
+  ).trim();
+  const shipmentPostageCentsRaw = Number(rawOrder?.shipmentPostageCents);
+  const shipmentPostageCents =
+    Number.isFinite(shipmentPostageCentsRaw) && shipmentPostageCentsRaw >= 0 ? Math.round(shipmentPostageCentsRaw) : 0;
+  const explicitHoldReason = String(rawOrder?.fulfillmentHoldReason || "").trim();
+  const fulfillmentHoldReason = shippingRequired
+    ? explicitHoldReason || (stateMatchResult.stateMatch ? "" : "state_mismatch")
+    : "";
+  const customerTaxExemptByState =
+    rawOrder?.customerTaxExemptByState === true || (customerState ? manualNonTaxStates.has(customerState) : false);
+
+  return {
+    id,
+    createdAt,
+    createdAtIso: createdAt > 0 ? new Date(createdAt * 1000).toISOString() : "",
+    paymentStatus: String(rawOrder?.paymentStatus || "paid").trim().toLowerCase() || "paid",
+    paymentMethod,
+    currency: String(rawOrder?.currency || currency).trim().toLowerCase() || currency,
+    amountSubtotal,
+    amountShipping,
+    amountTax,
+    amountTotal,
+    unitsTotal,
+    bookUnitsTotal,
+    shippableUnits,
+    shippingWeightLbs,
+    shippingBillableWeightLbs,
+    shippingZone,
+    items,
+    fulfillmentStatus: normalizeFulfillmentStatus(rawOrder?.fulfillmentStatus),
+    shippedAt,
+    shippedAtIso: shippedAt > 0 ? new Date(shippedAt * 1000).toISOString() : "",
+    packagedAt,
+    packagedAtIso: packagedAt > 0 ? new Date(packagedAt * 1000).toISOString() : "",
+    packageWeightValue,
+    shipmentCarrier: String(rawOrder?.shipmentCarrier || "").trim(),
+    shipmentTrackingNumber: String(rawOrder?.shipmentTrackingNumber || "").trim(),
+    shipmentTrackingUrl: String(rawOrder?.shipmentTrackingUrl || "").trim(),
+    shipmentNote: String(rawOrder?.shipmentNote || "").trim(),
+    shipmentLabelId: String(rawOrder?.shipmentLabelId || "").trim(),
+    shipmentLabelUrl: String(rawOrder?.shipmentLabelUrl || "").trim(),
+    shipmentPostageCents,
+    fulfillmentHoldReason,
+    shippingRequired,
+    shippingDetails: shippingInput,
+    orderSource: String(rawOrder?.orderSource || "admin_pos").trim().toLowerCase() || "admin_pos",
+    customerState,
+    shippingState: shippingRequired ? stateMatchResult.shippingState || stateMatchResult.shippingStateRaw || "" : "",
+    shippingCountry: stateMatchResult.shippingCountry,
+    shippingStateMatchesCustomerState: stateMatchResult.stateMatch,
+    shippingStateMismatchReason: stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason,
+    customerTaxExemptByState,
+    paymentIntentId: String(rawOrder?.paymentIntentId || "").trim(),
+    customerName,
+    customerEmail,
+    customerPhone,
+    shippingName: shippingRequired ? String(shippingInput?.name || customerName).trim() : "",
+    shippingAddressLine1: shippingRequired ? String(shippingInput?.line1 || "").trim() : "",
+    shippingAddressLine2: shippingRequired ? String(shippingInput?.line2 || "").trim() : "",
+    shippingCity: shippingRequired ? String(shippingInput?.city || "").trim() : "",
+    shippingAddress: shippingRequired ? buildManualShippingAddressLabel(shippingInput) : "",
+    shippingPostalCode: shippingRequired ? String(shippingInput?.postalCode || "").trim() : "",
+    customerKey: customerEmail ? customerEmail.toLowerCase() : `guest:${id}`,
+    cashReceivedCents,
+    cashChangeDueCents
+  };
+}
+
+function buildManualOrderReceiptPayload(order) {
+  const normalizedOrder = normalizeManualOrderRecord(order);
+  if (!normalizedOrder) {
+    return null;
+  }
+
+  return {
+    id: normalizedOrder.id,
+    createdAt: normalizedOrder.createdAt,
+    createdAtIso: normalizedOrder.createdAtIso,
+    amountSubtotal: normalizedOrder.amountSubtotal,
+    amountShipping: normalizedOrder.amountShipping,
+    amountTax: normalizedOrder.amountTax,
+    amountDiscount: 0,
+    amountTotal: normalizedOrder.amountTotal,
+    currency: normalizedOrder.currency,
+    paymentMethod: normalizedOrder.paymentMethod,
+    cashReceivedCents: normalizedOrder.cashReceivedCents,
+    cashChangeDueCents: normalizedOrder.cashChangeDueCents,
+    shippingRequired: normalizedOrder.shippingRequired,
+    orderSource: normalizedOrder.orderSource,
+    customerState: normalizedOrder.customerState,
+    shippingState: normalizedOrder.shippingState,
+    shippingCountry: normalizedOrder.shippingCountry,
+    shippingStateMatchesCustomerState: normalizedOrder.shippingStateMatchesCustomerState,
+    shippingStateMismatchReason: normalizedOrder.shippingStateMismatchReason,
+    customerTaxExemptByState: normalizedOrder.customerTaxExemptByState,
+    customerEmail: normalizedOrder.customerEmail,
+    customerName: normalizedOrder.customerName,
+    shippingDetails: buildStripeStyleShippingDetails(
+      normalizedOrder.shippingDetails || {
+        name: normalizedOrder.customerName,
+        phone: normalizedOrder.customerPhone,
+        line1: "",
+        line2: "",
+        city: "",
+        state: "",
+        postalCode: "",
+        country: "US"
+      }
+    ),
+    lineItems: normalizedOrder.items.map((item) => ({
+      name: item.name,
+      quantity: item.quantity,
+      amountTotal: item.amountTotal
+    }))
+  };
+}
+
+function buildManualCashOrder({ cartDetails, shippingRequired, shippingDetails, cashReceivedCents }) {
+  const createdAt = Math.floor(Date.now() / 1000);
+  const orderId = `pos_cash_${createdAt}_${randomUUID().slice(0, 8)}`;
+  const normalizedShippingDetails = shippingRequired
+    ? normalizeCheckoutShippingInput(shippingDetails, "")
+    : null;
+  const stateMatchResult = evaluateManualOrderStateMatch({
+    customerState: cartDetails.customerState,
+    shippingRequired,
+    shippingDetails: normalizedShippingDetails
+  });
+  const customerName = shippingRequired
+    ? String(normalizedShippingDetails?.name || "Customer").trim()
+    : "Walk-in Customer";
+  const customerEmail = shippingRequired ? String(normalizedShippingDetails?.email || "").trim().toLowerCase() : "";
+  const customerPhone = shippingRequired ? String(normalizedShippingDetails?.phone || "").trim() : "";
+  const amountTotal = Math.max(0, Math.round(Number(cartDetails.amountTotal) || 0));
+  const cashReceived = Math.max(amountTotal, Math.round(Number(cashReceivedCents) || amountTotal));
+
+  return {
+    id: orderId,
+    createdAt,
+    paymentStatus: "paid",
+    paymentMethod: "cash",
+    currency,
+    amountSubtotal: cartDetails.amountSubtotal,
+    amountShipping: cartDetails.shippingTotal,
+    amountTax: cartDetails.manualSalesTaxTotal,
+    amountTotal,
+    unitsTotal: cartDetails.unitsTotal,
+    bookUnitsTotal: cartDetails.bookUnitsTotal,
+    shippableUnits: cartDetails.shippableUnits,
+    shippingWeightLbs: cartDetails.shippingWeightLbs,
+    shippingBillableWeightLbs: cartDetails.shippingBillableWeightLbs,
+    shippingZone: cartDetails.shippingZone,
+    items: cartDetails.items,
+    fulfillmentStatus: "pending",
+    shippedAt: 0,
+    packagedAt: 0,
+    packageWeightValue: "",
+    shipmentCarrier: "",
+    shipmentTrackingNumber: "",
+    shipmentTrackingUrl: "",
+    shipmentNote: "",
+    shipmentLabelId: "",
+    shipmentLabelUrl: "",
+    shipmentPostageCents: 0,
+    fulfillmentHoldReason: shippingRequired ? (stateMatchResult.stateMatch ? "" : "state_mismatch") : "",
+    shippingRequired,
+    shippingDetails: normalizedShippingDetails,
+    orderSource: "admin_pos",
+    customerState: cartDetails.customerState,
+    shippingState: shippingRequired ? stateMatchResult.shippingState || stateMatchResult.shippingStateRaw || "" : "",
+    shippingCountry: stateMatchResult.shippingCountry,
+    shippingStateMatchesCustomerState: stateMatchResult.stateMatch,
+    shippingStateMismatchReason: stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason,
+    customerTaxExemptByState: cartDetails.customerTaxExemptByState,
+    customerName,
+    customerEmail,
+    customerPhone,
+    cashReceivedCents: cashReceived,
+    cashChangeDueCents: Math.max(0, cashReceived - amountTotal)
+  };
+}
+
+function buildManualOrderAddressBookInput(order) {
+  const normalizedOrder = normalizeManualOrderRecord(order);
+  if (!normalizedOrder || normalizedOrder.shippingRequired === false || !normalizedOrder.shippingDetails) {
+    return null;
+  }
+  return {
+    orderId: normalizedOrder.id,
+    ...normalizedOrder.shippingDetails
+  };
+}
+
+async function saveManualOrderAddressToBook(order) {
+  const input = buildManualOrderAddressBookInput(order);
+  if (!input) {
+    throw new AddressBookValidationError(
+      getShippingNotRequiredErrorMessageForOrderSource(order?.orderSource || "storefront")
+    );
+  }
+  return upsertAddressBookEntry(input);
+}
+
+async function findNormalizedManualOrderById(orderId) {
+  const manualOrder = await findManualOrderById(orderId);
+  return normalizeManualOrderRecord(manualOrder);
 }
 
 function getTaxRuntimeStatus() {
@@ -2671,10 +3132,6 @@ app.get("/api/admin/health", requireAdmin, (req, res) => {
 });
 
 app.get("/api/admin/orders", requireAdmin, async (req, res) => {
-  if (!requireStripe(res)) {
-    return;
-  }
-
   const parsedLimit = Number.parseInt(String(req.query?.limit ?? ""), 10);
   const limit = Number.isFinite(parsedLimit) ? Math.min(500, Math.max(1, parsedLimit)) : 50;
   const paidOnly = String(req.query?.paidOnly ?? "true").trim().toLowerCase() !== "false";
@@ -2685,43 +3142,58 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         .map((entry) => String(entry?.orderId || "").trim())
         .filter(Boolean)
     );
+    const normalizedManualOrders = (await listManualOrders())
+      .map((order) => normalizeManualOrderRecord(order))
+      .filter(Boolean)
+      .filter((order) => {
+        if (paidOnly && order.paymentStatus !== "paid") {
+          return false;
+        }
+        return true;
+      });
+    const manualExcludedCount = normalizedManualOrders.reduce((sum, order) => {
+      const orderId = String(order?.id || "").trim();
+      return orderId && excludedOrderIds.has(orderId) ? sum + 1 : sum;
+    }, 0);
     const visibleSessions = [];
     let excludedVisibleCount = 0;
-    let hasMore = true;
-    let startingAfter = "";
+    if (stripe) {
+      let hasMore = true;
+      let startingAfter = "";
 
-    while (hasMore && visibleSessions.length < limit) {
-      const response = await stripe.checkout.sessions.list({
-        limit: Math.min(100, limit - visibleSessions.length),
-        expand: ["data.payment_intent"],
-        ...(startingAfter ? { starting_after: startingAfter } : {})
-      });
-      const pageSessions = Array.isArray(response?.data) ? response.data : [];
-      if (pageSessions.length === 0) {
-        break;
-      }
-
-      for (const session of pageSessions) {
-        if (paidOnly && session.payment_status !== "paid") {
-          continue;
-        }
-        const sessionId = String(session?.id || "").trim();
-        if (sessionId && excludedOrderIds.has(sessionId)) {
-          excludedVisibleCount += 1;
-          continue;
-        }
-        visibleSessions.push(session);
-        if (visibleSessions.length >= limit) {
+      while (hasMore && visibleSessions.length < limit) {
+        const response = await stripe.checkout.sessions.list({
+          limit: Math.min(100, limit - visibleSessions.length),
+          expand: ["data.payment_intent"],
+          ...(startingAfter ? { starting_after: startingAfter } : {})
+        });
+        const pageSessions = Array.isArray(response?.data) ? response.data : [];
+        if (pageSessions.length === 0) {
           break;
         }
-      }
 
-      const lastSession = pageSessions[pageSessions.length - 1];
-      startingAfter = String(lastSession?.id || "").trim();
-      hasMore = Boolean(response?.has_more) && Boolean(startingAfter);
+        for (const session of pageSessions) {
+          if (paidOnly && session.payment_status !== "paid") {
+            continue;
+          }
+          const sessionId = String(session?.id || "").trim();
+          if (sessionId && excludedOrderIds.has(sessionId)) {
+            excludedVisibleCount += 1;
+            continue;
+          }
+          visibleSessions.push(session);
+          if (visibleSessions.length >= limit) {
+            break;
+          }
+        }
+
+        const lastSession = pageSessions[pageSessions.length - 1];
+        startingAfter = String(lastSession?.id || "").trim();
+        hasMore = Boolean(response?.has_more) && Boolean(startingAfter);
+      }
     }
 
-    const normalizedOrders = visibleSessions
+    const normalizedStripeOrders = visibleSessions
       .map((session) => {
         const totals = computeOrderTotals(session, []);
         const metadata = session.metadata || {};
@@ -2886,6 +3358,13 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         };
       })
       .sort((left, right) => right.createdAt - left.createdAt);
+    const normalizedOrders = [...normalizedStripeOrders, ...normalizedManualOrders]
+      .filter((order) => {
+        const orderId = String(order?.id || "").trim();
+        return !(orderId && excludedOrderIds.has(orderId));
+      })
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .slice(0, limit);
 
     const customerMap = new Map();
     for (const order of normalizedOrders) {
@@ -2918,6 +3397,7 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         createdAt: order.createdAt,
         createdAtIso: order.createdAtIso,
         paymentStatus: order.paymentStatus,
+        paymentMethod: order.paymentMethod || "",
         currency: order.currency,
         amountSubtotal: order.amountSubtotal,
         amountShipping: order.amountShipping,
@@ -2944,6 +3424,7 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         shipmentLabelUrl: order.shipmentLabelUrl,
         shipmentPostageCents: order.shipmentPostageCents,
         fulfillmentHoldReason: order.fulfillmentHoldReason,
+        shippingRequired: order.shippingRequired !== false,
         customerState: order.customerState,
         shippingState: order.shippingState,
         shippingCountry: order.shippingCountry,
@@ -2960,6 +3441,8 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         shippingCity: order.shippingCity,
         shippingAddress: order.shippingAddress,
         shippingPostalCode: order.shippingPostalCode,
+        cashReceivedCents: Number(order.cashReceivedCents) || 0,
+        cashChangeDueCents: Number(order.cashChangeDueCents) || 0,
         customerOrdersCount: customer?.ordersCount || 1,
         customerUnitsTotal: customer?.unitsTotal || order.unitsTotal,
         customerPastOrderIds: pastOrderIds
@@ -2983,7 +3466,7 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
       fetchedAt: new Date().toISOString(),
       paidOnly,
       count: orders.length,
-      excludedCount: excludedVisibleCount,
+      excludedCount: excludedVisibleCount + manualExcludedCount,
       orders,
       customers
     });
@@ -3065,16 +3548,87 @@ app.get("/api/admin/address-book", requireAdmin, async (req, res) => {
 });
 
 app.post("/api/admin/orders/:id/edit-shipping-address", requireAdmin, async (req, res) => {
-  if (!requireStripe(res)) {
-    return;
-  }
-
   const orderId = String(req.params.id || "").trim();
   if (!orderId) {
     return res.status(400).json({ error: "Order ID is required." });
   }
 
   try {
+    const manualOrder = await findNormalizedManualOrderById(orderId);
+    if (manualOrder) {
+      if (!manualOrder.shippingRequired) {
+        return res.status(409).json({
+          error: getShippingNotRequiredErrorMessageForOrderSource(manualOrder.orderSource)
+        });
+      }
+
+      const shippingName = String(req.body?.name || "").trim().slice(0, 120);
+      const shippingLine1 = String(req.body?.line1 || "").trim().slice(0, 220);
+      const shippingLine2 = String(req.body?.line2 || "").trim().slice(0, 220);
+      const shippingCity = String(req.body?.city || "").trim().slice(0, 120);
+      const shippingState = normalizeUsStateCode(req.body?.state);
+      const shippingPostalCode = String(req.body?.postalCode || req.body?.postal_code || "")
+        .trim()
+        .toUpperCase()
+        .slice(0, 20);
+      const shippingCountry = normalizeIsoCountry(req.body?.country, "US");
+
+      if (!shippingName || !shippingLine1 || !shippingCity || !shippingState || !shippingPostalCode) {
+        return res.status(400).json({
+          error: "Name, address line 1, city, state, and ZIP are required."
+        });
+      }
+      if (shippingCountry !== "US") {
+        return res.status(400).json({
+          error: "Only U.S. shipping addresses are supported."
+        });
+      }
+
+      const shippingDetails = {
+        ...(manualOrder.shippingDetails || {}),
+        name: shippingName,
+        email: manualOrder.customerEmail,
+        phone: manualOrder.customerPhone,
+        line1: shippingLine1,
+        line2: shippingLine2,
+        city: shippingCity,
+        state: shippingState,
+        postalCode: shippingPostalCode,
+        country: shippingCountry
+      };
+      const stateMatchResult = evaluateManualOrderStateMatch({
+        customerState: manualOrder.customerState,
+        shippingRequired: true,
+        shippingDetails
+      });
+
+      await updateManualOrder(orderId, {
+        shippingDetails,
+        customerName: shippingName || manualOrder.customerName,
+        fulfillmentStatus: manualOrder.fulfillmentStatus === "shipped" ? "shipped" : "pending",
+        fulfillmentHoldReason: stateMatchResult.stateMatch ? "" : "state_mismatch",
+        shippingState: stateMatchResult.shippingState || shippingState,
+        shippingCountry: stateMatchResult.shippingCountry || shippingCountry,
+        shippingStateMatchesCustomerState: stateMatchResult.stateMatch,
+        shippingStateMismatchReason: stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason
+      });
+
+      return res.json({
+        ok: true,
+        orderId,
+        shipping: shippingDetails,
+        shippingStateMatchesCustomerState: stateMatchResult.stateMatch,
+        shippingStateMismatchReason: stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason,
+        message: stateMatchResult.stateMatch
+          ? "Shipping address updated."
+          : "Shipping address updated, but checkout state still does not match this state."
+      });
+    }
+
+    if (!requireStripe(res)) {
+      return;
+    }
+
     const session = await stripe.checkout.sessions.retrieve(orderId, {
       expand: ["payment_intent"]
     });
@@ -3168,16 +3722,30 @@ app.post("/api/admin/orders/:id/edit-shipping-address", requireAdmin, async (req
 });
 
 app.post("/api/admin/orders/:id/save-address", requireAdmin, async (req, res) => {
-  if (!requireStripe(res)) {
-    return;
-  }
-
   const orderId = String(req.params.id || "").trim();
   if (!orderId) {
     return res.status(400).json({ error: "Order ID is required." });
   }
 
   try {
+    const manualOrder = await findNormalizedManualOrderById(orderId);
+    if (manualOrder) {
+      if (!manualOrder.shippingRequired) {
+        return res.status(409).json({
+          error: getShippingNotRequiredErrorMessageForOrderSource(manualOrder.orderSource)
+        });
+      }
+      const entry = await saveManualOrderAddressToBook(manualOrder);
+      return res.json({
+        ok: true,
+        entry
+      });
+    }
+
+    if (!requireStripe(res)) {
+      return;
+    }
+
     const session = await stripe.checkout.sessions.retrieve(orderId, {
       expand: ["payment_intent"]
     });
@@ -3213,16 +3781,57 @@ app.post("/api/admin/orders/:id/save-address", requireAdmin, async (req, res) =>
 });
 
 app.post("/api/admin/orders/:id/use-shipping-state", requireAdmin, async (req, res) => {
-  if (!requireStripe(res)) {
-    return;
-  }
-
   const orderId = String(req.params.id || "").trim();
   if (!orderId) {
     return res.status(400).json({ error: "Order ID is required." });
   }
 
   try {
+    const manualOrder = await findNormalizedManualOrderById(orderId);
+    if (manualOrder) {
+      if (!manualOrder.shippingRequired) {
+        return res.status(409).json({
+          error: getShippingNotRequiredErrorMessageForOrderSource(manualOrder.orderSource)
+        });
+      }
+      if (manualOrder.customerState) {
+        return res.status(409).json({
+          error: `Checkout state is already set to ${manualOrder.customerState}.`
+        });
+      }
+
+      const shippingState = normalizeUsStateCode(manualOrder.shippingState);
+      if (!shippingState || String(manualOrder.shippingCountry || "US").trim().toUpperCase() !== "US") {
+        return res.status(400).json({
+          error: "Shipping address must include a valid U.S. state to use this fix."
+        });
+      }
+
+      await updateManualOrder(orderId, {
+        customerState: shippingState,
+        customerTaxExemptByState: manualNonTaxStates.has(shippingState),
+        fulfillmentStatus: manualOrder.fulfillmentStatus === "shipped" ? "shipped" : "pending",
+        fulfillmentHoldReason: "",
+        shippingState: shippingState,
+        shippingCountry: "US",
+        shippingStateMatchesCustomerState: true,
+        shippingStateMismatchReason: ""
+      });
+
+      return res.json({
+        ok: true,
+        orderId,
+        selectedState: shippingState,
+        shippingState,
+        sessionMetadataUpdated: false,
+        message: `Order state fixed to ${shippingState}.`
+      });
+    }
+
+    if (!requireStripe(res)) {
+      return;
+    }
+
     const session = await stripe.checkout.sessions.retrieve(orderId, {
       expand: ["payment_intent"]
     });
@@ -3306,16 +3915,23 @@ app.post("/api/admin/orders/:id/use-shipping-state", requireAdmin, async (req, r
 });
 
 app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
-  if (!requireStripe(res)) {
-    return;
-  }
-
   const orderId = String(req.params.id || "").trim();
   if (!orderId) {
     return res.status(400).json({ error: "Order ID is required." });
   }
 
   try {
+    const manualOrder = await findNormalizedManualOrderById(orderId);
+    if (manualOrder) {
+      return res.status(409).json({
+        error: "USPS label generation is only available for Stripe-backed orders right now."
+      });
+    }
+
+    if (!requireStripe(res)) {
+      return;
+    }
+
     const session = await stripe.checkout.sessions.retrieve(orderId, {
       expand: ["payment_intent"]
     });
@@ -3427,10 +4043,6 @@ app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
 });
 
 app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
-  if (!requireStripe(res)) {
-    return;
-  }
-
   const orderId = String(req.params.id || "").trim();
   if (!orderId) {
     return res.status(400).json({ error: "Order ID is required." });
@@ -3444,6 +4056,121 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
   const overrideStateMismatch = parseBooleanFlag(req.body?.overrideStateMismatch, false) === true;
 
   try {
+    const manualOrder = await findNormalizedManualOrderById(orderId);
+    if (manualOrder) {
+      if (!manualOrder.shippingRequired) {
+        return res.status(409).json({
+          error: getShippingNotRequiredErrorMessageForOrderSource(manualOrder.orderSource)
+        });
+      }
+      if (!manualOrder.shippingStateMatchesCustomerState && !overrideStateMismatch) {
+        return res.status(409).json({
+          error: `Cannot mark shipped: ${buildStateMismatchErrorMessage({
+            selectedState: manualOrder.customerState,
+            shippingState: manualOrder.shippingState,
+            shippingCountry: manualOrder.shippingCountry,
+            mismatchReason: manualOrder.shippingStateMismatchReason
+          })}`
+        });
+      }
+
+      const carrier =
+        carrierRaw !== undefined
+          ? String(carrierRaw || "").trim().slice(0, 80)
+          : String(manualOrder.shipmentCarrier || "").trim().slice(0, 80);
+      const trackingNumber =
+        trackingNumberRaw !== undefined
+          ? String(trackingNumberRaw || "").trim().slice(0, 140)
+          : String(manualOrder.shipmentTrackingNumber || "").trim().slice(0, 140);
+      const trackingUrl =
+        trackingUrlRaw !== undefined
+          ? String(trackingUrlRaw || "").trim().slice(0, 500)
+          : String(manualOrder.shipmentTrackingUrl || "").trim().slice(0, 500);
+      const note =
+        noteRaw !== undefined
+          ? String(noteRaw || "").trim().slice(0, 500)
+          : String(manualOrder.shipmentNote || "").trim().slice(0, 500);
+      const existingStatus = normalizeFulfillmentStatus(manualOrder.fulfillmentStatus);
+      if (existingStatus === "shipped" && !resendEmail) {
+        return res.json({
+          ok: true,
+          alreadyShipped: true,
+          message: "Order already marked shipped. Use resendEmail=true to re-send shipment email."
+        });
+      }
+
+      const shippedAtUnix =
+        existingStatus === "shipped" && resendEmail && manualOrder.shippedAt > 0
+          ? manualOrder.shippedAt
+          : Math.floor(Date.now() / 1000);
+      const packagedAtUnix = manualOrder.packagedAt > 0 ? manualOrder.packagedAt : shippedAtUnix;
+      const updatedOrder = await updateManualOrder(orderId, {
+        fulfillmentStatus: "shipped",
+        shippedAt: shippedAtUnix,
+        packagedAt: packagedAtUnix,
+        shipmentCarrier: carrier,
+        shipmentTrackingNumber: trackingNumber,
+        shipmentTrackingUrl: trackingUrl,
+        shipmentNote: note
+      });
+      const normalizedUpdatedOrder = normalizeManualOrderRecord(updatedOrder);
+      const customerEmail = String(normalizedUpdatedOrder?.customerEmail || "").trim();
+      if (!customerEmail) {
+        return res.json({
+          ok: true,
+          shipped: true,
+          emailed: false,
+          shippedAt: shippedAtUnix,
+          message: "Order marked shipped, but customer email was missing."
+        });
+      }
+
+      setImmediate(() => {
+        void (async () => {
+          try {
+            await sendShipmentNotification({
+              customerEmail,
+              customerName: normalizedUpdatedOrder.customerName,
+              orderId: normalizedUpdatedOrder.id,
+              currency: normalizedUpdatedOrder.currency || currency,
+              lineItems: normalizedUpdatedOrder.items,
+              shippingDetails: buildStripeStyleShippingDetails(
+                normalizedUpdatedOrder.shippingDetails || {
+                  name: normalizedUpdatedOrder.customerName,
+                  phone: normalizedUpdatedOrder.customerPhone,
+                  line1: "",
+                  line2: "",
+                  city: "",
+                  state: "",
+                  postalCode: "",
+                  country: "US"
+                }
+              ),
+              carrier,
+              trackingNumber,
+              trackingUrl,
+              note
+            });
+            console.log(`Shipment email sent for order ${normalizedUpdatedOrder.id} -> ${customerEmail}`);
+          } catch (error) {
+            console.error(`Failed to send shipment notification for order ${normalizedUpdatedOrder.id}:`, error);
+          }
+        })();
+      });
+
+      return res.json({
+        ok: true,
+        shipped: true,
+        emailed: true,
+        emailQueued: true,
+        shippedAt: shippedAtUnix
+      });
+    }
+
+    if (!requireStripe(res)) {
+      return;
+    }
+
     const session = await stripe.checkout.sessions.retrieve(orderId, {
       expand: ["payment_intent"]
     });
@@ -3584,10 +4311,6 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
 });
 
 app.post("/api/admin/orders/:id/package", requireAdmin, async (req, res) => {
-  if (!requireStripe(res)) {
-    return;
-  }
-
   const orderId = String(req.params.id || "").trim();
   if (!orderId) {
     return res.status(400).json({ error: "Order ID is required." });
@@ -3596,6 +4319,24 @@ app.post("/api/admin/orders/:id/package", requireAdmin, async (req, res) => {
   const packaged = parseBooleanFlag(req.body?.packaged, true) === true;
 
   try {
+    const manualOrder = await findNormalizedManualOrderById(orderId);
+    if (manualOrder) {
+      const packagedAtUnix = packaged ? Math.floor(Date.now() / 1000) : 0;
+      await updateManualOrder(orderId, {
+        packagedAt: packagedAtUnix
+      });
+      return res.json({
+        ok: true,
+        packaged,
+        packagedAt: packagedAtUnix,
+        packagedAtIso: packagedAtUnix > 0 ? new Date(packagedAtUnix * 1000).toISOString() : ""
+      });
+    }
+
+    if (!requireStripe(res)) {
+      return;
+    }
+
     const session = await stripe.checkout.sessions.retrieve(orderId, {
       expand: ["payment_intent"]
     });
@@ -3636,10 +4377,6 @@ app.post("/api/admin/orders/:id/package", requireAdmin, async (req, res) => {
 });
 
 app.post("/api/admin/orders/:id/package-weight", requireAdmin, async (req, res) => {
-  if (!requireStripe(res)) {
-    return;
-  }
-
   const orderId = String(req.params.id || "").trim();
   if (!orderId) {
     return res.status(400).json({ error: "Order ID is required." });
@@ -3651,6 +4388,21 @@ app.post("/api/admin/orders/:id/package-weight", requireAdmin, async (req, res) 
   }
 
   try {
+    const manualOrder = await findNormalizedManualOrderById(orderId);
+    if (manualOrder) {
+      await updateManualOrder(orderId, {
+        packageWeightValue
+      });
+      return res.json({
+        ok: true,
+        packageWeightValue
+      });
+    }
+
+    if (!requireStripe(res)) {
+      return;
+    }
+
     const session = await stripe.checkout.sessions.retrieve(orderId, {
       expand: ["payment_intent"]
     });
@@ -3688,16 +4440,33 @@ app.post("/api/admin/orders/:id/package-weight", requireAdmin, async (req, res) 
 });
 
 app.post("/api/admin/orders/:id/mark-pending", requireAdmin, async (req, res) => {
-  if (!requireStripe(res)) {
-    return;
-  }
-
   const orderId = String(req.params.id || "").trim();
   if (!orderId) {
     return res.status(400).json({ error: "Order ID is required." });
   }
 
   try {
+    const manualOrder = await findNormalizedManualOrderById(orderId);
+    if (manualOrder) {
+      await updateManualOrder(orderId, {
+        fulfillmentStatus: "pending",
+        shippedAt: 0,
+        shipmentCarrier: "",
+        shipmentTrackingNumber: "",
+        shipmentTrackingUrl: "",
+        shipmentNote: ""
+      });
+      return res.json({
+        ok: true,
+        shipped: false,
+        status: "pending"
+      });
+    }
+
+    if (!requireStripe(res)) {
+      return;
+    }
+
     const session = await stripe.checkout.sessions.retrieve(orderId, {
       expand: ["payment_intent"]
     });
@@ -3958,7 +4727,76 @@ app.post("/api/admin/pos/create-checkout-session", requireAdmin, async (req, res
   }
 });
 
+app.post("/api/admin/pos/create-cash-sale", requireAdmin, async (req, res) => {
+  try {
+    if (getTaxRuntimeStatus() === "stripe_automatic") {
+      return res.status(409).json({
+        error:
+          "Cash POS needs an exact tax total. Switch Stripe automatic tax off or use manual tax mode before recording cash sales."
+      });
+    }
+
+    const cart = Array.isArray(req.body?.cart) ? req.body.cart : [];
+    const customerState = req.body?.customerState;
+    const needsShipping = parseBooleanFlag(req.body?.needsShipping, false) === true;
+    const shippingDetails = needsShipping
+      ? normalizeCheckoutShippingInput(req.body?.shippingInfo, customerState)
+      : null;
+    const cartDetails = await buildCheckoutSessionCartDetails(cart, customerState, {
+      shippingRequired: needsShipping,
+      allowHiddenProducts: true
+    });
+
+    if (needsShipping) {
+      if (!hasCompleteCheckoutShippingInput(shippingDetails)) {
+        return res.status(400).json({
+          error: "Name, address line 1, city, state, and ZIP are required for shipped POS orders."
+        });
+      }
+      if (shippingDetails.country !== "US") {
+        return res.status(400).json({
+          error: "Only U.S. shipping addresses are supported for shipped POS orders."
+        });
+      }
+    }
+
+    const cashReceivedCents = parseCashReceivedCents(req.body?.cashReceivedCents, cartDetails.amountTotal);
+    if (!Number.isFinite(cashReceivedCents)) {
+      return res.status(400).json({ error: "Enter a valid cash amount received." });
+    }
+    if (cashReceivedCents < cartDetails.amountTotal) {
+      return res.status(400).json({ error: "Cash received must be at least the sale total." });
+    }
+
+    const createdOrder = await createManualOrder(
+      buildManualCashOrder({
+        cartDetails,
+        shippingRequired: needsShipping,
+        shippingDetails,
+        cashReceivedCents
+      })
+    );
+    invalidateSoldCopiesCache();
+    return res.status(201).json({
+      ok: true,
+      order: buildManualOrderReceiptPayload(createdOrder)
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(
+      error instanceof ManualOrderValidationError || isCheckoutValidationErrorMessage(details) ? 400 : 500
+    ).json({
+      error: details ? `Could not record cash sale: ${details}` : "Could not record cash sale right now."
+    });
+  }
+});
+
 app.get("/api/order/:sessionId", async (req, res) => {
+  const manualOrder = await findNormalizedManualOrderById(req.params.sessionId);
+  if (manualOrder) {
+    return res.json(buildManualOrderReceiptPayload(manualOrder));
+  }
+
   if (!requireStripe(res)) {
     return;
   }
@@ -4010,6 +4848,10 @@ app.get("/api/order/:sessionId", async (req, res) => {
       amountDiscount: session.total_details?.amount_discount || 0,
       amountTotal: totals.amountTotal,
       currency: session.currency || currency,
+      paymentMethod:
+        Array.isArray(session.payment_method_types) && session.payment_method_types.length > 0
+          ? String(session.payment_method_types[0] || "").trim().toLowerCase()
+          : "card",
       shippingRequired,
       orderSource,
       customerState: stateMatchResult.selectedState,
@@ -4047,6 +4889,10 @@ app.get("/fulfillment", (req, res) => {
   res.redirect("/fulfillment.html");
 });
 
+app.get("/completed-orders", (req, res) => {
+  res.redirect("/completed-orders.html");
+});
+
 app.use((error, req, res, next) => {
   if (!error) {
     return next();
@@ -4078,6 +4924,7 @@ async function start() {
   await ensureSiteSettingsStore();
   await ensureAddressBookStore();
   await ensureOrderExclusionStore();
+  await ensureManualOrderStore();
   await fs.mkdir(uploadsDir, { recursive: true });
 
   app.listen(port, () => {

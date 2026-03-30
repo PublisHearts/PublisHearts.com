@@ -23,6 +23,8 @@ const ADMIN_KEY = "publishearts_admin_password_v1";
 const SHIPPO_MANUAL_LABEL_URL = "https://apps.goshippo.com/orders";
 const SHIPPO_ORDER_EXPORT_VERSION = "SHIPPO_ORDER_EXPORT_V2";
 const COPIES_PER_EDITION = 50;
+const PAGE_MODE = String(document.body?.dataset?.pageMode || "fulfillment").trim().toLowerCase();
+const isCompletedOrdersPage = PAGE_MODE === "completed-orders";
 
 const state = {
   adminPassword: window.localStorage.getItem(ADMIN_KEY) || "",
@@ -570,9 +572,48 @@ function getOrderSearchQuery() {
   return String(ordersSearchInput?.value || "").trim().toLowerCase();
 }
 
+function getOrdersForCurrentPage(rawOrders) {
+  const safeOrders = Array.isArray(rawOrders) ? rawOrders : [];
+  if (isCompletedOrdersPage) {
+    return safeOrders.filter(
+      (order) => isOrderShippingRequired(order) && String(order?.fulfillmentStatus || "pending") === "shipped"
+    );
+  }
+  return safeOrders;
+}
+
+function buildCustomersFromOrders(orders) {
+  const customerMap = new Map();
+  const safeOrders = Array.isArray(orders) ? orders : [];
+  for (const order of safeOrders) {
+    const email = String(order?.customerEmail || "").trim();
+    const key = email ? email.toLowerCase() : `guest:${String(order?.id || "").trim()}`;
+    const existing = customerMap.get(key) || {
+      key,
+      email,
+      name: String(order?.customerName || "Unknown customer").trim(),
+      ordersCount: 0,
+      unitsTotal: 0,
+      amountTotal: 0,
+      lastOrderAt: 0,
+      orderIds: []
+    };
+    existing.ordersCount += 1;
+    existing.unitsTotal += Math.max(0, Number(order?.unitsTotal) || 0);
+    existing.amountTotal += Math.max(0, Number(order?.amountTotal) || 0);
+    existing.lastOrderAt = Math.max(existing.lastOrderAt, Number(order?.createdAt) || 0);
+    if (!existing.name && order?.customerName) {
+      existing.name = String(order.customerName || "").trim();
+    }
+    existing.orderIds.push(String(order?.id || "").trim());
+    customerMap.set(key, existing);
+  }
+  return Array.from(customerMap.values()).sort((left, right) => right.lastOrderAt - left.lastOrderAt);
+}
+
 function getFilteredOrdersForDisplay(payload) {
-  const allOrders = Array.isArray(payload?.orders) ? payload.orders : [];
-  const allCustomers = Array.isArray(payload?.customers) ? payload.customers : [];
+  const allOrders = getOrdersForCurrentPage(payload?.orders);
+  const allCustomers = buildCustomersFromOrders(allOrders);
   const query = getOrderSearchQuery();
   const matchesSearch = (order) => {
     if (!query) {
@@ -619,6 +660,38 @@ function renderSummary(allOrders) {
     return;
   }
   const orders = Array.isArray(allOrders) ? allOrders : [];
+  if (isCompletedOrdersPage) {
+    const trackedOrders = orders.filter((order) => order?.shipmentTrackingNumber || order?.shipmentTrackingUrl);
+    const carrierOrders = orders.filter((order) => String(order?.shipmentCarrier || "").trim());
+    const recentCutoffSeconds = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+    const recentOrders = orders.filter((order) => Number(order?.shippedAt) >= recentCutoffSeconds);
+    const revenueTotal = orders.reduce((sum, order) => sum + Math.max(0, Number(order?.amountTotal) || 0), 0);
+
+    summaryEl.innerHTML = `
+      <article class="admin-health-card">
+        <h3>Completed</h3>
+        <p><strong>${formatWholeNumber(orders.length)}</strong> shipped orders on file</p>
+        <p>Lookup by customer, order number, or state.</p>
+      </article>
+      <article class="admin-health-card">
+        <h3>Revenue</h3>
+        <p><strong>${formatMoney(revenueTotal)}</strong> across shipped orders</p>
+        <p>Based on order totals already captured in Stripe.</p>
+      </article>
+      <article class="admin-health-card">
+        <h3>Tracking Saved</h3>
+        <p><strong>${formatWholeNumber(trackedOrders.length)}</strong> completed orders have tracking info</p>
+        <p><strong>${formatWholeNumber(carrierOrders.length)}</strong> have a carrier saved</p>
+      </article>
+      <article class="admin-health-card">
+        <h3>Recent</h3>
+        <p><strong>${formatWholeNumber(recentOrders.length)}</strong> shipped in the last 7 days</p>
+        <p>Use this page to resend shipment emails or reopen an order.</p>
+      </article>
+    `;
+    return;
+  }
+
   const shippingOrders = orders.filter((order) => isOrderShippingRequired(order));
   const pendingShippingOrders = shippingOrders.filter((order) => String(order.fulfillmentStatus || "pending") !== "shipped");
   const shippedOrders = shippingOrders.filter((order) => String(order.fulfillmentStatus || "pending") === "shipped");
@@ -922,7 +995,7 @@ function renderOrders(payload) {
 
   if (customers.length > 0) {
     orderCustomersEl.innerHTML = `
-      <h3>Customer History${query ? ` (${customers.length} match)` : ""}</h3>
+      <h3>${isCompletedOrdersPage ? "Completed Customer History" : "Customer History"}${query ? ` (${customers.length} match)` : ""}</h3>
       <div class="admin-customer-list">
         ${customers
           .slice(0, 20)
@@ -938,11 +1011,21 @@ function renderOrders(payload) {
       </div>
     `;
   } else {
-    orderCustomersEl.innerHTML = `<h3>Customer History</h3><p class="cart-item-sub">No customer history yet.</p>`;
+    orderCustomersEl.innerHTML = `<h3>${isCompletedOrdersPage ? "Completed Customer History" : "Customer History"}</h3><p class="cart-item-sub">${
+      isCompletedOrdersPage ? "No completed orders found yet." : "No customer history yet."
+    }</p>`;
   }
 
   if (orders.length === 0) {
-    ordersEl.innerHTML = `<p class="cart-item-sub">${query ? "No orders matched your search." : "No paid orders found yet."}</p>`;
+    ordersEl.innerHTML = `<p class="cart-item-sub">${
+      query
+        ? isCompletedOrdersPage
+          ? "No completed orders matched your search."
+          : "No orders matched your search."
+        : isCompletedOrdersPage
+          ? "No completed orders found yet."
+          : "No paid orders found yet."
+    }</p>`;
     setOrdersBusy(state.ordersBusy);
     return;
   }
@@ -1010,7 +1093,7 @@ function renderOrders(payload) {
     const shippingAddressLabel = shippingRequired ? escapeHtml(order.shippingAddress || "No address") : "Customer left with purchase";
     const packageWeightValue = getOrderPackageWeightValue(order);
     const shippoExportWeight = getShippoExportWeightLbs(order);
-    const shippingToolsHtml = shippingRequired
+    const shippingToolsHtml = shippingRequired && !isCompletedOrdersPage
       ? `
         ${
           canUseShippingStateFallback
@@ -1112,6 +1195,21 @@ function renderOrders(payload) {
     </article>`;
   };
 
+  if (isCompletedOrdersPage) {
+    ordersEl.innerHTML = `
+      <h3>Completed Orders (${shippedOrders.length}${query ? ` / ${allOrders.length} total` : ""})</h3>
+      <div class="admin-orders-list">
+        ${
+          shippedOrders.length > 0
+            ? shippedOrders.map(renderOrderCard).join("")
+            : '<p class="cart-item-sub">No completed shipped orders found.</p>'
+        }
+      </div>
+    `;
+    setOrdersBusy(state.ordersBusy);
+    return;
+  }
+
   ordersEl.innerHTML = `
     <h3>Needs Fulfillment (${pendingShippingOrders.length}${query ? ` / ${allOrders.length} total` : ""})</h3>
     ${
@@ -1150,10 +1248,6 @@ function renderOrders(payload) {
           ? pickupOrders.map(renderOrderCard).join("")
           : '<p class="cart-item-sub">No POS or pickup orders yet.</p>'
       }
-    </div>
-    <h3>Shipped (${shippedOrders.length}${query ? ` / ${allOrders.length} total` : ""})</h3>
-    <div class="admin-orders-list">
-      ${shippedOrders.length > 0 ? shippedOrders.map(renderOrderCard).join("") : '<p class="cart-item-sub">No shipped orders yet.</p>'}
     </div>
   `;
   setOrdersBusy(state.ordersBusy);
@@ -1365,7 +1459,7 @@ loginForm.addEventListener("submit", async (event) => {
     passwordInput.value = "";
     showPanel();
     await loadOrders();
-    setOrdersMessage("Fulfillment ready.");
+    setOrdersMessage(isCompletedOrdersPage ? "Completed orders ready." : "Fulfillment ready.");
     setLoginMessage("");
   } catch (error) {
     setLoginMessage(error.message || "Could not sign in.", true);

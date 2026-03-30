@@ -22,6 +22,8 @@
         </a>
         <div class="header-actions">
           <a class="ghost-btn ghost-link" href="/admin">Admin</a>
+          <a class="ghost-btn ghost-link" href="/fulfillment">Fulfillment</a>
+          <a class="ghost-btn ghost-link" href="/completed-orders">Completed</a>
           <button id="pos-logout-btn" class="ghost-btn hidden" type="button">Log out</button>
         </div>
       </div>
@@ -30,7 +32,7 @@
     <main class="container pos-shell">
       <section id="pos-login-card" class="admin-login-card pos-login-card">
         <h1>POS Login</h1>
-        <p>Use your admin password to open the in-person Stripe checkout and print receipts.</p>
+        <p>Use your admin password to open the in-person POS for card or cash sales and print receipts.</p>
         <form id="pos-login-form" class="admin-login-form">
           <label for="pos-admin-password">Password</label>
           <input id="pos-admin-password" name="password" type="password" autocomplete="current-password" required />
@@ -45,7 +47,7 @@
             <p class="pos-eyebrow">In-Person Transactions</p>
             <h1>POS Checkout</h1>
             <p class="pos-head-copy">
-              Build a card sale, send it through Stripe, and print a merchant-style receipt back on this page.
+              Build a card or cash sale, send card payments through Stripe, and print a merchant-style receipt back on this page.
             </p>
           </div>
           <div class="pos-page-head-actions">
@@ -74,7 +76,7 @@
               <div class="pos-transaction-head">
                 <div>
                   <h2>Current Sale</h2>
-                  <p>Stripe-hosted card checkout for in-person transactions.</p>
+                  <p>Use Stripe for cards or record a cash payment directly here.</p>
                 </div>
                 <button id="pos-new-sale-btn" class="ghost-btn" type="button">New Sale</button>
               </div>
@@ -158,7 +160,8 @@
               </p>
 
               <div class="admin-form-actions">
-                <button id="pos-checkout-btn" class="primary-btn" type="button">Open Stripe Checkout</button>
+                <button id="pos-checkout-btn" class="primary-btn" type="button">Charge Card with Stripe</button>
+                <button id="pos-cash-btn" class="ghost-btn" type="button">Record Cash Sale</button>
                 <button id="pos-clear-btn" class="ghost-btn" type="button">Clear Cart</button>
               </div>
             </section>

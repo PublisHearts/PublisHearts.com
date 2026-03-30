@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PublisHearts Completed Orders</title>
+    <meta name="description" content="PublisHearts completed shipped order lookup" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="admin-page" data-page-mode="completed-orders">
+    <header class="site-header">
+      <div class="container row-between">
+        <a class="brand" href="/">
+          <span class="brand-mark">P</span>
+          <span>PublisHearts</span>
+        </a>
+        <div class="header-actions">
+          <a class="ghost-btn ghost-link" href="/admin">Admin</a>
+          <a class="ghost-btn ghost-link" href="/fulfillment">Fulfillment</a>
+          <a class="ghost-btn ghost-link" href="/pos">POS</a>
+          <button id="fulfillment-logout-btn" class="ghost-btn hidden" type="button">Log out</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container admin-shell">
+      <section id="fulfillment-login-card" class="admin-login-card">
+        <h1>Completed Orders Login</h1>
+        <p>Use your admin password to look up shipped orders, resend emails, and reopen an order when needed.</p>
+        <form id="fulfillment-login-form" class="admin-login-form">
+          <label for="fulfillment-password">Password</label>
+          <input id="fulfillment-password" name="password" type="password" autocomplete="current-password" required />
+          <button class="primary-btn block" type="submit">Open Completed Orders</button>
+        </form>
+        <p id="fulfillment-login-message" class="checkout-message"></p>
+      </section>
+
+      <section id="fulfillment-panel" class="admin-panel admin-panel-single hidden">
+        <div class="admin-toolbar">
+          <div>
+            <h1>Completed Orders</h1>
+            <p>Look up shipped orders by customer or order number without cluttering the active fulfillment queue.</p>
+          </div>
+          <div class="admin-toolbar-actions">
+            <button id="fulfillment-refresh-btn" class="ghost-btn" type="button">Refresh Orders</button>
+            <a class="ghost-btn ghost-link" href="/fulfillment">Back to Fulfillment</a>
+          </div>
+        </div>
+
+        <section class="admin-section">
+          <div class="admin-section-head row-between">
+            <div>
+              <h2>Completed Shipment Lookup</h2>
+              <p>Search shipped orders, resend shipment emails, or move an order back to pending if you need to reopen it.</p>
+            </div>
+            <div class="admin-orders-toolbar">
+              <input
+                id="fulfillment-search"
+                class="admin-orders-search"
+                type="search"
+                placeholder="Lookup by order #, customer, email, or state"
+                autocomplete="off"
+              />
+            </div>
+          </div>
+
+          <div id="fulfillment-summary" class="admin-health-grid"></div>
+          <div id="fulfillment-order-customers" class="admin-order-customers"></div>
+          <div id="fulfillment-orders" class="admin-orders"></div>
+          <p id="fulfillment-message" class="checkout-message"></p>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/fulfillment.js"></script>
+  </body>
+</html>
