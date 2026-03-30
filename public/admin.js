@@ -1577,15 +1577,22 @@ function renderOrders(payload) {
       : "";
     const fulfillmentActionHtml = shippingRequired
       ? shipped
-        ? `<button class="ghost-btn" type="button" data-action="resend-shipped-email" data-id="${escapeHtml(order.id)}">Resend Shipment Email</button>
+        ? `<button class="ghost-btn" type="button" data-action="resend-shipped-email" data-id="${escapeHtml(order.id)}">Send Shipment Email</button>
            <button class="ghost-btn" type="button" data-action="mark-pending-order" data-id="${escapeHtml(order.id)}">Mark Pending</button>`
-        : blockedForStateMismatch
-          ? `<button class="danger-btn" type="button" data-action="force-mark-shipped-order" data-id="${escapeHtml(order.id)}">
-               Override Block + Mark Shipped + Email
-             </button>`
-          : `<button class="primary-btn" type="button" data-action="mark-shipped-order" data-id="${escapeHtml(order.id)}">
-               Mark Shipped + Email Customer
-             </button>`
+        : `${blockedForStateMismatch
+            ? `<button class="danger-btn" type="button" data-action="override-state-mismatch" data-id="${escapeHtml(order.id)}">
+                 Override Block
+               </button>`
+            : ""}
+           <button
+             class="primary-btn"
+             type="button"
+             data-action="mark-shipped-order"
+             data-id="${escapeHtml(order.id)}"
+             ${blockedForStateMismatch ? 'disabled title="Override or fix the state mismatch first"' : ""}
+           >
+             Mark Shipped
+           </button>`
       : "";
 
     return `<article class="admin-order-card">
@@ -2491,6 +2498,44 @@ ordersEl?.addEventListener("click", async (event) => {
     return;
   }
 
+  if (action === "override-state-mismatch") {
+    if (!selectedOrder) {
+      setOrdersMessage("Order details are missing. Refresh and try again.", true);
+      return;
+    }
+    if (!blockedForStateMismatch) {
+      setOrdersMessage(`Order ${orderId} is not blocked by a state mismatch.`);
+      return;
+    }
+
+    const confirmOverride = window.confirm(`Override the state mismatch block for this order?\n\n${mismatchReason}`);
+    if (!confirmOverride) {
+      return;
+    }
+
+    setOrdersBusy(true);
+    setOrdersMessage("Applying override...");
+    try {
+      const result = await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/override-state-mismatch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+      await loadOrders();
+      setOrdersMessage(result.message || `Override applied for order ${orderId}.`);
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setOrdersMessage(error.message || "Could not override the state mismatch block.", true);
+    } finally {
+      setOrdersBusy(false);
+    }
+    return;
+  }
+
   if (action === "mark-shipped-order") {
     if (blockedForStateMismatch) {
       setOrdersMessage(`Cannot mark shipped: ${mismatchReason}`, true);
@@ -2502,17 +2547,20 @@ ordersEl?.addEventListener("click", async (event) => {
     }
 
     setOrdersBusy(true);
-    setOrdersMessage("Marking order shipped and queueing customer email...");
+    setOrdersMessage("Marking order shipped...");
     try {
       await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/ship`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(shipmentDetails)
+        body: JSON.stringify({
+          ...shipmentDetails,
+          sendEmail: false
+        })
       });
       await loadOrders();
-      setOrdersMessage(`Order ${orderId} marked shipped. Shipment email queued.`);
+      setOrdersMessage(`Order ${orderId} marked shipped.`);
     } catch (error) {
       if (error.status === 401) {
         logoutBtn.click();
@@ -2525,53 +2573,8 @@ ordersEl?.addEventListener("click", async (event) => {
     return;
   }
 
-  if (action === "force-mark-shipped-order") {
-    if (!selectedOrder) {
-      setOrdersMessage("Order details are missing. Refresh and try again.", true);
-      return;
-    }
-
-    const confirmOverride = window.confirm(
-      `Override state mismatch and mark this order shipped anyway?\n\n${mismatchReason}`
-    );
-    if (!confirmOverride) {
-      return;
-    }
-
-    const shipmentDetails = promptShipmentDetails();
-    if (!shipmentDetails) {
-      return;
-    }
-
-    setOrdersBusy(true);
-    setOrdersMessage("Overriding state block, marking shipped, and queueing customer email...");
-    try {
-      await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/ship`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          ...shipmentDetails,
-          overrideStateMismatch: true
-        })
-      });
-      await loadOrders();
-      setOrdersMessage(`Override applied. Order ${orderId} marked shipped. Shipment email queued.`);
-    } catch (error) {
-      if (error.status === 401) {
-        logoutBtn.click();
-        return;
-      }
-      setOrdersMessage(error.message || "Could not override and mark order as shipped.", true);
-    } finally {
-      setOrdersBusy(false);
-    }
-    return;
-  }
-
   if (action === "resend-shipped-email") {
-    if (!window.confirm("Resend shipment email to this customer?")) {
+    if (!window.confirm("Send shipment email to this customer now?")) {
       return;
     }
 

@@ -3914,6 +3914,133 @@ app.post("/api/admin/orders/:id/use-shipping-state", requireAdmin, async (req, r
   }
 });
 
+app.post("/api/admin/orders/:id/override-state-mismatch", requireAdmin, async (req, res) => {
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  try {
+    const manualOrder = await findNormalizedManualOrderById(orderId);
+    if (manualOrder) {
+      if (!manualOrder.shippingRequired) {
+        return res.status(409).json({
+          error: getShippingNotRequiredErrorMessageForOrderSource(manualOrder.orderSource)
+        });
+      }
+      if (manualOrder.shippingStateMatchesCustomerState) {
+        return res.json({
+          ok: true,
+          orderId,
+          selectedState: manualOrder.customerState || "",
+          shippingState: manualOrder.shippingState || "",
+          message: "Order is not currently blocked by a state mismatch."
+        });
+      }
+
+      const shippingState = normalizeUsStateCode(manualOrder.shippingState);
+      if (!shippingState || String(manualOrder.shippingCountry || "US").trim().toUpperCase() !== "US") {
+        return res.status(400).json({
+          error: "Shipping address must include a valid U.S. state to override this mismatch."
+        });
+      }
+
+      await updateManualOrder(orderId, {
+        customerState: shippingState,
+        customerTaxExemptByState: manualNonTaxStates.has(shippingState),
+        fulfillmentStatus: manualOrder.fulfillmentStatus === "shipped" ? "shipped" : "pending",
+        fulfillmentHoldReason: "",
+        shippingState: shippingState,
+        shippingCountry: "US",
+        shippingStateMatchesCustomerState: true,
+        shippingStateMismatchReason: ""
+      });
+
+      return res.json({
+        ok: true,
+        orderId,
+        selectedState: shippingState,
+        shippingState,
+        message: `Override applied. Order unblocked with ${shippingState}.`
+      });
+    }
+
+    if (!requireStripe(res)) {
+      return;
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(orderId, {
+      expand: ["payment_intent"]
+    });
+    if (!session || session.payment_status !== "paid") {
+      return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const paymentIntentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+    if (!isSessionShippingRequired(session, { paymentIntentMetadata })) {
+      return res.status(409).json({
+        error: getShippingNotRequiredErrorMessage(session, { paymentIntentMetadata })
+      });
+    }
+
+    const stateMatchResult = evaluateCheckoutStateMatch(session, {
+      paymentIntentMetadata
+    });
+    if (stateMatchResult.stateMatch) {
+      return res.json({
+        ok: true,
+        orderId,
+        selectedState: stateMatchResult.selectedState || "",
+        shippingState: stateMatchResult.shippingState || "",
+        message: "Order is not currently blocked by a state mismatch."
+      });
+    }
+
+    const shippingState = stateMatchResult.shippingState;
+    if (stateMatchResult.shippingCountry !== "US" || !shippingState) {
+      return res.status(400).json({
+        error: "Shipping address must include a valid U.S. state to override this mismatch."
+      });
+    }
+
+    const paymentIntentId = getPaymentIntentIdFromSession(session);
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: "This order has no payment intent to update." });
+    }
+
+    const currentStatus = normalizeFulfillmentStatus(paymentIntentMetadata.fulfillment_status);
+    await stripe.paymentIntents.update(paymentIntentId, {
+      metadata: {
+        ...paymentIntentMetadata,
+        fulfillment_status: currentStatus === "shipped" ? "shipped" : "pending",
+        fulfillment_hold_reason: "",
+        fulfillment_selected_state_override: shippingState,
+        fulfillment_selected_state: shippingState,
+        fulfillment_shipping_state: shippingState,
+        fulfillment_shipping_country: "US",
+        fulfillment_state_match: "true",
+        fulfillment_state_mismatch_reason: ""
+      }
+    });
+
+    return res.json({
+      ok: true,
+      orderId,
+      selectedState: shippingState,
+      shippingState,
+      message: `Override applied. Order unblocked with ${shippingState}.`
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not override state mismatch: ${details}` : "Could not override state mismatch right now."
+    });
+  }
+});
+
 app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
   const orderId = String(req.params.id || "").trim();
   if (!orderId) {
@@ -4054,6 +4181,7 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
   const noteRaw = req.body?.note;
   const resendEmail = parseBooleanFlag(req.body?.resendEmail, false) === true;
   const overrideStateMismatch = parseBooleanFlag(req.body?.overrideStateMismatch, false) === true;
+  const sendEmail = parseBooleanFlag(req.body?.sendEmail, true) !== false;
 
   try {
     const manualOrder = await findNormalizedManualOrderById(orderId);
@@ -4114,6 +4242,15 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
         shipmentNote: note
       });
       const normalizedUpdatedOrder = normalizeManualOrderRecord(updatedOrder);
+      if (!sendEmail) {
+        return res.json({
+          ok: true,
+          shipped: true,
+          emailed: false,
+          emailQueued: false,
+          shippedAt: shippedAtUnix
+        });
+      }
       const customerEmail = String(normalizedUpdatedOrder?.customerEmail || "").trim();
       if (!customerEmail) {
         return res.json({
@@ -4244,6 +4381,16 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
     await stripe.paymentIntents.update(paymentIntentId, {
       metadata: nextMetadata
     });
+
+    if (!sendEmail) {
+      return res.json({
+        ok: true,
+        shipped: true,
+        emailed: false,
+        emailQueued: false,
+        shippedAt: shippedAtUnix
+      });
+    }
 
     const customerEmail = String(session.customer_details?.email || session.customer_email || "").trim();
     if (!customerEmail) {
