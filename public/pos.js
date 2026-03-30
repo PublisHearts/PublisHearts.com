@@ -11,6 +11,14 @@ const searchInput = document.getElementById("pos-search");
 const stateSelect = document.getElementById("pos-customer-state");
 const needsShippingInput = document.getElementById("pos-needs-shipping");
 const hintEl = document.getElementById("pos-hint");
+const paymentMethodInputs = Array.from(document.querySelectorAll('input[name="pos-payment-method"]'));
+const receiptEmailInput = document.getElementById("pos-receipt-email");
+const cashPanelEl = document.getElementById("pos-cash-panel");
+const cashReceivedInput = document.getElementById("pos-cash-received");
+const cashChangeLabelEl = document.getElementById("pos-cash-change-label");
+const cashChangeValueEl = document.getElementById("pos-cash-change-value");
+const cashChangeRowEl = cashChangeLabelEl?.closest(".pos-cash-change") || null;
+const cashHelpEl = document.getElementById("pos-cash-help");
 const shippingFieldsEl = document.getElementById("pos-shipping-fields");
 const shippingNameInput = document.getElementById("pos-shipping-name");
 const shippingEmailInput = document.getElementById("pos-shipping-email");
@@ -29,6 +37,7 @@ const checkoutBtn = document.getElementById("pos-checkout-btn");
 const cashBtn = document.getElementById("pos-cash-btn");
 const clearBtn = document.getElementById("pos-clear-btn");
 const newSaleBtn = document.getElementById("pos-new-sale-btn");
+const emailBtn = document.getElementById("pos-email-btn");
 const printBtn = document.getElementById("pos-print-btn");
 const receiptEl = document.getElementById("pos-receipt");
 
@@ -208,13 +217,24 @@ function canRecordCashSale() {
 }
 
 function syncActionButtons() {
-  checkoutBtn.disabled = state.busy;
+  const paymentMethod = getSelectedPaymentMethod();
+  const cashSelected = paymentMethod === "cash";
+
+  checkoutBtn.classList.toggle("hidden", cashSelected);
+  checkoutBtn.disabled = state.busy || cashSelected;
   if (cashBtn) {
-    cashBtn.disabled = state.busy || !canRecordCashSale();
+    cashBtn.classList.toggle("hidden", !cashSelected);
+    cashBtn.disabled = state.busy || !cashSelected || !canRecordCashSale();
   }
   clearBtn.disabled = state.busy;
   newSaleBtn.disabled = state.busy;
   refreshBtn.disabled = state.busy;
+  if (emailBtn) {
+    emailBtn.disabled = state.busy || !state.receiptOrder || state.health?.emailSendingEnabled === false;
+  }
+  if (printBtn) {
+    printBtn.disabled = state.busy || !state.receiptOrder;
+  }
 }
 
 function setBusy(isBusy) {
@@ -223,12 +243,19 @@ function setBusy(isBusy) {
   searchInput.disabled = isBusy;
   stateSelect.disabled = isBusy;
   needsShippingInput.disabled = isBusy;
+  paymentMethodInputs.forEach((input) => {
+    input.disabled = isBusy;
+  });
+  if (receiptEmailInput) {
+    receiptEmailInput.disabled = isBusy;
+  }
   shippingInputs.forEach((input) => {
     input.disabled = isBusy;
   });
   productsEl.querySelectorAll("button[data-pos-action]").forEach((button) => {
     button.disabled = isBusy;
   });
+  syncPaymentMethodUi(getSummaryTotals());
 }
 
 function escapeHtml(value) {
@@ -258,6 +285,10 @@ function parseMoneyToCents(value) {
     return Number.NaN;
   }
   return Math.round(Number.parseFloat(normalized) * 100);
+}
+
+function formatMoneyInput(amountCents = 0) {
+  return ((Number(amountCents) || 0) / 100).toFixed(2);
 }
 
 function formatPaymentMethodLabel(value) {
@@ -370,6 +401,48 @@ function looksLikeEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
 }
 
+function getSelectedPaymentMethod() {
+  const selectedInput = paymentMethodInputs.find((input) => input.checked);
+  return selectedInput?.value === "cash" ? "cash" : "card";
+}
+
+function setSelectedPaymentMethod(value) {
+  const normalized = String(value || "").trim().toLowerCase() === "cash" ? "cash" : "card";
+  paymentMethodInputs.forEach((input) => {
+    input.checked = input.value === normalized;
+  });
+}
+
+function getExplicitReceiptEmailValue() {
+  return String(receiptEmailInput?.value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function getPreferredReceiptEmail(order = state.receiptOrder) {
+  const explicitEmail = getExplicitReceiptEmailValue();
+  if (explicitEmail) {
+    return explicitEmail;
+  }
+  const receiptOrderEmail = String(order?.customerEmail || "")
+    .trim()
+    .toLowerCase();
+  if (receiptOrderEmail) {
+    return receiptOrderEmail;
+  }
+  return String(shippingEmailInput?.value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function validateReceiptEmailInput() {
+  const receiptEmail = getExplicitReceiptEmailValue();
+  if (!looksLikeEmail(receiptEmail)) {
+    throw new Error("Enter a valid receipt email or leave it blank.");
+  }
+  return receiptEmail;
+}
+
 function getShippingFormData() {
   return {
     name: String(shippingNameInput?.value || "").trim(),
@@ -423,11 +496,127 @@ function syncShippingFieldsVisibility() {
   shippingFieldsEl.classList.toggle("hidden", !needsShippingInput.checked);
 }
 
-function validateShippingForm() {
+function getCashTenderState(summary = getSummaryTotals()) {
+  if (!Number.isFinite(summary?.amountTotalCents)) {
+    return {
+      cashReceivedCents: Number.NaN,
+      label: "Change Due",
+      display: "Exact total unavailable",
+      help: "Cash sales stay disabled while Stripe automatic tax is calculating the final total.",
+      mode: "invalid"
+    };
+  }
+
+  const rawValue = String(cashReceivedInput?.value || "").trim();
+  if (!rawValue) {
+    return {
+      cashReceivedCents: summary.amountTotalCents,
+      label: "Change Due",
+      display: formatMoney(0),
+      help: `Exact cash received is ${formatMoney(summary.amountTotalCents)}. Enter a larger tendered amount to see change.`,
+      mode: "change"
+    };
+  }
+
+  const parsedCents = parseMoneyToCents(rawValue);
+  if (!Number.isFinite(parsedCents)) {
+    return {
+      cashReceivedCents: Number.NaN,
+      label: "Change Due",
+      display: "Enter valid amount",
+      help: "Use a number like 20 or 20.00 for cash received.",
+      mode: "invalid"
+    };
+  }
+
+  if (parsedCents < summary.amountTotalCents) {
+    return {
+      cashReceivedCents: parsedCents,
+      label: "Still Due",
+      display: formatMoney(summary.amountTotalCents - parsedCents),
+      help: `Tendered so far: ${formatMoney(parsedCents)} of ${formatMoney(summary.amountTotalCents)} total.`,
+      mode: "due"
+    };
+  }
+
+  const changeDueCents = Math.max(0, parsedCents - summary.amountTotalCents);
+  return {
+    cashReceivedCents: parsedCents,
+    label: "Change Due",
+    display: formatMoney(changeDueCents),
+    help:
+      changeDueCents > 0
+        ? `Tendered: ${formatMoney(parsedCents)} on a ${formatMoney(summary.amountTotalCents)} sale.`
+        : "Exact cash received. No change is due.",
+    mode: "change"
+  };
+}
+
+function seedCashReceivedFromTotal(summary = getSummaryTotals()) {
+  if (!cashReceivedInput) {
+    return;
+  }
+  if (String(cashReceivedInput.value || "").trim()) {
+    return;
+  }
+  if (!Number.isFinite(summary?.amountTotalCents) || summary.amountTotalCents <= 0) {
+    return;
+  }
+  cashReceivedInput.value = formatMoneyInput(summary.amountTotalCents);
+}
+
+function syncPaymentMethodUi(summary = getSummaryTotals()) {
+  const paymentMethod = getSelectedPaymentMethod();
+  const cashSelected = paymentMethod === "cash";
+
+  paymentMethodInputs.forEach((input) => {
+    input.closest(".pos-payment-option")?.classList.toggle("is-selected", input.checked);
+  });
+
+  if (cashPanelEl) {
+    cashPanelEl.classList.toggle("hidden", !cashSelected);
+  }
+
+  if (!cashSelected) {
+    if (cashReceivedInput) {
+      cashReceivedInput.disabled = true;
+    }
+    return;
+  }
+
+  if (cashReceivedInput) {
+    if (document.activeElement !== cashReceivedInput) {
+      seedCashReceivedFromTotal(summary);
+    }
+    cashReceivedInput.disabled = state.busy || !Number.isFinite(summary?.amountTotalCents);
+  }
+
+  const tenderState = getCashTenderState(summary);
+  if (cashChangeLabelEl) {
+    cashChangeLabelEl.textContent = tenderState.label;
+  }
+  if (cashChangeValueEl) {
+    cashChangeValueEl.textContent = tenderState.display;
+  }
+  if (cashHelpEl) {
+    cashHelpEl.textContent = canRecordCashSale()
+      ? tenderState.help
+      : "Cash sales are disabled while Stripe automatic tax is active because the final total is only known at checkout.";
+  }
+  if (cashChangeRowEl) {
+    cashChangeRowEl.classList.toggle("is-due", tenderState.mode === "due");
+    cashChangeRowEl.classList.toggle("is-invalid", tenderState.mode === "invalid" || !canRecordCashSale());
+  }
+}
+
+function validateShippingForm(receiptEmail = "") {
   if (!needsShippingInput.checked) {
     return null;
   }
   const shippingInfo = getShippingFormData();
+  if (!shippingInfo.email && receiptEmail) {
+    shippingInfo.email = receiptEmail;
+  }
   if (!shippingInfo.name || !shippingInfo.line1 || !shippingInfo.city || !shippingInfo.state || !shippingInfo.postalCode) {
     throw new Error("Enter name, address line 1, city, state, and ZIP for shipped POS orders.");
   }
@@ -634,6 +823,15 @@ function loadDraft() {
       stateSelect.value = String(draft.customerState).trim().toUpperCase();
     }
     needsShippingInput.checked = draft?.needsShipping === true;
+    if (draft?.paymentMethod === "cash") {
+      setSelectedPaymentMethod("cash");
+    }
+    if (receiptEmailInput) {
+      receiptEmailInput.value = String(draft?.receiptEmail || "").trim().toLowerCase();
+    }
+    if (cashReceivedInput) {
+      cashReceivedInput.value = String(draft?.cashReceived || "").trim();
+    }
     setShippingFormData(draft?.shippingInfo || {});
   } catch {
     window.sessionStorage.removeItem(POS_DRAFT_KEY);
@@ -651,25 +849,44 @@ function saveDraft() {
         cart,
         customerState: stateSelect.value,
         needsShipping: needsShippingInput.checked,
+        paymentMethod: getSelectedPaymentMethod(),
+        receiptEmail: getExplicitReceiptEmailValue(),
+        cashReceived: String(cashReceivedInput?.value || "").trim(),
         shippingInfo: getShippingFormData()
       })
   );
 }
 
 function clearDraft() {
+  const paymentMethod = getSelectedPaymentMethod();
   state.cart = new Map();
   stateSelect.value = getDefaultState();
   needsShippingInput.checked = false;
+  setSelectedPaymentMethod(paymentMethod);
+  if (receiptEmailInput) {
+    receiptEmailInput.value = "";
+  }
+  if (cashReceivedInput) {
+    cashReceivedInput.value = "";
+  }
   clearShippingForm();
   syncShippingFieldsVisibility();
   window.sessionStorage.removeItem(POS_DRAFT_KEY);
 }
 
 function resetSaleAfterSuccess() {
+  const paymentMethod = getSelectedPaymentMethod();
   window.sessionStorage.removeItem(POS_DRAFT_KEY);
   state.cart = new Map();
   needsShippingInput.checked = false;
   stateSelect.value = getDefaultState();
+  setSelectedPaymentMethod(paymentMethod);
+  if (receiptEmailInput) {
+    receiptEmailInput.value = "";
+  }
+  if (cashReceivedInput) {
+    cashReceivedInput.value = "";
+  }
   clearShippingForm();
   syncShippingFieldsVisibility();
   renderAll();
@@ -761,6 +978,7 @@ function getSummaryTotals() {
     subtotalCents,
     shippingCents,
     taxCents: exactTotal ? manualTaxCents : null,
+    exactTotalAvailable: exactTotal,
     amountTotalCents: exactTotal ? subtotalCents + shippingCents + manualTaxCents : null
   };
 }
@@ -867,11 +1085,13 @@ function renderSummary() {
     grandTotalEl.textContent = formatMoney(summary.amountTotalCents ?? estimatedBaseTotal);
     summaryNoteEl.textContent = "Tax is off for this local estimate. Cash sales use the exact total shown here.";
   }
+
+  syncPaymentMethodUi(summary);
 }
 
 function renderReceipt(order) {
   state.receiptOrder = order || null;
-  printBtn.disabled = !state.receiptOrder;
+  syncActionButtons();
   if (!state.receiptOrder) {
     receiptEl.innerHTML = '<p class="cart-item-sub">Complete a POS transaction to load a printable receipt here.</p>';
     return;
@@ -942,6 +1162,7 @@ function renderReceipt(order) {
 }
 
 function renderAll() {
+  syncHintCopy();
   renderCatalog();
   renderCart();
   renderSummary();
@@ -1055,6 +1276,17 @@ async function ensureAuthenticated() {
   }
 }
 
+async function registerPosAppShell() {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+  try {
+    await navigator.serviceWorker.register("/pos-sw.js");
+  } catch (error) {
+    console.warn("Could not register POS app shell:", error);
+  }
+}
+
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const password = String(passwordInput.value || "").trim();
@@ -1148,19 +1380,39 @@ cartItemsEl.addEventListener("click", (event) => {
 
 stateSelect.addEventListener("change", () => {
   saveDraft();
-  renderSummary();
+  renderAll();
 });
 
 needsShippingInput.addEventListener("change", () => {
   saveDraft();
-  syncHintCopy();
-  renderSummary();
+  renderAll();
 });
 
 shippingInputs.forEach((input) => {
   input.addEventListener("input", () => {
     saveDraft();
   });
+});
+
+paymentMethodInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (input.checked) {
+      if (input.value === "cash") {
+        seedCashReceivedFromTotal();
+      }
+      saveDraft();
+      renderAll();
+    }
+  });
+});
+
+receiptEmailInput?.addEventListener("input", () => {
+  saveDraft();
+});
+
+cashReceivedInput?.addEventListener("input", () => {
+  saveDraft();
+  renderSummary();
 });
 
 clearBtn.addEventListener("click", () => {
@@ -1175,20 +1427,6 @@ newSaleBtn.addEventListener("click", () => {
   renderAll();
   setPosMessage("Ready for a new sale.");
 });
-
-function promptCashReceivedCents(totalCents) {
-  const promptValue = window.prompt(
-    `Cash received for this sale? Leave blank to use the exact total (${formatMoney(totalCents)}).`,
-    ((Number(totalCents) || 0) / 100).toFixed(2)
-  );
-  if (promptValue === null) {
-    return null;
-  }
-  if (!String(promptValue || "").trim()) {
-    return totalCents;
-  }
-  return parseMoneyToCents(promptValue);
-}
 
 checkoutBtn.addEventListener("click", async () => {
   if (state.busy) {
@@ -1207,9 +1445,11 @@ checkoutBtn.addEventListener("click", async () => {
     setPosMessage("Choose a state before opening checkout.", true);
     return;
   }
+  let receiptEmail = "";
   let shippingInfo = null;
   try {
-    shippingInfo = validateShippingForm();
+    receiptEmail = validateReceiptEmailInput();
+    shippingInfo = validateShippingForm(receiptEmail);
   } catch (error) {
     setPosMessage(error.message || "Enter the shipping details before opening checkout.", true);
     return;
@@ -1228,7 +1468,8 @@ checkoutBtn.addEventListener("click", async () => {
         cart,
         customerState: stateSelect.value,
         needsShipping: needsShippingInput.checked,
-        shippingInfo
+        shippingInfo,
+        customerEmail: receiptEmail
       })
     });
     const nextUrl = String(result?.url || "").trim();
@@ -1273,18 +1514,17 @@ cashBtn?.addEventListener("click", async () => {
     return;
   }
 
+  let receiptEmail = "";
   let shippingInfo = null;
   try {
-    shippingInfo = validateShippingForm();
+    receiptEmail = validateReceiptEmailInput();
+    shippingInfo = validateShippingForm(receiptEmail);
   } catch (error) {
     setPosMessage(error.message || "Enter the shipping details before recording a cash sale.", true);
     return;
   }
 
-  const cashReceivedCents = promptCashReceivedCents(summary.amountTotalCents);
-  if (cashReceivedCents === null) {
-    return;
-  }
+  const cashReceivedCents = getCashTenderState(summary).cashReceivedCents;
   if (!Number.isFinite(cashReceivedCents)) {
     setPosMessage("Enter a valid cash amount received.", true);
     return;
@@ -1308,6 +1548,7 @@ cashBtn?.addEventListener("click", async () => {
         customerState: stateSelect.value,
         needsShipping: needsShippingInput.checked,
         shippingInfo,
+        customerEmail: receiptEmail,
         cashReceivedCents
       })
     });
@@ -1330,6 +1571,57 @@ cashBtn?.addEventListener("click", async () => {
   }
 });
 
+emailBtn?.addEventListener("click", async () => {
+  if (!state.receiptOrder) {
+    setPosMessage("Complete a sale first so there is a receipt to email.", true);
+    return;
+  }
+  if (state.health?.emailSendingEnabled === false) {
+    setPosMessage("Receipt email sending is not configured right now.", true);
+    return;
+  }
+
+  let receiptEmail = "";
+  try {
+    validateReceiptEmailInput();
+    receiptEmail = getPreferredReceiptEmail(state.receiptOrder);
+  } catch (error) {
+    setPosMessage(error.message || "Enter a valid receipt email.", true);
+    return;
+  }
+  if (!receiptEmail || !looksLikeEmail(receiptEmail)) {
+    setPosMessage("Enter a receipt email before sending the receipt.", true);
+    return;
+  }
+
+  setBusy(true);
+  setPosMessage(`Sending receipt to ${receiptEmail}...`);
+  try {
+    const result = await adminRequest(`/api/admin/orders/${encodeURIComponent(state.receiptOrder.id)}/send-receipt`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        email: receiptEmail
+      })
+    });
+    if (state.receiptOrder) {
+      state.receiptOrder.customerEmail = String(result?.email || receiptEmail).trim().toLowerCase();
+      renderReceipt(state.receiptOrder);
+    }
+    setPosMessage(`Receipt emailed to ${receiptEmail}.`);
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setPosMessage(error.message || "Could not send receipt email.", true);
+  } finally {
+    setBusy(false);
+  }
+});
+
 printBtn.addEventListener("click", () => {
   if (!state.receiptOrder) {
     setPosMessage("Complete a sale first so there is a receipt to print.", true);
@@ -1343,9 +1635,13 @@ loadDraft();
 if (!stateSelect.value) {
   stateSelect.value = DEFAULT_POS_STATE;
 }
+if (getSelectedPaymentMethod() === "cash") {
+  seedCashReceivedFromTotal();
+}
 syncHintCopy();
 renderAll();
 renderReceipt(null);
+registerPosAppShell();
 
 ensureAuthenticated().catch(() => {
   showLogin();

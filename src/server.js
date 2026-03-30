@@ -617,6 +617,9 @@ function isCheckoutValidationErrorMessage(message) {
   return (
     text === "Your cart is empty." ||
     text === "Select a valid U.S. state before checkout." ||
+    text === "Enter a valid email address." ||
+    text === "Name, address line 1, city, state, and ZIP are required for shipped POS orders." ||
+    text === "Only U.S. shipping addresses are supported for shipped POS orders." ||
     text.startsWith("Unknown product id:") ||
     text.endsWith("is currently unavailable.") ||
     text.endsWith("is coming soon and not orderable yet.") ||
@@ -1392,11 +1395,110 @@ function buildManualOrderReceiptPayload(order) {
   };
 }
 
-function buildManualCashOrder({ cartDetails, shippingRequired, shippingDetails, cashReceivedCents }) {
+function buildCustomerReceiptEmailPayload(order) {
+  return {
+    orderId: order.id,
+    amountSubtotal: order.amountSubtotal,
+    amountShipping: order.amountShipping,
+    amountTax: order.amountTax,
+    amountTotal: order.amountTotal,
+    currency: order.currency || currency,
+    lineItems: Array.isArray(order.lineItems) ? order.lineItems : [],
+    shippingDetails: order.shippingDetails || buildStripeStyleShippingDetails(),
+    shippingRequired: order.shippingRequired !== false
+  };
+}
+
+async function getStripeOrderReceiptContext(orderId) {
+  const session = await stripe.checkout.sessions.retrieve(orderId, {
+    expand: ["payment_intent"]
+  });
+  if (!session || session.payment_status !== "paid") {
+    return null;
+  }
+
+  const lineItemsResponse = await stripe.checkout.sessions.listLineItems(session.id, {
+    limit: 100
+  });
+  let lineItems = lineItemsResponse.data.map((item) => ({
+    name: item.description || "Book",
+    quantity: item.quantity || 1,
+    amountTotal: item.amount_total || 0
+  }));
+  if (lineItems.length === 0) {
+    lineItems = parseLineItemsFromMetadata(session.metadata);
+  }
+
+  const totals = computeOrderTotals(session, lineItems);
+  const paymentIntentMetadata =
+    session.payment_intent && typeof session.payment_intent === "object"
+      ? session.payment_intent.metadata || {}
+      : {};
+  const createdAt = Number(session.created) || 0;
+  const shippingRequired = isSessionShippingRequired(session, { paymentIntentMetadata });
+  const resolvedShipping = buildStripeStyleShippingDetails(
+    getOrderShippingAddress(session, { paymentIntentMetadata })
+  );
+  const orderSource = getSessionOrderSource(session, { paymentIntentMetadata });
+  const stateMatchResult = evaluateCheckoutStateMatch(session, {
+    paymentIntentMetadata
+  });
+  const customerName = String(
+    session.customer_details?.name || resolvedShipping.name || session.shipping_details?.name || ""
+  ).trim();
+
+  return {
+    session,
+    paymentIntentMetadata,
+    lineItems,
+    totals,
+    receiptPayload: {
+      id: session.id,
+      createdAt,
+      createdAtIso: createdAt > 0 ? new Date(createdAt * 1000).toISOString() : "",
+      amountSubtotal: totals.amountSubtotal,
+      amountShipping: totals.amountShipping,
+      amountTax: totals.amountTax,
+      amountDiscount: session.total_details?.amount_discount || 0,
+      amountTotal: totals.amountTotal,
+      currency: session.currency || currency,
+      paymentMethod:
+        Array.isArray(session.payment_method_types) && session.payment_method_types.length > 0
+          ? String(session.payment_method_types[0] || "").trim().toLowerCase()
+          : "card",
+      shippingRequired,
+      orderSource,
+      customerState: stateMatchResult.selectedState,
+      shippingState: stateMatchResult.shippingState || stateMatchResult.shippingStateRaw || "",
+      shippingCountry: stateMatchResult.shippingCountry,
+      shippingStateMatchesCustomerState: stateMatchResult.stateMatch,
+      shippingStateMismatchReason: stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason,
+      customerTaxExemptByState:
+        String(session.metadata?.customer_tax_exempt_by_state || "")
+          .trim()
+          .toLowerCase() === "true",
+      customerEmail: session.customer_details?.email || session.customer_email || "",
+      customerName,
+      shippingDetails: resolvedShipping,
+      lineItems
+    }
+  };
+}
+
+function buildManualCashOrder({ cartDetails, shippingRequired, shippingDetails, cashReceivedCents, customerEmail = "" }) {
   const createdAt = Math.floor(Date.now() / 1000);
   const orderId = `pos_cash_${createdAt}_${randomUUID().slice(0, 8)}`;
+  const normalizedCustomerEmail = String(customerEmail || "")
+    .trim()
+    .toLowerCase();
   const normalizedShippingDetails = shippingRequired
-    ? normalizeCheckoutShippingInput(shippingDetails, "")
+    ? normalizeCheckoutShippingInput(
+        {
+          ...(shippingDetails || {}),
+          email: shippingDetails?.email || normalizedCustomerEmail
+        },
+        ""
+      )
     : null;
   const stateMatchResult = evaluateManualOrderStateMatch({
     customerState: cartDetails.customerState,
@@ -1406,7 +1508,9 @@ function buildManualCashOrder({ cartDetails, shippingRequired, shippingDetails, 
   const customerName = shippingRequired
     ? String(normalizedShippingDetails?.name || "Customer").trim()
     : "Walk-in Customer";
-  const customerEmail = shippingRequired ? String(normalizedShippingDetails?.email || "").trim().toLowerCase() : "";
+  const resolvedCustomerEmail = shippingRequired
+    ? String(normalizedShippingDetails?.email || normalizedCustomerEmail || "").trim().toLowerCase()
+    : normalizedCustomerEmail;
   const customerPhone = shippingRequired ? String(normalizedShippingDetails?.phone || "").trim() : "";
   const amountTotal = Math.max(0, Math.round(Number(cartDetails.amountTotal) || 0));
   const cashReceived = Math.max(amountTotal, Math.round(Number(cashReceivedCents) || amountTotal));
@@ -1450,7 +1554,7 @@ function buildManualCashOrder({ cartDetails, shippingRequired, shippingDetails, 
     shippingStateMismatchReason: stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason,
     customerTaxExemptByState: cartDetails.customerTaxExemptByState,
     customerName,
-    customerEmail,
+    customerEmail: resolvedCustomerEmail,
     customerPhone,
     cashReceivedCents: cashReceived,
     cashChangeDueCents: Math.max(0, cashReceived - amountTotal)
@@ -1992,6 +2096,20 @@ function cleanNumericPostalCode(value, maxLength = 10) {
     .replace(/\s+/g, "")
     .slice(0, maxLength);
   return text;
+}
+
+function normalizeCustomerEmail(value) {
+  const email = String(value || "")
+    .trim()
+    .toLowerCase()
+    .slice(0, 320);
+  if (!email) {
+    return "";
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Enter a valid email address.");
+  }
+  return email;
 }
 
 function normalizeCheckoutShippingInput(input = {}, fallbackState = "") {
@@ -4852,6 +4970,7 @@ app.post("/api/admin/pos/create-checkout-session", requireAdmin, async (req, res
     const appUrl = getAppUrl(req);
     const cart = Array.isArray(req.body?.cart) ? req.body.cart : [];
     const customerState = req.body?.customerState;
+    const customerEmail = normalizeCustomerEmail(req.body?.customerEmail);
     const needsShipping = parseBooleanFlag(req.body?.needsShipping, false) === true;
     const shippingDetails = needsShipping
       ? normalizeCheckoutShippingInput(req.body?.shippingInfo, customerState)
@@ -4860,6 +4979,7 @@ app.post("/api/admin/pos/create-checkout-session", requireAdmin, async (req, res
       shippingRequired: needsShipping,
       requireShippingDetails: needsShipping,
       shippingDetails,
+      customerEmail,
       orderSource: "admin_pos",
       successUrl: `${appUrl}/pos?pos=success&session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${appUrl}/pos?pos=cancel`,
@@ -4890,9 +5010,16 @@ app.post("/api/admin/pos/create-cash-sale", requireAdmin, async (req, res) => {
 
     const cart = Array.isArray(req.body?.cart) ? req.body.cart : [];
     const customerState = req.body?.customerState;
+    const customerEmail = normalizeCustomerEmail(req.body?.customerEmail);
     const needsShipping = parseBooleanFlag(req.body?.needsShipping, false) === true;
     const shippingDetails = needsShipping
-      ? normalizeCheckoutShippingInput(req.body?.shippingInfo, customerState)
+      ? normalizeCheckoutShippingInput(
+          {
+            ...(req.body?.shippingInfo || {}),
+            email: req.body?.shippingInfo?.email || customerEmail
+          },
+          customerState
+        )
       : null;
     const cartDetails = await buildCheckoutSessionCartDetails(cart, customerState, {
       shippingRequired: needsShipping,
@@ -4925,7 +5052,8 @@ app.post("/api/admin/pos/create-cash-sale", requireAdmin, async (req, res) => {
         cartDetails,
         shippingRequired: needsShipping,
         shippingDetails,
-        cashReceivedCents
+        cashReceivedCents,
+        customerEmail
       })
     );
     invalidateSoldCopiesCache();
@@ -4943,6 +5071,93 @@ app.post("/api/admin/pos/create-cash-sale", requireAdmin, async (req, res) => {
   }
 });
 
+app.post("/api/admin/orders/:id/send-receipt", requireAdmin, async (req, res) => {
+  const orderId = String(req.params.id || "").trim();
+  if (!orderId) {
+    return res.status(400).json({ error: "Order ID is required." });
+  }
+
+  const emailHealth = getEmailHealth();
+  if (!emailHealth.emailSendingEnabled) {
+    return res.status(503).json({ error: "Receipt email sending is not configured right now." });
+  }
+
+  let overrideEmail = "";
+  try {
+    overrideEmail = normalizeCustomerEmail(req.body?.email);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Enter a valid email address." });
+  }
+
+  try {
+    const manualOrder = await findNormalizedManualOrderById(orderId);
+    if (manualOrder) {
+      const customerEmail = overrideEmail || String(manualOrder.customerEmail || "").trim().toLowerCase();
+      if (!customerEmail) {
+        return res.status(400).json({ error: "No receipt email is available for this order." });
+      }
+
+      let receiptPayload = buildManualOrderReceiptPayload(manualOrder);
+      if (overrideEmail && overrideEmail !== manualOrder.customerEmail) {
+        const updatedOrder = await updateManualOrder(orderId, {
+          customerEmail: overrideEmail,
+          shippingDetails: manualOrder.shippingRequired
+            ? {
+                ...(manualOrder.shippingDetails || {}),
+                email: overrideEmail
+              }
+            : manualOrder.shippingDetails
+        });
+        receiptPayload = buildManualOrderReceiptPayload(updatedOrder);
+      }
+
+      await sendCustomerReceipt({
+        customerEmail,
+        ...buildCustomerReceiptEmailPayload(receiptPayload)
+      });
+
+      return res.json({
+        ok: true,
+        emailed: true,
+        orderId,
+        email: customerEmail
+      });
+    }
+
+    if (!requireStripe(res)) {
+      return;
+    }
+
+    const stripeReceiptContext = await getStripeOrderReceiptContext(orderId);
+    if (!stripeReceiptContext) {
+      return res.status(404).json({ error: "Paid order not found." });
+    }
+
+    const customerEmail =
+      overrideEmail || String(stripeReceiptContext.receiptPayload.customerEmail || "").trim().toLowerCase();
+    if (!customerEmail) {
+      return res.status(400).json({ error: "No receipt email is available for this order." });
+    }
+
+    await sendCustomerReceipt({
+      customerEmail,
+      ...buildCustomerReceiptEmailPayload(stripeReceiptContext.receiptPayload)
+    });
+
+    return res.json({
+      ok: true,
+      emailed: true,
+      orderId,
+      email: customerEmail
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not send receipt: ${details}` : "Could not send receipt right now."
+    });
+  }
+});
+
 app.get("/api/order/:sessionId", async (req, res) => {
   const manualOrder = await findNormalizedManualOrderById(req.params.sessionId);
   if (manualOrder) {
@@ -4954,72 +5169,11 @@ app.get("/api/order/:sessionId", async (req, res) => {
   }
 
   try {
-    const session = await stripe.checkout.sessions.retrieve(req.params.sessionId, {
-      expand: ["payment_intent"]
-    });
-    if (!session || session.payment_status !== "paid") {
+    const stripeReceiptContext = await getStripeOrderReceiptContext(req.params.sessionId);
+    if (!stripeReceiptContext) {
       return res.status(404).json({ error: "Order not found." });
     }
-
-    const lineItemsResponse = await stripe.checkout.sessions.listLineItems(session.id, {
-      limit: 100
-    });
-    let lineItems = lineItemsResponse.data.map((item) => ({
-      name: item.description || "Book",
-      quantity: item.quantity || 1,
-      amountTotal: item.amount_total || 0
-    }));
-    if (lineItems.length === 0) {
-      lineItems = parseLineItemsFromMetadata(session.metadata);
-    }
-    const totals = computeOrderTotals(session, lineItems);
-    const paymentIntentMetadata =
-      session.payment_intent && typeof session.payment_intent === "object"
-        ? session.payment_intent.metadata || {}
-        : {};
-    const createdAt = Number(session.created) || 0;
-    const shippingRequired = isSessionShippingRequired(session, { paymentIntentMetadata });
-    const resolvedShipping = buildStripeStyleShippingDetails(
-      getOrderShippingAddress(session, { paymentIntentMetadata })
-    );
-    const orderSource = getSessionOrderSource(session, { paymentIntentMetadata });
-    const stateMatchResult = evaluateCheckoutStateMatch(session, {
-      paymentIntentMetadata
-    });
-    const customerName = String(
-      session.customer_details?.name || resolvedShipping.name || session.shipping_details?.name || ""
-    ).trim();
-
-    return res.json({
-      id: session.id,
-      createdAt,
-      createdAtIso: createdAt > 0 ? new Date(createdAt * 1000).toISOString() : "",
-      amountSubtotal: totals.amountSubtotal,
-      amountShipping: totals.amountShipping,
-      amountTax: totals.amountTax,
-      amountDiscount: session.total_details?.amount_discount || 0,
-      amountTotal: totals.amountTotal,
-      currency: session.currency || currency,
-      paymentMethod:
-        Array.isArray(session.payment_method_types) && session.payment_method_types.length > 0
-          ? String(session.payment_method_types[0] || "").trim().toLowerCase()
-          : "card",
-      shippingRequired,
-      orderSource,
-      customerState: stateMatchResult.selectedState,
-      shippingState: stateMatchResult.shippingState || stateMatchResult.shippingStateRaw || "",
-      shippingCountry: stateMatchResult.shippingCountry,
-      shippingStateMatchesCustomerState: stateMatchResult.stateMatch,
-      shippingStateMismatchReason: stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason,
-      customerTaxExemptByState:
-        String(session.metadata?.customer_tax_exempt_by_state || "")
-          .trim()
-          .toLowerCase() === "true",
-      customerEmail: session.customer_details?.email || session.customer_email || "",
-      customerName,
-      shippingDetails: resolvedShipping,
-      lineItems
-    });
+    return res.json(stripeReceiptContext.receiptPayload);
   } catch {
     return res.status(404).json({ error: "Order not found." });
   }

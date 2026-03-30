@@ -1316,6 +1316,135 @@ h1 {
   background: #fffdfa;
 }
 
+.pos-payment-block {
+  margin-top: 0.95rem;
+  padding: 0.95rem;
+  border: 1px solid #ead8c2;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fff7ef 0%, #fff 100%);
+}
+
+.pos-payment-block-head h3 {
+  margin: 0;
+}
+
+.pos-payment-block-head p {
+  margin: 0.22rem 0 0.9rem;
+  color: var(--ink-soft);
+}
+
+.pos-payment-methods {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.pos-payment-option {
+  position: relative;
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid #ddc8af;
+  border-radius: 14px;
+  background: rgba(255, 250, 244, 0.9);
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.pos-payment-option:hover {
+  transform: translateY(-1px);
+  border-color: rgba(141, 57, 28, 0.3);
+}
+
+.pos-payment-option.is-selected {
+  border-color: rgba(141, 57, 28, 0.45);
+  background: linear-gradient(180deg, rgba(255, 245, 233, 0.95) 0%, rgba(255, 251, 246, 1) 100%);
+  box-shadow: 0 10px 24px rgba(141, 57, 28, 0.08);
+}
+
+.pos-payment-option input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pos-payment-option span {
+  font-weight: 700;
+  color: #4b291f;
+}
+
+.pos-payment-option small {
+  color: var(--ink-soft);
+}
+
+.pos-payment-grid {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+}
+
+.pos-payment-grid label,
+.pos-cash-panel label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: #4e4337;
+}
+
+.pos-payment-grid input,
+.pos-cash-panel input {
+  width: 100%;
+  border: 1px solid #d8cab8;
+  border-radius: 10px;
+  padding: 0.58rem 0.7rem;
+  font: inherit;
+  color: var(--ink);
+  background: #fffdfa;
+}
+
+.pos-cash-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px dashed #dbc3a8;
+  border-radius: 14px;
+  background: rgba(255, 250, 243, 0.92);
+}
+
+.pos-cash-change {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.8rem 0.9rem;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid rgba(141, 57, 28, 0.12);
+}
+
+.pos-cash-change span {
+  font-weight: 600;
+  color: #5b4839;
+}
+
+.pos-cash-change strong {
+  font-size: 1.15rem;
+  color: #24543a;
+}
+
+.pos-cash-change.is-due strong {
+  color: #8d391c;
+}
+
+.pos-cash-change.is-invalid strong {
+  color: #b42318;
+}
+
 .pos-shipping-fields {
   margin-top: 0.9rem;
   padding: 0.95rem;
@@ -1404,6 +1533,13 @@ h1 {
   margin-top: 0.1rem;
   border-top: 1px solid rgba(141, 57, 28, 0.14);
   font-size: 1.05rem;
+}
+
+.pos-receipt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
 }
 
 .pos-receipt-card {
@@ -1929,7 +2065,8 @@ h1 {
 
   .pos-layout,
   .pos-form-grid,
-  .pos-shipping-grid {
+  .pos-shipping-grid,
+  .pos-payment-methods {
     grid-template-columns: 1fr;
   }
 
