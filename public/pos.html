@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PublisHearts POS</title>
+    <meta name="description" content="PublisHearts in-person point of sale" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="pos-page">
+    <header class="site-header">
+      <div class="container row-between">
+        <a class="brand" href="/">
+          <span class="brand-mark">P</span>
+          <span>PublisHearts</span>
+        </a>
+        <div class="header-actions">
+          <a class="ghost-btn ghost-link" href="/admin">Admin</a>
+          <button id="pos-logout-btn" class="ghost-btn hidden" type="button">Log out</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container pos-shell">
+      <section id="pos-login-card" class="admin-login-card pos-login-card">
+        <h1>POS Login</h1>
+        <p>Use your admin password to open the in-person Stripe checkout and print receipts.</p>
+        <form id="pos-login-form" class="admin-login-form">
+          <label for="pos-admin-password">Password</label>
+          <input id="pos-admin-password" name="password" type="password" autocomplete="current-password" required />
+          <button class="primary-btn block" type="submit">Open POS</button>
+        </form>
+        <p id="pos-login-message" class="checkout-message"></p>
+      </section>
+
+      <section id="pos-panel" class="pos-panel hidden">
+        <div class="pos-page-head">
+          <div>
+            <p class="pos-eyebrow">In-Person Transactions</p>
+            <h1>POS Checkout</h1>
+            <p class="pos-head-copy">
+              Build a card sale, send it through Stripe, and print a merchant-style receipt back on this page.
+            </p>
+          </div>
+          <div class="pos-page-head-actions">
+            <button id="pos-refresh-btn" class="ghost-btn" type="button">Refresh POS</button>
+          </div>
+        </div>
+        <p id="pos-page-message" class="checkout-message"></p>
+
+        <div class="pos-layout">
+          <section class="pos-catalog-panel">
+            <div class="pos-toolbar">
+              <div class="pos-toolbar-copy">
+                <h2>Book Catalog</h2>
+                <p>Choose titles for the in-person sale. Hidden titles still appear here if they remain sellable.</p>
+              </div>
+              <label class="pos-search-label" for="pos-search">
+                <span>Search</span>
+                <input id="pos-search" class="admin-orders-search" type="search" placeholder="Search titles" autocomplete="off" />
+              </label>
+            </div>
+            <div id="pos-products" class="pos-products-grid"></div>
+          </section>
+
+          <aside class="pos-transaction-panel">
+            <section class="pos-transaction-card">
+              <div class="pos-transaction-head">
+                <div>
+                  <h2>Current Sale</h2>
+                  <p>Stripe-hosted card checkout for in-person transactions.</p>
+                </div>
+                <button id="pos-new-sale-btn" class="ghost-btn" type="button">New Sale</button>
+              </div>
+
+              <div class="pos-form-grid">
+                <label>
+                  Tax / Ship State
+                  <select id="pos-customer-state" name="customerState" required></select>
+                </label>
+                <label class="checkbox-row">
+                  <input id="pos-needs-shipping" name="needsShipping" type="checkbox" />
+                  Needs shipping
+                </label>
+              </div>
+              <p id="pos-hint" class="admin-help">
+                Leave shipping off for hand-to-hand sales. Turn it on when the order should enter shipping fulfillment.
+              </p>
+              <section id="pos-shipping-fields" class="pos-shipping-fields hidden">
+                <div class="pos-shipping-head">
+                  <div>
+                    <h3>Shipping Information</h3>
+                    <p>Enter the ship-to details here so the POS sale can use your shipping estimate and enter fulfillment.</p>
+                  </div>
+                </div>
+                <div class="pos-shipping-grid">
+                  <label>
+                    Customer Name
+                    <input id="pos-shipping-name" name="shippingName" type="text" autocomplete="shipping name" />
+                  </label>
+                  <label>
+                    Email
+                    <input id="pos-shipping-email" name="shippingEmail" type="email" autocomplete="email" />
+                  </label>
+                  <label>
+                    Phone
+                    <input id="pos-shipping-phone" name="shippingPhone" type="tel" autocomplete="tel" />
+                  </label>
+                  <label>
+                    Address Line 1
+                    <input id="pos-shipping-line1" name="shippingLine1" type="text" autocomplete="shipping address-line1" />
+                  </label>
+                  <label>
+                    Address Line 2
+                    <input id="pos-shipping-line2" name="shippingLine2" type="text" autocomplete="shipping address-line2" />
+                  </label>
+                  <label>
+                    City
+                    <input id="pos-shipping-city" name="shippingCity" type="text" autocomplete="shipping address-level2" />
+                  </label>
+                  <label>
+                    ZIP Code
+                    <input id="pos-shipping-postal" name="shippingPostalCode" type="text" inputmode="numeric" autocomplete="shipping postal-code" />
+                  </label>
+                </div>
+                <p class="cart-item-sub">The ship-to state uses the selector above.</p>
+              </section>
+
+              <div id="pos-cart-items" class="pos-cart-items"></div>
+
+              <div class="pos-totals">
+                <div class="row-between">
+                  <span>Items</span>
+                  <strong id="pos-items-subtotal">$0.00</strong>
+                </div>
+                <div class="row-between">
+                  <span>Shipping</span>
+                  <strong id="pos-shipping-total">$0.00</strong>
+                </div>
+                <div class="row-between">
+                  <span>Tax</span>
+                  <strong id="pos-tax-total">Calculated at checkout</strong>
+                </div>
+                <div class="row-between pos-grand-total">
+                  <span>Total</span>
+                  <strong id="pos-grand-total">$0.00</strong>
+                </div>
+              </div>
+
+              <p id="pos-summary-note" class="admin-help">
+                Stripe may adjust the final tax amount at checkout depending on your tax mode and customer details.
+              </p>
+
+              <div class="admin-form-actions">
+                <button id="pos-checkout-btn" class="primary-btn" type="button">Open Stripe Checkout</button>
+                <button id="pos-clear-btn" class="ghost-btn" type="button">Clear Cart</button>
+              </div>
+            </section>
+
+            <section class="pos-receipt-panel">
+              <div class="pos-receipt-head">
+                <div>
+                  <h2>Receipt</h2>
+                  <p>After a successful sale, print the receipt directly from this page.</p>
+                </div>
+                <button id="pos-print-btn" class="ghost-btn" type="button">Print Receipt</button>
+              </div>
+              <div id="pos-receipt" class="pos-receipt-card pos-print-area">
+                <p class="cart-item-sub">Complete a POS transaction to load a printable receipt here.</p>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/pos.js"></script>
+  </body>
+</html>

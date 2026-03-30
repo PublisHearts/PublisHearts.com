@@ -65,6 +65,14 @@ function formatAddress(address) {
     .join(", ");
 }
 
+function formatOrderSourceLabel(orderSource) {
+  const normalized = String(orderSource || "").trim().toLowerCase();
+  if (normalized === "admin_pos") {
+    return "Admin POS";
+  }
+  return "Storefront";
+}
+
 function normalizeLineItems(lineItems) {
   if (!Array.isArray(lineItems)) {
     return [];
@@ -235,7 +243,8 @@ export async function sendCustomerReceipt({
   amountTotal,
   currency,
   lineItems,
-  shippingDetails
+  shippingDetails,
+  shippingRequired = true
 }) {
   if (!emailConfigured() || !customerEmail) {
     return;
@@ -249,8 +258,10 @@ export async function sendCustomerReceipt({
   const total = formatMoney(amountTotal || 0, currency);
   const textItems = orderLineItemsText(normalizedItems, currency);
   const htmlItems = orderLineItemsHtml(normalizedItems, currency);
+  const requiresShipping = shippingRequired !== false;
   const shippingName = shippingDetails?.name || "Not provided";
-  const shippingAddress = formatAddress(shippingDetails?.address);
+  const shippingAddress = requiresShipping ? formatAddress(shippingDetails?.address) : "No shipping address required";
+  const fulfillmentMode = requiresShipping ? "Ship this order" : "In-person / no shipping required";
 
   await transporter.sendMail({
     from: fromEmail,
@@ -265,7 +276,8 @@ Sales tax: ${taxTotal}
 Total: ${total}
 Units ordered: ${unitsTotal}
 
-Shipping:
+Fulfillment:
+Mode: ${fulfillmentMode}
 Name: ${shippingName}
 Address: ${shippingAddress}
 
@@ -281,7 +293,8 @@ If you have any questions, reply to this email.`,
       <p style="margin:0 0 4px;">Sales tax: <strong>${escapeHtml(taxTotal)}</strong></p>
       <p style="margin:0 0 16px;">Total: <strong>${escapeHtml(total)}</strong></p>
       <p style="margin:0 0 16px;">Units ordered: <strong>${unitsTotal}</strong></p>
-      <h3 style="margin:0 0 8px;">Shipping</h3>
+      <h3 style="margin:0 0 8px;">Fulfillment</h3>
+      <p style="margin:0 0 4px;">Mode: <strong>${escapeHtml(fulfillmentMode)}</strong></p>
       <p style="margin:0 0 4px;">Name: ${escapeHtml(shippingName)}</p>
       <p style="margin:0 0 16px;">Address: ${escapeHtml(shippingAddress)}</p>
       <table style="width:100%; border-collapse:collapse; margin:0 0 16px;">
@@ -308,7 +321,9 @@ export async function sendOwnerNotification({
   currency,
   lineItems,
   customerDetails,
-  shippingDetails
+  shippingDetails,
+  shippingRequired = true,
+  orderSource = "storefront"
 }) {
   if (!emailConfigured()) {
     return;
@@ -331,8 +346,11 @@ export async function sendOwnerNotification({
   const customerName = customerDetails?.name || "Unknown";
   const customerEmail = customerDetails?.email || "Unknown";
   const customerPhone = customerDetails?.phone || "Not provided";
+  const requiresShipping = shippingRequired !== false;
   const shippingName = shippingDetails?.name || "Not provided";
-  const shippingAddress = formatAddress(shippingDetails?.address);
+  const shippingAddress = requiresShipping ? formatAddress(shippingDetails?.address) : "No shipping address required";
+  const fulfillmentMode = requiresShipping ? "Ship this order" : "In-person / no shipping required";
+  const orderSourceLabel = formatOrderSourceLabel(orderSource);
   const textItems = orderLineItemsText(normalizedItems, currency);
   const htmlItems = orderLineItemsHtml(normalizedItems, currency);
 
@@ -348,6 +366,7 @@ Shipping: ${shippingTotal}
 Sales tax: ${taxTotal}
 Total: ${total}
 Units ordered: ${unitsTotal}
+Source: ${orderSourceLabel}
 
 Customer:
 Name: ${customerName}
@@ -355,6 +374,7 @@ Email: ${customerEmail}
 Phone: ${customerPhone}
 
 Shipping:
+Mode: ${fulfillmentMode}
 Name: ${shippingName}
 Address: ${shippingAddress}
 
@@ -368,11 +388,13 @@ ${textItems}`,
       <p style="margin:0 0 4px;">Sales tax: <strong>${escapeHtml(taxTotal)}</strong></p>
       <p style="margin:0 0 16px;">Total: <strong>${escapeHtml(total)}</strong></p>
       <p style="margin:0 0 16px;">Units ordered: <strong>${unitsTotal}</strong></p>
+      <p style="margin:0 0 16px;">Source: <strong>${escapeHtml(orderSourceLabel)}</strong></p>
       <h3 style="margin:0 0 8px;">Customer</h3>
       <p style="margin:0 0 4px;">Name: ${escapeHtml(customerName)}</p>
       <p style="margin:0 0 4px;">Email: ${escapeHtml(customerEmail)}</p>
       <p style="margin:0 0 16px;">Phone: ${escapeHtml(customerPhone)}</p>
-      <h3 style="margin:0 0 8px;">Shipping</h3>
+      <h3 style="margin:0 0 8px;">Fulfillment</h3>
+      <p style="margin:0 0 4px;">Mode: <strong>${escapeHtml(fulfillmentMode)}</strong></p>
       <p style="margin:0 0 4px;">Name: ${escapeHtml(shippingName)}</p>
       <p style="margin:0 0 16px;">Address: ${escapeHtml(shippingAddress)}</p>
       <h3 style="margin:0 0 8px;">Items</h3>

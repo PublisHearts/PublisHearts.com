@@ -36,19 +36,7 @@
         <p id="login-message" class="checkout-message"></p>
       </section>
 
-      <section id="admin-panel" class="admin-panel hidden">
-        <aside class="admin-edition-frame" aria-live="polite">
-          <h2>Edition Buyers</h2>
-          <p>Each panel tracks 50 sold book copies in order. Click a row to cross it off after you package it, and type a number next to each name when you need it.</p>
-          <div id="admin-edition-board" class="admin-edition-list">
-            <article class="admin-edition-card">
-              <h3>The First 50</h3>
-              <p>0 / 50 copies</p>
-              <p class="cart-item-sub">No book orders yet.</p>
-            </article>
-          </div>
-        </aside>
-
+      <section id="admin-panel" class="admin-panel admin-panel-single hidden">
         <div class="admin-toolbar">
           <div>
             <h1>Store Manager</h1>
@@ -57,6 +45,8 @@
           <div class="admin-toolbar-actions">
             <button id="publish-btn" class="primary-btn" type="button">Publish Live Changes</button>
             <button id="new-product-btn" class="ghost-btn" type="button">Add New Book</button>
+            <a class="ghost-btn ghost-link" href="/fulfillment">Fulfillment</a>
+            <a class="ghost-btn ghost-link" href="/pos">POS</a>
             <button id="logout-btn" class="ghost-btn" type="button">Log out</button>
           </div>
         </div>
@@ -361,36 +351,6 @@
           <div id="admin-products" class="admin-products"></div>
         </section>
 
-        <section class="admin-section">
-          <div class="admin-section-head row-between">
-            <div>
-              <h2>Orders</h2>
-              <p>View paid orders, create USPS labels, and save ship-to details to your address book.</p>
-            </div>
-            <div class="admin-orders-toolbar">
-              <input
-                id="orders-search"
-                class="admin-orders-search"
-                type="search"
-                placeholder="Search by order # or customer name"
-                autocomplete="off"
-              />
-              <button id="refresh-orders-btn" class="ghost-btn" type="button">Refresh Orders</button>
-              <button id="export-orders-csv-btn" class="ghost-btn" type="button">Export Live CSV</button>
-            </div>
-          </div>
-          <article id="admin-sold-counter" class="admin-orders-celebration">
-            <p id="admin-sold-kicker" class="admin-sold-kicker">1st edition in progress</p>
-            <p class="admin-sold-count">
-              <span id="admin-sold-counter-value">0</span>
-              <span id="admin-sold-counter-label" class="admin-sold-count-label">/ 50 copies in 1st edition</span>
-            </p>
-            <p id="admin-sold-counter-note" class="admin-sold-caption">Across 0 paid orders | Editions: 1st: 0/50</p>
-          </article>
-          <div id="admin-order-customers" class="admin-order-customers"></div>
-          <div id="admin-orders" class="admin-orders"></div>
-          <p id="orders-message" class="checkout-message"></p>
-        </section>
       </section>
     </main>
 

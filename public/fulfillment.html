@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PublisHearts Fulfillment</title>
+    <meta name="description" content="PublisHearts shipping and fulfillment workspace" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="admin-page">
+    <header class="site-header">
+      <div class="container row-between">
+        <a class="brand" href="/">
+          <span class="brand-mark">P</span>
+          <span>PublisHearts</span>
+        </a>
+        <div class="header-actions">
+          <a class="ghost-btn ghost-link" href="/admin">Admin</a>
+          <a class="ghost-btn ghost-link" href="/pos">POS</a>
+          <button id="fulfillment-logout-btn" class="ghost-btn hidden" type="button">Log out</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container admin-shell">
+      <section id="fulfillment-login-card" class="admin-login-card">
+        <h1>Fulfillment Login</h1>
+        <p>Use your admin password to export Shippo CSV files, manage package weights, and mark orders shipped.</p>
+        <form id="fulfillment-login-form" class="admin-login-form">
+          <label for="fulfillment-password">Password</label>
+          <input id="fulfillment-password" name="password" type="password" autocomplete="current-password" required />
+          <button class="primary-btn block" type="submit">Open Fulfillment</button>
+        </form>
+        <p id="fulfillment-login-message" class="checkout-message"></p>
+      </section>
+
+      <section id="fulfillment-panel" class="admin-panel hidden">
+        <aside class="admin-edition-frame" aria-live="polite">
+          <h2>Edition Buyers</h2>
+          <p>Each panel tracks 50 sold book copies in order. Click a row to mark it packaged, and enter the packed box weight for Shippo when you have it.</p>
+          <div id="fulfillment-edition-board" class="admin-edition-list">
+            <article class="admin-edition-card">
+              <h3>The First 50</h3>
+              <p>0 / 50 copies</p>
+              <p class="cart-item-sub">No book orders yet.</p>
+            </article>
+          </div>
+        </aside>
+
+        <div class="admin-toolbar">
+          <div>
+            <h1>Fulfillment</h1>
+            <p>Export pending ship orders for Shippo, keep the actual package weight, and finish shipment follow-up in one place.</p>
+          </div>
+          <div class="admin-toolbar-actions">
+            <button id="fulfillment-open-shippo-btn" class="ghost-btn" type="button">Open Shippo</button>
+            <button id="fulfillment-refresh-btn" class="ghost-btn" type="button">Refresh Orders</button>
+            <button id="fulfillment-export-shippo-csv-btn" class="primary-btn" type="button">Export Shippo CSV</button>
+          </div>
+        </div>
+
+        <section class="admin-section">
+          <div class="admin-section-head row-between">
+            <div>
+              <h2>Pending Shipments</h2>
+              <p>The Shippo export weight uses your package weight if entered. Otherwise it falls back to the current shipping algorithm weight.</p>
+              <p class="cart-item-sub">In Shippo, upload the CSV on Orders, map the columns once, then save that mapping template for future exports.</p>
+            </div>
+            <div class="admin-orders-toolbar">
+              <input
+                id="fulfillment-search"
+                class="admin-orders-search"
+                type="search"
+                placeholder="Search by order # or customer name"
+                autocomplete="off"
+              />
+            </div>
+          </div>
+
+          <article id="fulfillment-sold-counter" class="admin-orders-celebration">
+            <p id="fulfillment-sold-kicker" class="admin-sold-kicker">1st edition in progress</p>
+            <p class="admin-sold-count">
+              <span id="fulfillment-sold-counter-value">0</span>
+              <span id="fulfillment-sold-counter-label" class="admin-sold-count-label">/ 50 copies in 1st edition</span>
+            </p>
+            <p id="fulfillment-sold-counter-note" class="admin-sold-caption">Across 0 paid orders | Editions: 1st: 0/50</p>
+          </article>
+
+          <div id="fulfillment-summary" class="admin-health-grid"></div>
+          <div id="fulfillment-order-customers" class="admin-order-customers"></div>
+          <div id="fulfillment-orders" class="admin-orders"></div>
+          <p id="fulfillment-message" class="checkout-message"></p>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/fulfillment.js"></script>
+  </body>
+</html>

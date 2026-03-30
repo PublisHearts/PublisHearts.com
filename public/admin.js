@@ -45,6 +45,16 @@ const soldCounterKickerEl = document.getElementById("admin-sold-kicker");
 const soldCounterLabelEl = document.getElementById("admin-sold-counter-label");
 const soldCounterNoteEl = document.getElementById("admin-sold-counter-note");
 const editionBoardEl = document.getElementById("admin-edition-board");
+const posForm = document.getElementById("pos-form");
+const posProductsEl = document.getElementById("pos-products");
+const posSummaryEl = document.getElementById("pos-summary");
+const posMessageEl = document.getElementById("pos-message");
+const posCheckoutBtn = document.getElementById("pos-checkout-btn");
+const posClearBtn = document.getElementById("pos-clear-btn");
+const posNeedsShippingInput = document.getElementById("pos-needs-shipping");
+const posCustomerStateSelect = document.getElementById("pos-customer-state");
+const posStateLabelEl = document.getElementById("pos-state-label");
+const posHintEl = document.getElementById("pos-hint");
 
 const siteSettingsForm = document.getElementById("site-settings-form");
 const designMessageEl = document.getElementById("design-message");
@@ -94,7 +104,9 @@ const state = {
   publishBusy: false,
   healthBusy: false,
   ordersBusy: false,
+  posBusy: false,
   ordersPayload: null,
+  posCart: new Map(),
   soldCounterValue: 0,
   soldCounterAnimationFrame: 0,
   soldCounterEdition: 1,
@@ -105,6 +117,60 @@ const state = {
 
 const DEFAULT_SHIPPING_FEE = 5;
 const COPIES_PER_EDITION = 50;
+const DEFAULT_POS_STATE = "NY";
+const US_STATE_OPTIONS = [
+  "AL",
+  "AK",
+  "AZ",
+  "AR",
+  "CA",
+  "CO",
+  "CT",
+  "DE",
+  "FL",
+  "GA",
+  "HI",
+  "ID",
+  "IL",
+  "IN",
+  "IA",
+  "KS",
+  "KY",
+  "LA",
+  "ME",
+  "MD",
+  "MA",
+  "MI",
+  "MN",
+  "MS",
+  "MO",
+  "MT",
+  "NE",
+  "NV",
+  "NH",
+  "NJ",
+  "NM",
+  "NY",
+  "NC",
+  "ND",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VT",
+  "VA",
+  "WA",
+  "WV",
+  "WI",
+  "WY",
+  "DC"
+];
 
 function setMessage(targetEl, message, isError = false) {
   if (!targetEl) {
@@ -132,6 +198,10 @@ function setHealthMessage(message, isError = false) {
 
 function setOrdersMessage(message, isError = false) {
   setMessage(ordersMessageEl, message, isError);
+}
+
+function setPosMessage(message, isError = false) {
+  setMessage(posMessageEl, message, isError);
 }
 
 function setLoginMessage(message, isError = false) {
@@ -170,6 +240,27 @@ function setOrdersBusy(isBusy) {
   }
   if (exportOrdersCsvBtn) {
     exportOrdersCsvBtn.disabled = isBusy;
+  }
+}
+
+function setPosBusy(isBusy) {
+  state.posBusy = isBusy;
+  if (posCheckoutBtn) {
+    posCheckoutBtn.disabled = isBusy;
+  }
+  if (posClearBtn) {
+    posClearBtn.disabled = isBusy;
+  }
+  if (posNeedsShippingInput) {
+    posNeedsShippingInput.disabled = isBusy;
+  }
+  if (posCustomerStateSelect) {
+    posCustomerStateSelect.disabled = isBusy;
+  }
+  if (posProductsEl) {
+    posProductsEl.querySelectorAll("button[data-pos-action]").forEach((button) => {
+      button.disabled = isBusy;
+    });
   }
 }
 
@@ -271,6 +362,252 @@ function fillSiteSettingsForm(settings) {
 
   state.siteSettings = settings;
   resetSiteSettingsDraftFields();
+}
+
+function getDefaultPosState() {
+  const fromState = String(state.siteSettings?.shippingEstimate?.fromState || "")
+    .trim()
+    .toUpperCase();
+  if (US_STATE_OPTIONS.includes(fromState)) {
+    return fromState;
+  }
+  return DEFAULT_POS_STATE;
+}
+
+function populatePosStateOptions() {
+  if (!posCustomerStateSelect) {
+    return;
+  }
+  posCustomerStateSelect.innerHTML = [
+    '<option value="">Select a state</option>',
+    ...US_STATE_OPTIONS.map((stateCode) => `<option value="${stateCode}">${stateCode}</option>`)
+  ].join("");
+}
+
+function syncPosStateDefault(force = false) {
+  if (!posCustomerStateSelect) {
+    return;
+  }
+  if (!force && posCustomerStateSelect.value) {
+    return;
+  }
+  posCustomerStateSelect.value = getDefaultPosState();
+}
+
+function applyPosSectionCopy() {
+  if (!posNeedsShippingInput) {
+    return;
+  }
+  const needsShipping = posNeedsShippingInput.checked;
+  if (posStateLabelEl) {
+    posStateLabelEl.textContent = needsShipping ? "Ship-to State" : "Tax State";
+  }
+  if (posHintEl) {
+    posHintEl.textContent = needsShipping
+      ? "Stripe will collect the card, billing details, email, and shipping address for this order."
+      : "Stripe will collect the card, billing details, and email. No shipping line is added unless you check it.";
+  }
+}
+
+function isPosProductOrderable(product) {
+  if (!product || product.inStock === false) {
+    return false;
+  }
+  if (product.isComingSoon === true && product.allowPreorder !== true) {
+    return false;
+  }
+  return true;
+}
+
+function sanitizePosCartAgainstCatalog() {
+  let changed = false;
+  Array.from(state.posCart.keys()).forEach((productId) => {
+    const product = state.products.find((entry) => entry.id === productId);
+    if (!isPosProductOrderable(product)) {
+      state.posCart.delete(productId);
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function getPosCartRows() {
+  return Array.from(state.posCart.values())
+    .map((entry) => {
+      const product = state.products.find((item) => item.id === entry.id);
+      if (!isPosProductOrderable(product)) {
+        return null;
+      }
+      return {
+        ...product,
+        quantity: Math.max(1, Math.min(10, Number(entry.quantity) || 1))
+      };
+    })
+    .filter(Boolean);
+}
+
+function getPosUnitsTotal() {
+  return getPosCartRows().reduce((sum, item) => sum + item.quantity, 0);
+}
+
+function getPosBookUnitsTotal() {
+  return getPosCartRows().reduce((sum, item) => sum + item.quantity, 0);
+}
+
+function getPosSubtotal() {
+  return getPosCartRows().reduce((sum, item) => sum + (Number(item.priceCents) || 0) * item.quantity, 0);
+}
+
+function updatePosQuantity(productId, delta) {
+  const product = state.products.find((entry) => entry.id === productId);
+  if (!isPosProductOrderable(product)) {
+    return;
+  }
+  const current = state.posCart.get(productId);
+  if (!current && delta < 0) {
+    return;
+  }
+  const nextQuantity = Math.max(0, Math.min(10, (current?.quantity || 0) + delta));
+  if (nextQuantity <= 0) {
+    state.posCart.delete(productId);
+  } else {
+    state.posCart.set(productId, {
+      id: productId,
+      quantity: nextQuantity
+    });
+  }
+}
+
+function resetPosDraft() {
+  state.posCart = new Map();
+  if (posNeedsShippingInput) {
+    posNeedsShippingInput.checked = false;
+  }
+  syncPosStateDefault(true);
+  applyPosSectionCopy();
+  renderPosSection();
+}
+
+function renderPosProducts() {
+  if (!posProductsEl) {
+    return;
+  }
+  const products = state.products.filter((product) => isPosProductOrderable(product));
+  if (products.length === 0) {
+    posProductsEl.innerHTML = `<p class="cart-item-sub">No in-stock titles are available for POS checkout.</p>`;
+    return;
+  }
+
+  posProductsEl.innerHTML = products
+    .map((product) => {
+      const quantity = Math.max(0, Number(state.posCart.get(product.id)?.quantity) || 0);
+      const isHidden = product.isVisible === false;
+      const isPreorder = product.isComingSoon === true && product.allowPreorder === true;
+      return `<article class="admin-pos-row">
+        <div>
+          <div class="row-between">
+            <h3>${escapeHtml(product.title)}</h3>
+            <strong>${formatMoney(product.priceCents)}</strong>
+          </div>
+          <p>${escapeHtml(product.subtitle || "No description.")}</p>
+          <div class="admin-pos-meta">
+            ${isHidden ? '<span class="admin-stock-badge sold-out">Hidden from storefront</span>' : ""}
+            ${isPreorder ? '<span class="admin-stock-badge in-stock">Preorder</span>' : ""}
+            ${
+              isShippingEnabled(product)
+                ? '<span class="admin-stock-badge in-stock">Can be shipped</span>'
+                : '<span class="admin-stock-badge sold-out">No shipping fee product</span>'
+            }
+          </div>
+        </div>
+        <div class="qty-controls">
+          <button class="qty-btn" type="button" data-pos-action="decrease" data-id="${escapeHtml(product.id)}">-</button>
+          <strong>${quantity}</strong>
+          <button class="qty-btn" type="button" data-pos-action="increase" data-id="${escapeHtml(product.id)}">+</button>
+        </div>
+      </article>`;
+    })
+    .join("");
+}
+
+function renderPosSummary() {
+  if (!posSummaryEl) {
+    return;
+  }
+  const rows = getPosCartRows();
+  if (rows.length === 0) {
+    posSummaryEl.innerHTML = `
+      <h3>POS Summary</h3>
+      <p>Select one or more books, then open Stripe checkout.</p>
+    `;
+    return;
+  }
+
+  const needsShipping = posNeedsShippingInput?.checked === true;
+  const selectedState = String(posCustomerStateSelect?.value || "").trim().toUpperCase();
+  const subtotal = getPosSubtotal();
+  const unitsTotal = getPosUnitsTotal();
+  const bookUnitsTotal = getPosBookUnitsTotal();
+
+  posSummaryEl.innerHTML = `
+    <h3>POS Summary</h3>
+    <p><strong>Subtotal:</strong> ${escapeHtml(formatMoney(subtotal))}</p>
+    <p><strong>Units:</strong> ${escapeHtml(formatWholeNumber(unitsTotal))} total | <strong>Sold counter:</strong> ${escapeHtml(
+      formatWholeNumber(bookUnitsTotal)
+    )} book copies</p>
+    <p><strong>Shipping:</strong> ${
+      needsShipping
+        ? `Added in Stripe checkout for ${escapeHtml(selectedState || "the selected state")}.`
+        : "No shipping line will be added."
+    }</p>
+    <p><strong>State used for tax/shipping:</strong> ${escapeHtml(selectedState || "Choose a state")}</p>
+    <p><strong>Stripe flow:</strong> Opens a hosted checkout in a new tab and returns here when finished.</p>
+  `;
+}
+
+function renderPosSection() {
+  sanitizePosCartAgainstCatalog();
+  renderPosProducts();
+  renderPosSummary();
+  if (posCheckoutBtn) {
+    posCheckoutBtn.disabled = state.posBusy || getPosCartRows().length === 0;
+  }
+}
+
+function clearPosRedirectParams() {
+  const url = new URL(window.location.href);
+  let changed = false;
+  ["pos", "session_id"].forEach((key) => {
+    if (url.searchParams.has(key)) {
+      url.searchParams.delete(key);
+      changed = true;
+    }
+  });
+  if (!changed) {
+    return;
+  }
+  const search = url.searchParams.toString();
+  const nextUrl = `${url.pathname}${search ? `?${search}` : ""}${url.hash}`;
+  window.history.replaceState({}, "", nextUrl);
+}
+
+function applyPosRedirectState() {
+  const params = new URLSearchParams(window.location.search);
+  const posState = String(params.get("pos") || "").trim().toLowerCase();
+  const sessionId = String(params.get("session_id") || "").trim();
+  if (!posState) {
+    return;
+  }
+  if (posState === "success") {
+    setPosMessage(
+      sessionId
+        ? `POS payment completed for ${sessionId}. Orders and sold counter were refreshed.`
+        : "POS payment completed. Orders and sold counter were refreshed."
+    );
+  } else if (posState === "cancel") {
+    setPosMessage("POS checkout was canceled.");
+  }
+  clearPosRedirectParams();
 }
 
 function beginEdit(productId) {
@@ -407,6 +744,18 @@ function formatShortOrderLabel(orderId) {
   return cleanId.length > 12 ? `Order ${cleanId.slice(-8)}` : `Order ${cleanId}`;
 }
 
+function isOrderShippingRequired(order) {
+  return order?.shippingRequired !== false;
+}
+
+function formatOrderSourceLabel(orderSource) {
+  const normalized = String(orderSource || "").trim().toLowerCase();
+  if (normalized === "admin_pos") {
+    return "POS";
+  }
+  return "Web";
+}
+
 function getOrderPackagedAt(order) {
   const packagedAt = Number(order?.packagedAt);
   if (Number.isFinite(packagedAt) && packagedAt > 0) {
@@ -462,6 +811,8 @@ function buildEditionOrderBuckets(orders) {
     const packaged = packagedAt > 0;
     const packageWeightValue = getOrderPackageWeightValue(order);
     const shipped = String(order?.fulfillmentStatus || "pending") === "shipped";
+    const shippingRequired = isOrderShippingRequired(order);
+    const orderSource = formatOrderSourceLabel(order?.orderSource);
 
     while (remainingUnits > 0) {
       const openSpots = COPIES_PER_EDITION - copiesUsedInEdition;
@@ -482,7 +833,9 @@ function buildEditionOrderBuckets(orders) {
         packagedAt,
         packageWeightValue,
         isPackaged: packaged,
-        isShipped: shipped
+        isShipped: shipped,
+        isShippingRequired: shippingRequired,
+        orderSource
       });
       copiesUsedInEdition += unitsToAllocate;
       if (packaged) {
@@ -521,16 +874,28 @@ function renderEditionBoard(orders) {
               ${bucket.entries
                 .map(
                   (entry) => {
-                    const statusLabel = entry.isShipped ? "Shipped" : entry.isPackaged ? "Packaged" : "Open";
-                    const metaParts = [formatShortOrderLabel(entry.orderId), formatCopyLabel(entry.units)];
-                    if (entry.isPackaged && entry.packagedAt > 0) {
-                      metaParts.push(`Packed ${formatDateTime(entry.packagedAt)}`);
-                    }
-                    const packagedTitle = entry.isShipped
-                      ? "Already shipped"
+                    const statusLabel = entry.isShippingRequired
+                      ? entry.isShipped
+                        ? "Shipped"
+                        : entry.isPackaged
+                          ? "Packaged"
+                          : "Open"
                       : entry.isPackaged
-                        ? "Click to unmark packaged"
-                        : "Click to mark packaged";
+                        ? "Completed"
+                        : "POS";
+                    const metaParts = [formatShortOrderLabel(entry.orderId), entry.orderSource, formatCopyLabel(entry.units)];
+                    if (entry.isPackaged && entry.packagedAt > 0) {
+                      metaParts.push(`${entry.isShippingRequired ? "Packed" : "Completed"} ${formatDateTime(entry.packagedAt)}`);
+                    }
+                    const packagedTitle = entry.isShippingRequired
+                      ? entry.isShipped
+                        ? "Already shipped"
+                        : entry.isPackaged
+                          ? "Click to unmark packaged"
+                          : "Click to mark packaged"
+                      : entry.isPackaged
+                        ? "Click to unmark completed"
+                        : "Click to mark completed";
                     return `<li>
                       <div
                         class="admin-edition-entry ${entry.isPackaged ? "is-packaged" : ""} ${entry.isShipped ? "is-shipped" : ""}"
@@ -544,20 +909,24 @@ function renderEditionBoard(orders) {
                         <span class="admin-edition-entry-main">
                           <span class="admin-edition-entry-header">
                             <span class="admin-edition-entry-name">${escapeHtml(entry.buyerName)}</span>
-                            <label class="admin-edition-weight" data-package-weight-field>
-                              <span class="admin-edition-weight-label">Wt</span>
-                              <input
-                                class="admin-edition-weight-input"
-                                type="number"
-                                inputmode="decimal"
-                                step="0.01"
-                                min="0"
-                                placeholder="0"
-                                value="${escapeHtml(entry.packageWeightValue)}"
-                                data-action="save-package-weight"
-                                data-id="${escapeHtml(entry.orderId)}"
-                              />
-                            </label>
+                            ${
+                              entry.isShippingRequired
+                                ? `<label class="admin-edition-weight" data-package-weight-field>
+                                    <span class="admin-edition-weight-label">Wt</span>
+                                    <input
+                                      class="admin-edition-weight-input"
+                                      type="number"
+                                      inputmode="decimal"
+                                      step="0.01"
+                                      min="0"
+                                      placeholder="0"
+                                      value="${escapeHtml(entry.packageWeightValue)}"
+                                      data-action="save-package-weight"
+                                      data-id="${escapeHtml(entry.orderId)}"
+                                    />
+                                  </label>`
+                                : ""
+                            }
                           </span>
                           <span class="admin-edition-entry-meta">${escapeHtml(metaParts.join(" | "))}</span>
                         </span>
@@ -807,6 +1176,7 @@ function getFilteredOrdersForDisplay(payload) {
       order.customerName,
       order.customerEmail,
       order.customerState,
+      order.orderSource,
       order.shippingName,
       order.shippingAddress
     ]
@@ -895,6 +1265,8 @@ function buildLiveOrdersCsv(orders) {
     "created_at_iso",
     "payment_status",
     "fulfillment_status",
+    "order_source",
+    "shipping_required",
     "currency",
     "amount_subtotal",
     "amount_shipping",
@@ -936,6 +1308,8 @@ function buildLiveOrdersCsv(orders) {
       toCsvCell(order?.createdAtIso || ""),
       toCsvCell(order?.paymentStatus || "unknown"),
       toCsvCell(order?.fulfillmentStatus || "pending"),
+      toCsvCell(order?.orderSource || "storefront"),
+      toCsvCell(String(isOrderShippingRequired(order))),
       toCsvCell(order?.currency || "usd"),
       toCsvCell(formatAmountForExport(order?.amountSubtotal)),
       toCsvCell(formatAmountForExport(order?.amountShipping)),
@@ -1120,8 +1494,10 @@ function renderOrders(payload) {
     return;
   }
 
-  const pendingOrders = orders.filter((order) => String(order.fulfillmentStatus || "pending") !== "shipped");
-  const shippedOrders = orders.filter((order) => String(order.fulfillmentStatus || "pending") === "shipped");
+  const shippingOrders = orders.filter((order) => isOrderShippingRequired(order));
+  const pendingShippingOrders = shippingOrders.filter((order) => String(order.fulfillmentStatus || "pending") !== "shipped");
+  const shippedOrders = shippingOrders.filter((order) => String(order.fulfillmentStatus || "pending") === "shipped");
+  const pickupOrders = orders.filter((order) => !isOrderShippingRequired(order));
 
   const renderOrderCard = (order) => {
     const itemSummary =
@@ -1132,8 +1508,11 @@ function renderOrders(payload) {
       Array.isArray(order.customerPastOrderIds) && order.customerPastOrderIds.length > 0
         ? order.customerPastOrderIds.map((orderId) => escapeHtml(orderId)).join(", ")
         : "None";
+    const shippingRequired = isOrderShippingRequired(order);
+    const sourceLabel = formatOrderSourceLabel(order.orderSource);
     const shipped = String(order.fulfillmentStatus || "pending") === "shipped";
-    const fulfillmentLabel = shipped ? "Shipped" : "Needs Fulfillment";
+    const fulfillmentLabel = shippingRequired ? (shipped ? "Shipped" : "Needs Fulfillment") : "No Shipping Required";
+    const fulfillmentClass = shippingRequired ? (shipped ? "shipped" : "pending") : "pickup";
     const shipDate = order.shippedAt ? formatDateTime(order.shippedAt) : "";
     const labelId = String(order.shipmentLabelId || "").trim();
     const labelUrl = String(order.shipmentLabelUrl || "").trim();
@@ -1141,17 +1520,25 @@ function renderOrders(payload) {
     const hasPostage = Number.isFinite(postageCentsRaw) && postageCentsRaw > 0;
     const shippingWeightRaw = Number(order.shippingWeightLbs);
     const shippingWeightLabel =
-      Number.isFinite(shippingWeightRaw) && shippingWeightRaw > 0 ? `${shippingWeightRaw.toFixed(2)} lb` : "Unknown";
+      !shippingRequired
+        ? "Not needed"
+        : Number.isFinite(shippingWeightRaw) && shippingWeightRaw > 0
+          ? `${shippingWeightRaw.toFixed(2)} lb`
+          : "Unknown";
     const shippingBillableWeightRaw = Number(order.shippingBillableWeightLbs);
     const shippingBillableWeightLabel =
-      Number.isFinite(shippingBillableWeightRaw) && shippingBillableWeightRaw > 0
-        ? `${shippingBillableWeightRaw.toFixed(2)} lb`
-        : "Unknown";
+      !shippingRequired
+        ? "Not needed"
+        : Number.isFinite(shippingBillableWeightRaw) && shippingBillableWeightRaw > 0
+          ? `${shippingBillableWeightRaw.toFixed(2)} lb`
+          : "Unknown";
     const shippingZoneRaw = Number(order.shippingZone);
     const shippingZoneLabel =
-      Number.isFinite(shippingZoneRaw) && shippingZoneRaw >= 1 && shippingZoneRaw <= 8
+      shippingRequired && Number.isFinite(shippingZoneRaw) && shippingZoneRaw >= 1 && shippingZoneRaw <= 8
         ? `Zone ${Math.round(shippingZoneRaw)}`
-        : "Unknown";
+        : shippingRequired
+          ? "Unknown"
+          : "Not needed";
     const selectedState = String(order.customerState || "").trim().toUpperCase();
     const shippingState = String(order.shippingState || "").trim().toUpperCase();
     const shippingCountry = String(order.shippingCountry || "US").trim().toUpperCase();
@@ -1159,26 +1546,61 @@ function renderOrders(payload) {
     const shippingStateMismatchReason = String(order.shippingStateMismatchReason || "").trim();
     const fulfillmentHoldReason = String(order.fulfillmentHoldReason || "").trim();
     const blockedForStateMismatch =
-      !shippingStateMatchesCustomerState || fulfillmentHoldReason === "state_mismatch";
+      shippingRequired &&
+      (!shippingStateMatchesCustomerState || fulfillmentHoldReason === "state_mismatch");
     const canUseShippingStateFallback =
       blockedForStateMismatch && !selectedState && Boolean(shippingState) && shippingCountry === "US";
     const uspsButtonLabel = "Open Shippo Manual Label";
-    const stateCheckText = blockedForStateMismatch
-      ? `Blocked - ${shippingStateMismatchReason || `Selected ${selectedState || "Unknown"} vs shipping ${shippingState || "Unknown"} (${shippingCountry})`}`
-      : `Match (${selectedState || "Unknown"} -> ${shippingState || selectedState || "Unknown"})`;
+    const stateCheckText = shippingRequired
+      ? blockedForStateMismatch
+        ? `Blocked - ${shippingStateMismatchReason || `Selected ${selectedState || "Unknown"} vs shipping ${shippingState || "Unknown"} (${shippingCountry})`}`
+        : `Match (${selectedState || "Unknown"} -> ${shippingState || selectedState || "Unknown"})`
+      : `Not required (${sourceLabel} checkout)`;
+    const shippingNameLabel = shippingRequired ? escapeHtml(order.shippingName || "Unknown") : "No shipping required";
+    const shippingAddressLabel = shippingRequired ? escapeHtml(order.shippingAddress || "No address") : "Customer left with purchase";
+    const shippingToolsHtml = shippingRequired
+      ? `
+        ${
+          canUseShippingStateFallback
+            ? `<button class="ghost-btn" type="button" data-action="use-shipping-state" data-id="${escapeHtml(order.id)}">Use Shipping State</button>`
+            : ""
+        }
+        <button class="ghost-btn" type="button" data-action="create-usps-label" data-id="${escapeHtml(order.id)}" ${
+          blockedForStateMismatch ? "disabled title=\"Fix state mismatch first\"" : ""
+        }>${uspsButtonLabel}</button>
+        <button class="ghost-btn" type="button" data-action="export-shippo-order-txt" data-id="${escapeHtml(order.id)}">
+          Export Shipping TXT
+        </button>
+        <button class="ghost-btn" type="button" data-action="edit-shipping-address" data-id="${escapeHtml(order.id)}">Edit Address</button>
+        <button class="ghost-btn" type="button" data-action="save-shipping-address" data-id="${escapeHtml(order.id)}">Save Address</button>
+      `
+      : "";
+    const fulfillmentActionHtml = shippingRequired
+      ? shipped
+        ? `<button class="ghost-btn" type="button" data-action="resend-shipped-email" data-id="${escapeHtml(order.id)}">Resend Shipment Email</button>
+           <button class="ghost-btn" type="button" data-action="mark-pending-order" data-id="${escapeHtml(order.id)}">Mark Pending</button>`
+        : blockedForStateMismatch
+          ? `<button class="danger-btn" type="button" data-action="force-mark-shipped-order" data-id="${escapeHtml(order.id)}">
+               Override Block + Mark Shipped + Email
+             </button>`
+          : `<button class="primary-btn" type="button" data-action="mark-shipped-order" data-id="${escapeHtml(order.id)}">
+               Mark Shipped + Email Customer
+             </button>`
+      : "";
 
     return `<article class="admin-order-card">
       <div class="row-between">
         <h4>${escapeHtml(order.id)}</h4>
         <strong>${formatMoney(order.amountTotal || 0)}</strong>
       </div>
-      <p><strong>Status:</strong> <span class="admin-order-status ${shipped ? "shipped" : "pending"}">${fulfillmentLabel}</span>${shipDate ? ` - ${escapeHtml(shipDate)}` : ""}</p>
+      <p><strong>Status:</strong> <span class="admin-order-status ${fulfillmentClass}">${fulfillmentLabel}</span>${shipDate ? ` - ${escapeHtml(shipDate)}` : ""}</p>
+      <p><strong>Source:</strong> ${escapeHtml(sourceLabel)}</p>
       <p><strong>Date:</strong> ${escapeHtml(formatDateTime(order.createdAt))}</p>
       <p><strong>Customer:</strong> ${escapeHtml(order.customerName || "Unknown")} (${escapeHtml(order.customerEmail || "No email")})</p>
       <p><strong>State:</strong> ${escapeHtml(order.customerState || "Unknown")} ${
         order.customerTaxExemptByState ? '(no-sales-tax state)' : ""
       }</p>
-      <p><strong>Ship to:</strong> ${escapeHtml(order.shippingName || "Unknown")} - ${escapeHtml(order.shippingAddress || "No address")}</p>
+      <p><strong>Ship to:</strong> ${shippingNameLabel} - ${shippingAddressLabel}</p>
       <p><strong>Address state check:</strong> ${escapeHtml(stateCheckText)}</p>
       <p><strong>Weight:</strong> ${escapeHtml(shippingWeightLabel)} actual | ${escapeHtml(shippingBillableWeightLabel)} billable | <strong>Zone:</strong> ${escapeHtml(shippingZoneLabel)}</p>
       <p><strong>Units:</strong> ${order.unitsTotal || 0} | <strong>Items:</strong> ${formatMoney(order.amountSubtotal || 0)} | <strong>Shipping:</strong> ${formatMoney(order.amountShipping || 0)} | <strong>Tax:</strong> ${formatMoney(order.amountTax || 0)}</p>
@@ -1203,40 +1625,29 @@ function renderOrders(payload) {
       <p><strong>Past orders by this customer:</strong> ${pastOrders}</p>
       <p><strong>Customer total orders:</strong> ${order.customerOrdersCount || 1}</p>
       <div class="admin-card-actions">
-        ${
-          canUseShippingStateFallback
-            ? `<button class="ghost-btn" type="button" data-action="use-shipping-state" data-id="${escapeHtml(order.id)}">Use Shipping State</button>`
-            : ""
-        }
-        <button class="ghost-btn" type="button" data-action="create-usps-label" data-id="${escapeHtml(order.id)}" ${
-          blockedForStateMismatch ? "disabled title=\"Fix state mismatch first\"" : ""
-        }>${uspsButtonLabel}</button>
-        <button class="ghost-btn" type="button" data-action="export-shippo-order-txt" data-id="${escapeHtml(order.id)}">
-          Export Shipping TXT
-        </button>
-        <button class="ghost-btn" type="button" data-action="edit-shipping-address" data-id="${escapeHtml(order.id)}">Edit Address</button>
-        <button class="ghost-btn" type="button" data-action="save-shipping-address" data-id="${escapeHtml(order.id)}">Save Address</button>
+        ${shippingToolsHtml}
         <button class="danger-btn" type="button" data-action="exclude-order" data-id="${escapeHtml(order.id)}">Remove Refunded Order</button>
-        ${
-          shipped
-            ? `<button class="ghost-btn" type="button" data-action="resend-shipped-email" data-id="${escapeHtml(order.id)}">Resend Shipment Email</button>
-               <button class="ghost-btn" type="button" data-action="mark-pending-order" data-id="${escapeHtml(order.id)}">Mark Pending</button>`
-            : blockedForStateMismatch
-              ? `<button class="danger-btn" type="button" data-action="force-mark-shipped-order" data-id="${escapeHtml(order.id)}">
-                   Override Block + Mark Shipped + Email
-                 </button>`
-              : `<button class="primary-btn" type="button" data-action="mark-shipped-order" data-id="${escapeHtml(order.id)}">
-                   Mark Shipped + Email Customer
-                 </button>`
-        }
+        ${fulfillmentActionHtml}
       </div>
     </article>`;
   };
 
   ordersEl.innerHTML = `
-    <h3>Needs Fulfillment (${pendingOrders.length}${query ? ` / ${allOrders.length} total` : ""})</h3>
+    <h3>Needs Fulfillment (${pendingShippingOrders.length}${query ? ` / ${allOrders.length} total` : ""})</h3>
     <div class="admin-orders-list">
-      ${pendingOrders.length > 0 ? pendingOrders.map(renderOrderCard).join("") : '<p class="cart-item-sub">No orders waiting to ship.</p>'}
+      ${
+        pendingShippingOrders.length > 0
+          ? pendingShippingOrders.map(renderOrderCard).join("")
+          : '<p class="cart-item-sub">No shippable orders waiting to go out.</p>'
+      }
+    </div>
+    <h3>In-Person / No Shipping Required (${pickupOrders.length}${query ? ` / ${allOrders.length} total` : ""})</h3>
+    <div class="admin-orders-list">
+      ${
+        pickupOrders.length > 0
+          ? pickupOrders.map(renderOrderCard).join("")
+          : '<p class="cart-item-sub">No POS or pickup orders yet.</p>'
+      }
     </div>
     <h3>Shipped (${shippedOrders.length}${query ? ` / ${allOrders.length} total` : ""})</h3>
     <div class="admin-orders-list">
@@ -1354,6 +1765,7 @@ async function loadProducts() {
   const products = await adminRequest("/api/admin/products");
   state.products = products;
   renderProducts();
+  renderPosSection();
 }
 
 async function loadHealth() {
@@ -1443,6 +1855,9 @@ function syncShippingInputs() {
 async function loadSiteSettings() {
   const settings = await adminRequest("/api/admin/site-settings");
   fillSiteSettingsForm(settings);
+  syncPosStateDefault(!posCustomerStateSelect?.value || posCustomerStateSelect.value === DEFAULT_POS_STATE);
+  applyPosSectionCopy();
+  renderPosSummary();
 }
 
 function moveProductInState(movedId, targetId, placeAfter = false) {
@@ -1530,7 +1945,8 @@ async function ensureAuthenticated() {
   try {
     await login(state.adminPassword);
     showPanel();
-    await Promise.all([loadProducts(), loadSiteSettings(), loadHealth(), loadOrders()]);
+    await Promise.all([loadProducts(), loadSiteSettings(), loadHealth()]);
+    applyPosRedirectState();
   } catch {
     state.adminPassword = "";
     window.localStorage.removeItem(ADMIN_KEY);
@@ -1552,7 +1968,9 @@ loginForm.addEventListener("submit", async (event) => {
     window.localStorage.setItem(ADMIN_KEY, password);
     passwordInput.value = "";
     showPanel();
-    await Promise.all([loadProducts(), loadSiteSettings(), loadHealth(), loadOrders()]);
+    setPosMessage("");
+    await Promise.all([loadProducts(), loadSiteSettings(), loadHealth()]);
+    applyPosRedirectState();
     setProductMessage("Signed in.");
     setDesignMessage("");
     setPublishMessage("");
@@ -1570,12 +1988,14 @@ logoutBtn.addEventListener("click", () => {
   state.ordersPayload = null;
   resetForm();
   resetSiteSettingsDraftFields();
+  resetPosDraft();
   showLogin();
   setProductMessage("");
   setDesignMessage("");
   setPublishMessage("");
   setHealthMessage("");
   setOrdersMessage("");
+  setPosMessage("");
   setLoginMessage("");
 });
 
@@ -1660,6 +2080,96 @@ ordersSearchInput?.addEventListener("input", () => {
     return;
   }
   renderOrders(state.ordersPayload);
+});
+
+posProductsEl?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-pos-action]");
+  if (!button || state.posBusy) {
+    return;
+  }
+  const productId = String(button.dataset.id || "").trim();
+  if (!productId) {
+    return;
+  }
+  const action = String(button.dataset.posAction || "").trim();
+  if (action === "increase") {
+    updatePosQuantity(productId, 1);
+  } else if (action === "decrease") {
+    updatePosQuantity(productId, -1);
+  } else {
+    return;
+  }
+  renderPosSection();
+});
+
+posNeedsShippingInput?.addEventListener("change", () => {
+  applyPosSectionCopy();
+  renderPosSummary();
+});
+
+posCustomerStateSelect?.addEventListener("change", () => {
+  renderPosSummary();
+});
+
+posClearBtn?.addEventListener("click", () => {
+  resetPosDraft();
+  setPosMessage("POS draft cleared.");
+});
+
+posForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.posBusy) {
+    return;
+  }
+
+  const customerState = String(posCustomerStateSelect?.value || "").trim().toUpperCase();
+  const cart = getPosCartRows().map((item) => ({
+    id: item.id,
+    quantity: item.quantity
+  }));
+  if (!customerState) {
+    setPosMessage("Choose a state before opening POS checkout.", true);
+    return;
+  }
+  if (cart.length === 0) {
+    setPosMessage("Add at least one book to the POS draft.", true);
+    return;
+  }
+
+  setPosBusy(true);
+  setPosMessage("Opening Stripe POS checkout...");
+  try {
+    const result = await adminRequest("/api/admin/pos/create-checkout-session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        cart,
+        customerState,
+        needsShipping: posNeedsShippingInput?.checked === true
+      })
+    });
+    const nextUrl = String(result?.url || "").trim();
+    if (!nextUrl) {
+      throw new Error("Stripe did not return a checkout URL.");
+    }
+    const checkoutWindow = window.open(nextUrl, "_blank", "noopener,noreferrer");
+    if (!checkoutWindow) {
+      window.location.href = nextUrl;
+      return;
+    }
+    setPosMessage("Stripe POS checkout opened in a new tab.");
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setPosMessage(error.message || "Could not open POS checkout.", true);
+  } finally {
+    setPosBusy(false);
+    renderPosSection();
+  }
 });
 
 editionBoardEl?.addEventListener("click", async (event) => {
@@ -2564,8 +3074,10 @@ siteSettingsForm.addEventListener("submit", async (event) => {
   }
 });
 
+syncShippingInputs();
+populatePosStateOptions();
+resetPosDraft();
+
 ensureAuthenticated().catch(() => {
   showLogin();
 });
-
-syncShippingInputs();

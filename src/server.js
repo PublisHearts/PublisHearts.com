@@ -378,12 +378,26 @@ function evaluateCheckoutStateMatch(session, options = {}) {
     normalizeUsStateCode(paymentIntentMetadata.fulfillment_selected_state_override) ||
     normalizeUsStateCode(paymentIntentMetadata.fulfillment_selected_state);
   const selectedState = selectedStateFromSession || selectedStateFromPaymentIntent;
+  const shippingRequired = isSessionShippingRequired(session, { paymentIntentMetadata });
   const shipping = getOrderShippingAddress(session, { paymentIntentMetadata });
   const shippingCountry = normalizeIsoCountry(shipping?.country, "US");
   const shippingStateRaw = String(shipping?.state || "")
     .trim()
     .toUpperCase();
   const shippingState = normalizeUsStateCode(shippingStateRaw);
+
+  if (!shippingRequired) {
+    return {
+      selectedState,
+      selectedStateSource: selectedStateFromSession ? "session_metadata" : selectedStateFromPaymentIntent ? "payment_intent" : "",
+      shippingState,
+      shippingStateRaw,
+      shippingCountry,
+      stateMatch: true,
+      mismatchReason: ""
+    };
+  }
+
   const stateMatch =
     Boolean(selectedState) &&
     shippingCountry === "US" &&
@@ -532,6 +546,277 @@ function shouldCountProductTowardBookCounter(product) {
     return false;
   }
   return isCounterBookItemName(product.title);
+}
+
+function isSessionShippingRequired(session, options = {}) {
+  const paymentIntentMetadata = options?.paymentIntentMetadata || {};
+  const overrideFlag = parseBooleanFlag(paymentIntentMetadata.fulfillment_shipping_required_override, undefined);
+  if (typeof overrideFlag === "boolean") {
+    return overrideFlag;
+  }
+  const paymentIntentFlag = parseBooleanFlag(paymentIntentMetadata.fulfillment_shipping_required, undefined);
+  if (typeof paymentIntentFlag === "boolean") {
+    return paymentIntentFlag;
+  }
+  const sessionFlag = parseBooleanFlag(session?.metadata?.shipping_required, undefined);
+  if (typeof sessionFlag === "boolean") {
+    return sessionFlag;
+  }
+  return true;
+}
+
+function getSessionOrderSource(session, options = {}) {
+  const paymentIntentMetadata = options?.paymentIntentMetadata || {};
+  const raw = String(paymentIntentMetadata.order_source || session?.metadata?.order_source || "storefront")
+    .trim()
+    .toLowerCase();
+  return raw || "storefront";
+}
+
+function getShippingNotRequiredErrorMessage(session, options = {}) {
+  const orderSource = getSessionOrderSource(session, options);
+  if (orderSource === "admin_pos") {
+    return "This admin POS order was checked out without shipping.";
+  }
+  return "This order does not require shipping.";
+}
+
+function isCheckoutValidationErrorMessage(message) {
+  const text = String(message || "").trim();
+  if (!text) {
+    return false;
+  }
+  return (
+    text === "Your cart is empty." ||
+    text === "Select a valid U.S. state before checkout." ||
+    text.startsWith("Unknown product id:") ||
+    text.endsWith("is currently unavailable.") ||
+    text.endsWith("is coming soon and not orderable yet.") ||
+    text.endsWith("is sold out right now.")
+  );
+}
+
+async function buildCheckoutSessionCartDetails(cart, customerState, options = {}) {
+  const safeCart = Array.isArray(cart) ? cart : [];
+  if (safeCart.length === 0) {
+    throw new Error("Your cart is empty.");
+  }
+
+  const normalizedCustomerState = normalizeUsStateCode(customerState);
+  if (!normalizedCustomerState) {
+    throw new Error("Select a valid U.S. state before checkout.");
+  }
+
+  const shippingRequired = options?.shippingRequired !== false;
+  const lineItems = [];
+  const cartSummaryParts = [];
+  let unitsTotal = 0;
+  let bookUnitsTotal = 0;
+  let shippableUnits = 0;
+  let itemsSubtotal = 0;
+
+  for (const item of safeCart) {
+    const product = await findProductById(item?.id);
+    if (!product) {
+      throw new Error(`Unknown product id: ${item?.id}`);
+    }
+    if (product.isVisible === false && options?.allowHiddenProducts !== true) {
+      throw new Error(`${product.title} is currently unavailable.`);
+    }
+    if (product.isComingSoon === true && product.allowPreorder !== true) {
+      throw new Error(`${product.title} is coming soon and not orderable yet.`);
+    }
+    if (!product.inStock) {
+      throw new Error(`${product.title} is sold out right now.`);
+    }
+
+    const quantity = Math.max(1, Math.min(10, Number.parseInt(item?.quantity, 10) || 1));
+    unitsTotal += quantity;
+    if (shouldCountProductTowardBookCounter(product)) {
+      bookUnitsTotal += quantity;
+    }
+    itemsSubtotal += product.priceCents * quantity;
+    if (product.shippingEnabled === true) {
+      shippableUnits += quantity;
+    }
+    cartSummaryParts.push(`${product.title} x${quantity}`);
+    lineItems.push({
+      price_data: {
+        currency,
+        unit_amount: product.priceCents,
+        product_data: {
+          name: product.title,
+          description: product.subtitle
+        }
+      },
+      quantity
+    });
+  }
+
+  const effectiveShippableUnits = shippingRequired ? shippableUnits : 0;
+  const shippingEstimate = calculateShippingFromUnits(effectiveShippableUnits, normalizedCustomerState);
+  const shippingTotal = shippingEstimate.shippingCents;
+  const shippingWeightLbs = shippingEstimate.shippingWeightLbs;
+  const shippingBillableWeightLbs = shippingEstimate.shippingBillableWeightLbs;
+  const shippingZone = shippingEstimate.shippingZone;
+  const shippingZoneMultiplier = shippingEstimate.shippingZoneMultiplier;
+  const shippingBaseRateCents = shippingEstimate.shippingBaseRateCents;
+  const salesTaxExemptByState = manualNonTaxStates.has(normalizedCustomerState);
+  const taxBase = itemsSubtotal + (manualSalesTaxApplyToShipping ? shippingTotal : 0);
+  const manualSalesTaxTotal =
+    manualSalesTaxEnabled && !salesTaxExemptByState
+      ? Math.max(0, Math.round(taxBase * (manualSalesTaxRatePercent / 100)))
+      : 0;
+
+  if (shippingRequired && shippingTotal > 0) {
+    lineItems.push({
+      price_data: {
+        currency,
+        unit_amount: shippingTotal,
+        product_data: {
+          name: "Shipping",
+          description: `USPS Ground Advantage (est.) - Zone ${shippingZone}, ${shippingBillableWeightLbs} lb billable`
+        }
+      },
+      quantity: 1
+    });
+    cartSummaryParts.push("Shipping x1");
+  }
+
+  if (manualSalesTaxTotal > 0) {
+    lineItems.push({
+      price_data: {
+        currency,
+        unit_amount: manualSalesTaxTotal,
+        product_data: {
+          name: "Sales Tax",
+          description: `Manual sales tax (${manualSalesTaxRatePercent.toFixed(2)}%)`
+        }
+      },
+      quantity: 1
+    });
+    cartSummaryParts.push("Sales Tax x1");
+  }
+
+  return {
+    customerState: normalizedCustomerState,
+    lineItems,
+    metadata: {
+      storefront: "publishearts.com",
+      units_total: String(unitsTotal),
+      book_units_total: String(bookUnitsTotal),
+      shippable_units: String(effectiveShippableUnits),
+      shipping_weight_lbs: String(shippingWeightLbs),
+      shipping_billable_weight_lbs: String(shippingBillableWeightLbs),
+      shipping_zone: String(shippingZone),
+      shipping_zone_multiplier: String(shippingZoneMultiplier),
+      shipping_base_rate_cents: String(shippingBaseRateCents),
+      items_subtotal_cents: String(itemsSubtotal),
+      shipping_total_cents: String(shippingTotal),
+      manual_sales_tax_rate_pct: String(manualSalesTaxRatePercent),
+      manual_sales_tax_cents: String(manualSalesTaxTotal),
+      customer_state: normalizedCustomerState,
+      shipping_required: String(shippingRequired),
+      shipping_state_match_required: String(shippingRequired),
+      customer_tax_exempt_by_state: String(salesTaxExemptByState),
+      cart_summary: cartSummaryParts.join(" | ").slice(0, 500)
+    }
+  };
+}
+
+async function createCheckoutSessionForCart(req, cart, customerState, options = {}) {
+  const shippingRequired = options?.shippingRequired !== false;
+  const allowPromotionCodes = options?.allowPromotionCodes !== false;
+  const orderSource = String(options?.orderSource || "storefront")
+    .trim()
+    .toLowerCase() || "storefront";
+  const successUrl = String(options?.successUrl || "").trim();
+  const cancelUrl = String(options?.cancelUrl || "").trim();
+  const sessionDetails = await buildCheckoutSessionCartDetails(cart, customerState, {
+    shippingRequired,
+    allowHiddenProducts: options?.allowHiddenProducts === true
+  });
+  const normalizedShippingInput = shippingRequired
+    ? normalizeCheckoutShippingInput(options?.shippingDetails, sessionDetails.customerState)
+    : null;
+  const hasProvidedShippingInput = hasCompleteCheckoutShippingInput(normalizedShippingInput);
+  const customerEmail = String(options?.customerEmail || normalizedShippingInput?.email || "")
+    .trim()
+    .toLowerCase()
+    .slice(0, 320);
+  if (shippingRequired && options?.requireShippingDetails === true) {
+    if (!hasProvidedShippingInput) {
+      throw new Error("Name, address line 1, city, state, and ZIP are required for shipped POS orders.");
+    }
+    if (normalizedShippingInput.country !== "US") {
+      throw new Error("Only U.S. shipping addresses are supported for shipped POS orders.");
+    }
+  }
+
+  const sessionOptions = {
+    mode: "payment",
+    payment_method_types: ["card"],
+    line_items: sessionDetails.lineItems,
+    automatic_tax: {
+      enabled: manualSalesTaxEnabled ? false : stripeAutomaticTaxEnabled
+    },
+    billing_address_collection: "required",
+    phone_number_collection: {
+      enabled: true
+    },
+    allow_promotion_codes: allowPromotionCodes,
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    metadata: {
+      ...sessionDetails.metadata,
+      order_source: orderSource
+    },
+    payment_intent_data: {
+      metadata: {
+        order_source: orderSource,
+        fulfillment_shipping_required: String(shippingRequired),
+        fulfillment_selected_state: sessionDetails.customerState,
+        fulfillment_hold_reason: "",
+        fulfillment_state_match: String(!shippingRequired)
+      }
+    }
+  };
+
+  if (customerEmail) {
+    sessionOptions.customer_email = customerEmail;
+    sessionOptions.payment_intent_data.receipt_email = customerEmail;
+  }
+
+  if (hasProvidedShippingInput) {
+    sessionOptions.payment_intent_data.metadata = {
+      ...sessionOptions.payment_intent_data.metadata,
+      ...buildCheckoutShippingMetadataOverrides(normalizedShippingInput)
+    };
+    sessionOptions.payment_intent_data.shipping = {
+      name: normalizedShippingInput.name,
+      phone: normalizedShippingInput.phone || undefined,
+      address: {
+        line1: normalizedShippingInput.line1,
+        line2: normalizedShippingInput.line2 || undefined,
+        city: normalizedShippingInput.city,
+        state: normalizedShippingInput.state,
+        postal_code: normalizedShippingInput.postalCode,
+        country: normalizedShippingInput.country
+      }
+    };
+  }
+
+  if (shippingRequired && !hasProvidedShippingInput) {
+    sessionOptions.shipping_address_collection = {
+      allowed_countries: allowedShippingCountries
+    };
+  }
+
+  const session = await stripe.checkout.sessions.create(sessionOptions);
+  return {
+    session,
+    details: sessionDetails
+  };
 }
 
 function calculateUnitsTotalFromSessionMetadata(session) {
@@ -1243,6 +1528,69 @@ function cleanNumericPostalCode(value, maxLength = 10) {
   return text;
 }
 
+function normalizeCheckoutShippingInput(input = {}, fallbackState = "") {
+  const shippingName = String(input?.name || "").trim().slice(0, 120);
+  const shippingEmail = String(input?.email || "").trim().toLowerCase().slice(0, 320);
+  const shippingPhone = String(input?.phone || "").trim().slice(0, 40);
+  const shippingLine1 = String(input?.line1 || "").trim().slice(0, 220);
+  const shippingLine2 = String(input?.line2 || "").trim().slice(0, 220);
+  const shippingCity = String(input?.city || "").trim().slice(0, 120);
+  const shippingState = normalizeUsStateCode(input?.state) || normalizeUsStateCode(fallbackState);
+  const shippingPostalCode = String(input?.postalCode || input?.postal_code || "")
+    .trim()
+    .toUpperCase()
+    .slice(0, 20);
+  const shippingCountry = normalizeIsoCountry(input?.country, "US");
+
+  return {
+    name: shippingName,
+    email: shippingEmail,
+    phone: shippingPhone,
+    line1: shippingLine1,
+    line2: shippingLine2,
+    city: shippingCity,
+    state: shippingState,
+    postalCode: shippingPostalCode,
+    country: shippingCountry
+  };
+}
+
+function hasCompleteCheckoutShippingInput(shipping) {
+  return Boolean(shipping?.name && shipping?.line1 && shipping?.city && shipping?.state && shipping?.postalCode);
+}
+
+function buildCheckoutShippingMetadataOverrides(shipping = {}) {
+  return {
+    fulfillment_shipping_name_override: String(shipping?.name || "").trim(),
+    fulfillment_shipping_line1_override: String(shipping?.line1 || "").trim(),
+    fulfillment_shipping_line2_override: String(shipping?.line2 || "").trim(),
+    fulfillment_shipping_city_override: String(shipping?.city || "").trim(),
+    fulfillment_shipping_state_override: normalizeUsStateCode(shipping?.state),
+    fulfillment_shipping_postal_override: String(shipping?.postalCode || "")
+      .trim()
+      .toUpperCase(),
+    fulfillment_shipping_country_override: normalizeIsoCountry(shipping?.country, "US")
+  };
+}
+
+function buildStripeStyleShippingDetails(shipping = {}) {
+  const country = normalizeIsoCountry(shipping?.country, "US");
+  return {
+    name: String(shipping?.name || "").trim(),
+    phone: String(shipping?.phone || "").trim(),
+    address: {
+      line1: String(shipping?.line1 || "").trim(),
+      line2: String(shipping?.line2 || "").trim(),
+      city: String(shipping?.city || "").trim(),
+      state: normalizeUsStateCode(shipping?.state),
+      postal_code: String(shipping?.postalCode || "")
+        .trim()
+        .toUpperCase(),
+      country
+    }
+  };
+}
+
 function buildZipCode(zip5, zip4 = "") {
   const normalizedZip5 = cleanNumericPostalCode(zip5, 10);
   const splitFromZip5 = normalizedZip5.split("-");
@@ -1310,19 +1658,26 @@ function deriveOrderWeightLbs(session) {
 
 function getOrderShippingAddress(session, options = {}) {
   const paymentIntentMetadata = options?.paymentIntentMetadata || {};
+  const paymentIntentShipping =
+    session?.payment_intent && typeof session.payment_intent === "object" ? session.payment_intent.shipping || {} : {};
+  const paymentIntentAddress = paymentIntentShipping?.address || {};
   const shippingDetails = session?.shipping_details || {};
   const shippingAddress = shippingDetails?.address || {};
-  const shippingNameBase = String(shippingDetails?.name || session?.customer_details?.name || "").trim();
+  const shippingNameBase = String(
+    shippingDetails?.name || paymentIntentShipping?.name || session?.customer_details?.name || ""
+  ).trim();
   const shippingNameOverride = String(paymentIntentMetadata.fulfillment_shipping_name_override || "").trim();
-  const shippingLine1Base = String(shippingAddress?.line1 || "").trim();
+  const shippingLine1Base = String(shippingAddress?.line1 || paymentIntentAddress?.line1 || "").trim();
   const shippingLine1Override = String(paymentIntentMetadata.fulfillment_shipping_line1_override || "").trim();
-  const shippingLine2Base = String(shippingAddress?.line2 || "").trim();
+  const shippingLine2Base = String(shippingAddress?.line2 || paymentIntentAddress?.line2 || "").trim();
   const shippingLine2Override = String(paymentIntentMetadata.fulfillment_shipping_line2_override || "").trim();
-  const shippingCityBase = String(shippingAddress?.city || "").trim();
+  const shippingCityBase = String(shippingAddress?.city || paymentIntentAddress?.city || "").trim();
   const shippingCityOverride = String(paymentIntentMetadata.fulfillment_shipping_city_override || "").trim();
-  const shippingStateBase = String(shippingAddress?.state || "").trim().toUpperCase();
+  const shippingStateBase = String(shippingAddress?.state || paymentIntentAddress?.state || "").trim().toUpperCase();
   const shippingStateOverride = String(paymentIntentMetadata.fulfillment_shipping_state_override || "").trim().toUpperCase();
-  const shippingPostalCodeBase = String(shippingAddress?.postal_code || "").trim().toUpperCase();
+  const shippingPostalCodeBase = String(shippingAddress?.postal_code || paymentIntentAddress?.postal_code || "")
+    .trim()
+    .toUpperCase();
   const shippingPostalCodeOverride = String(
     paymentIntentMetadata.fulfillment_shipping_postal_override ||
       paymentIntentMetadata.fulfillment_shipping_postal_code_override ||
@@ -1330,12 +1685,12 @@ function getOrderShippingAddress(session, options = {}) {
   )
     .trim()
     .toUpperCase();
-  const shippingCountryBase = normalizeIsoCountry(shippingAddress?.country, "US");
+  const shippingCountryBase = normalizeIsoCountry(shippingAddress?.country || paymentIntentAddress?.country, "US");
   const shippingCountryOverride = String(paymentIntentMetadata.fulfillment_shipping_country_override || "")
     .trim()
     .toUpperCase();
   const shippingEmail = String(session?.customer_details?.email || session?.customer_email || "").trim().toLowerCase();
-  const shippingPhone = String(session?.customer_details?.phone || "").trim();
+  const shippingPhone = String(session?.customer_details?.phone || paymentIntentShipping?.phone || "").trim();
 
   return {
     name: shippingNameOverride || shippingNameBase,
@@ -2091,15 +2446,22 @@ async function processStripeCheckoutCompletedEvent(eventSession) {
       session.payment_intent && typeof session.payment_intent === "object"
         ? session.payment_intent.metadata || {}
         : {};
+    const shippingRequired = isSessionShippingRequired(session, { paymentIntentMetadata });
+    const resolvedShipping = buildStripeStyleShippingDetails(
+      getOrderShippingAddress(session, { paymentIntentMetadata })
+    );
+    const orderSource = getSessionOrderSource(session, { paymentIntentMetadata });
     const stateMatchResult = evaluateCheckoutStateMatch(session, {
       paymentIntentMetadata
     });
-    const holdForStateMismatch = !stateMatchResult.stateMatch;
+    const holdForStateMismatch = shippingRequired && !stateMatchResult.stateMatch;
 
     if (paymentIntentId) {
       await stripe.paymentIntents.update(paymentIntentId, {
         metadata: {
           ...paymentIntentMetadata,
+          order_source: orderSource,
+          fulfillment_shipping_required: String(shippingRequired),
           fulfillment_status:
             holdForStateMismatch
               ? "pending"
@@ -2136,7 +2498,9 @@ async function processStripeCheckoutCompletedEvent(eventSession) {
           amountTotal: totals.amountTotal,
           currency: session.currency || currency,
           lineItems,
-          shippingDetails: session.shipping_details || {}
+          shippingDetails: resolvedShipping,
+          shippingRequired,
+          orderSource
         })
           .then(() => {
             console.log(`Customer receipt sent for session ${session.id} -> ${customerEmail}`);
@@ -2156,8 +2520,15 @@ async function processStripeCheckoutCompletedEvent(eventSession) {
         amountTotal: totals.amountTotal,
         currency: session.currency || currency,
         lineItems,
-        customerDetails: session.customer_details || {},
-        shippingDetails: session.shipping_details || {}
+        customerDetails: {
+          ...(session.customer_details || {}),
+          name: session.customer_details?.name || resolvedShipping.name || "",
+          email: customerEmail,
+          phone: session.customer_details?.phone || resolvedShipping.phone || ""
+        },
+        shippingDetails: resolvedShipping,
+        shippingRequired,
+        orderSource
       })
         .then(() => {
           console.log(`Owner notification sent for session ${session.id}`);
@@ -2305,27 +2676,50 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
   }
 
   const parsedLimit = Number.parseInt(String(req.query?.limit ?? ""), 10);
-  const limit = Number.isFinite(parsedLimit) ? Math.min(100, Math.max(1, parsedLimit)) : 50;
+  const limit = Number.isFinite(parsedLimit) ? Math.min(500, Math.max(1, parsedLimit)) : 50;
   const paidOnly = String(req.query?.paidOnly ?? "true").trim().toLowerCase() !== "false";
 
   try {
-    const response = await stripe.checkout.sessions.list({
-      limit,
-      expand: ["data.payment_intent"]
-    });
-    const rawSessions = Array.isArray(response?.data) ? response.data : [];
     const excludedOrderIds = new Set(
       (await listOrderExclusions())
         .map((entry) => String(entry?.orderId || "").trim())
         .filter(Boolean)
     );
-    const paidSessions = paidOnly
-      ? rawSessions.filter((session) => session.payment_status === "paid")
-      : rawSessions;
-    const visibleSessions = paidSessions.filter((session) => {
-      const sessionId = String(session?.id || "").trim();
-      return !sessionId || !excludedOrderIds.has(sessionId);
-    });
+    const visibleSessions = [];
+    let excludedVisibleCount = 0;
+    let hasMore = true;
+    let startingAfter = "";
+
+    while (hasMore && visibleSessions.length < limit) {
+      const response = await stripe.checkout.sessions.list({
+        limit: Math.min(100, limit - visibleSessions.length),
+        expand: ["data.payment_intent"],
+        ...(startingAfter ? { starting_after: startingAfter } : {})
+      });
+      const pageSessions = Array.isArray(response?.data) ? response.data : [];
+      if (pageSessions.length === 0) {
+        break;
+      }
+
+      for (const session of pageSessions) {
+        if (paidOnly && session.payment_status !== "paid") {
+          continue;
+        }
+        const sessionId = String(session?.id || "").trim();
+        if (sessionId && excludedOrderIds.has(sessionId)) {
+          excludedVisibleCount += 1;
+          continue;
+        }
+        visibleSessions.push(session);
+        if (visibleSessions.length >= limit) {
+          break;
+        }
+      }
+
+      const lastSession = pageSessions[pageSessions.length - 1];
+      startingAfter = String(lastSession?.id || "").trim();
+      hasMore = Boolean(response?.has_more) && Boolean(startingAfter);
+    }
 
     const normalizedOrders = visibleSessions
       .map((session) => {
@@ -2340,6 +2734,8 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           paymentIntentRef && typeof paymentIntentRef === "object" && paymentIntentRef.metadata
             ? paymentIntentRef.metadata
             : {};
+        const shippingRequired = isSessionShippingRequired(session, { paymentIntentMetadata });
+        const orderSource = getSessionOrderSource(session, { paymentIntentMetadata });
         const fulfillmentStatus = normalizeFulfillmentStatus(paymentIntentMetadata.fulfillment_status);
         const shippedAt = readMetadataInteger(paymentIntentMetadata, "fulfillment_shipped_at") || 0;
         const packagedAt = readMetadataInteger(paymentIntentMetadata, "fulfillment_packaged_at") || shippedAt || 0;
@@ -2365,8 +2761,9 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
         const shippingStateMatchesCustomerState = stateMatchResult.stateMatch;
         const shippingStateMismatchReason = stateMatchResult.stateMatch ? "" : stateMatchResult.mismatchReason;
         const explicitHoldReason = String(paymentIntentMetadata.fulfillment_hold_reason || "").trim();
-        const fulfillmentHoldReason =
-          explicitHoldReason || (shippingStateMatchesCustomerState ? "" : "state_mismatch");
+        const fulfillmentHoldReason = shippingRequired
+          ? explicitHoldReason || (shippingStateMatchesCustomerState ? "" : "state_mismatch")
+          : "";
         const customerTaxExemptByState =
           String(metadata.customer_tax_exempt_by_state || "")
             .trim()
@@ -2387,24 +2784,32 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
             : calculateBookUnitsFromCartEntries(cartEntries);
         const shippableUnitsFromMetadata = readMetadataInteger(metadata, "shippable_units");
         const shippableUnits =
-          Number.isFinite(shippableUnitsFromMetadata) && shippableUnitsFromMetadata > 0
-            ? shippableUnitsFromMetadata
-            : unitsTotal;
+          !shippingRequired
+            ? 0
+            : Number.isFinite(shippableUnitsFromMetadata) && shippableUnitsFromMetadata > 0
+              ? shippableUnitsFromMetadata
+              : unitsTotal;
         const shippingWeightFromMetadata = readMetadataFloat(metadata, "shipping_weight_lbs");
         const shippingWeightLbs =
-          Number.isFinite(shippingWeightFromMetadata) && shippingWeightFromMetadata > 0
-            ? Number(shippingWeightFromMetadata.toFixed(2))
-            : calculateShippableWeightLbs(Math.max(1, shippableUnits));
+          !shippingRequired
+            ? 0
+            : Number.isFinite(shippingWeightFromMetadata) && shippingWeightFromMetadata > 0
+              ? Number(shippingWeightFromMetadata.toFixed(2))
+              : calculateShippableWeightLbs(Math.max(1, shippableUnits));
         const shippingBillableWeightFromMetadata = readMetadataFloat(metadata, "shipping_billable_weight_lbs");
         const shippingBillableWeightLbs =
-          Number.isFinite(shippingBillableWeightFromMetadata) && shippingBillableWeightFromMetadata > 0
-            ? Number(shippingBillableWeightFromMetadata.toFixed(2))
-            : getBillableShippingWeightLbs(shippingWeightLbs);
+          !shippingRequired
+            ? 0
+            : Number.isFinite(shippingBillableWeightFromMetadata) && shippingBillableWeightFromMetadata > 0
+              ? Number(shippingBillableWeightFromMetadata.toFixed(2))
+              : getBillableShippingWeightLbs(shippingWeightLbs);
         const shippingZoneFromMetadata = readMetadataInteger(metadata, "shipping_zone");
-        const shippingZone = normalizeShippingZone(
-          shippingZoneFromMetadata,
-          getShippingZoneForState(customerState)
-        );
+        const shippingZone = shippingRequired
+          ? normalizeShippingZone(
+              shippingZoneFromMetadata,
+              getShippingZoneForState(customerState)
+            )
+          : 0;
 
         const shipping = getOrderShippingAddress(session, {
           paymentIntentMetadata
@@ -2414,15 +2819,17 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           session.customer_details?.name || shipping.name || "Unknown customer"
         ).trim();
         const customerPhone = String(session.customer_details?.phone || "").trim();
-        const shippingName = String(shipping.name || customerName).trim();
-        const shippingAddressLine1 = String(shipping.line1 || "").trim();
-        const shippingAddressLine2 = String(shipping.line2 || "").trim();
-        const shippingCity = String(shipping.city || "").trim();
-        const shippingPostalCode = String(shipping.postalCode || "").trim();
-        const shippingAddress = [shippingAddressLine1, shippingAddressLine2, shippingCity, shipping.state, shippingPostalCode, shipping.country]
-          .map((part) => String(part || "").trim())
-          .filter(Boolean)
-          .join(", ");
+        const shippingName = shippingRequired ? String(shipping.name || customerName).trim() : "";
+        const shippingAddressLine1 = shippingRequired ? String(shipping.line1 || "").trim() : "";
+        const shippingAddressLine2 = shippingRequired ? String(shipping.line2 || "").trim() : "";
+        const shippingCity = shippingRequired ? String(shipping.city || "").trim() : "";
+        const shippingPostalCode = shippingRequired ? String(shipping.postalCode || "").trim() : "";
+        const shippingAddress = shippingRequired
+          ? [shippingAddressLine1, shippingAddressLine2, shippingCity, shipping.state, shippingPostalCode, shipping.country]
+              .map((part) => String(part || "").trim())
+              .filter(Boolean)
+              .join(", ")
+          : "";
         const createdAt = Number(session.created) || 0;
         const customerKey = customerEmail ? customerEmail.toLowerCase() : `guest:${session.id}`;
 
@@ -2457,6 +2864,8 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
           shipmentLabelUrl,
           shipmentPostageCents,
           fulfillmentHoldReason,
+          shippingRequired,
+          orderSource,
           customerState,
           shippingState,
           shippingCountry,
@@ -2574,7 +2983,7 @@ app.get("/api/admin/orders", requireAdmin, async (req, res) => {
       fetchedAt: new Date().toISOString(),
       paidOnly,
       count: orders.length,
-      excludedCount: Math.max(0, paidSessions.length - visibleSessions.length),
+      excludedCount: excludedVisibleCount,
       orders,
       customers
     });
@@ -2682,6 +3091,11 @@ app.post("/api/admin/orders/:id/edit-shipping-address", requireAdmin, async (req
       session.payment_intent && typeof session.payment_intent === "object"
         ? session.payment_intent.metadata || {}
         : {};
+    if (!isSessionShippingRequired(session, { paymentIntentMetadata })) {
+      return res.status(409).json({
+        error: getShippingNotRequiredErrorMessage(session, { paymentIntentMetadata })
+      });
+    }
 
     const shippingName = String(req.body?.name || "").trim().slice(0, 120);
     const shippingLine1 = String(req.body?.line1 || "").trim().slice(0, 220);
@@ -2775,6 +3189,11 @@ app.post("/api/admin/orders/:id/save-address", requireAdmin, async (req, res) =>
       session.payment_intent && typeof session.payment_intent === "object"
         ? session.payment_intent.metadata || {}
         : {};
+    if (!isSessionShippingRequired(session, { paymentIntentMetadata })) {
+      return res.status(409).json({
+        error: getShippingNotRequiredErrorMessage(session, { paymentIntentMetadata })
+      });
+    }
     const entry = await saveOrderAddressToBook(session, {
       paymentIntentMetadata
     });
@@ -2811,6 +3230,15 @@ app.post("/api/admin/orders/:id/use-shipping-state", requireAdmin, async (req, r
       return res.status(404).json({ error: "Paid order not found." });
     }
 
+    const paymentIntentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
+    if (!isSessionShippingRequired(session, { paymentIntentMetadata })) {
+      return res.status(409).json({
+        error: getShippingNotRequiredErrorMessage(session, { paymentIntentMetadata })
+      });
+    }
     const sessionSelectedState = normalizeUsStateCode(session.metadata?.customer_state);
     if (sessionSelectedState) {
       return res.status(409).json({
@@ -2822,11 +3250,6 @@ app.post("/api/admin/orders/:id/use-shipping-state", requireAdmin, async (req, r
     if (!paymentIntentId) {
       return res.status(400).json({ error: "This order has no payment intent to update." });
     }
-
-    const paymentIntentMetadata =
-      session.payment_intent && typeof session.payment_intent === "object"
-        ? session.payment_intent.metadata || {}
-        : {};
     const stateMatchResult = evaluateCheckoutStateMatch(session, {
       paymentIntentMetadata
     });
@@ -2904,6 +3327,11 @@ app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
       session.payment_intent && typeof session.payment_intent === "object"
         ? session.payment_intent.metadata || {}
         : {};
+    if (!isSessionShippingRequired(session, { paymentIntentMetadata })) {
+      return res.status(409).json({
+        error: getShippingNotRequiredErrorMessage(session, { paymentIntentMetadata })
+      });
+    }
     const stateMatchResult = evaluateCheckoutStateMatch(session, {
       paymentIntentMetadata
     });
@@ -3027,6 +3455,11 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
       session.payment_intent && typeof session.payment_intent === "object"
         ? session.payment_intent.metadata || {}
         : {};
+    if (!isSessionShippingRequired(session, { paymentIntentMetadata: currentMetadata })) {
+      return res.status(409).json({
+        error: getShippingNotRequiredErrorMessage(session, { paymentIntentMetadata: currentMetadata })
+      });
+    }
     const stateMatchResult = evaluateCheckoutStateMatch(session, {
       paymentIntentMetadata: currentMetadata
     });
@@ -3069,6 +3502,7 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
     const shippedAtUnix = Math.floor(Date.now() / 1000);
     await stripe.paymentIntents.update(paymentIntentId, {
       metadata: {
+        ...currentMetadata,
         fulfillment_status: "shipped",
         fulfillment_shipped_at: String(shippedAtUnix),
         fulfillment_packaged_at: String(readMetadataInteger(currentMetadata, "fulfillment_packaged_at") || shippedAtUnix),
@@ -3254,8 +3688,13 @@ app.post("/api/admin/orders/:id/mark-pending", requireAdmin, async (req, res) =>
       return res.status(400).json({ error: "This order has no payment intent to update." });
     }
 
+    const currentMetadata =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? session.payment_intent.metadata || {}
+        : {};
     await stripe.paymentIntents.update(paymentIntentId, {
       metadata: {
+        ...currentMetadata,
         fulfillment_status: "pending",
         fulfillment_shipped_at: "",
         fulfillment_carrier: "",
@@ -3439,149 +3878,60 @@ app.post("/api/create-checkout-session", async (req, res) => {
     return;
   }
 
-  const cart = Array.isArray(req.body?.cart) ? req.body.cart : [];
-  if (cart.length === 0) {
-    return res.status(400).json({ error: "Your cart is empty." });
-  }
-  const customerState = normalizeUsStateCode(req.body?.customerState);
-  if (!customerState) {
-    return res.status(400).json({ error: "Select a valid U.S. state before checkout." });
-  }
-
-  const lineItems = [];
-  const cartSummaryParts = [];
-  let unitsTotal = 0;
-  let bookUnitsTotal = 0;
-  let shippableUnits = 0;
-  let itemsSubtotal = 0;
-  for (const item of cart) {
-    const product = await findProductById(item.id);
-    if (!product) {
-      return res.status(400).json({ error: `Unknown product id: ${item.id}` });
-    }
-    if (product.isVisible === false) {
-      return res.status(400).json({ error: `${product.title} is currently unavailable.` });
-    }
-    if (product.isComingSoon === true && product.allowPreorder !== true) {
-      return res.status(400).json({ error: `${product.title} is coming soon and not orderable yet.` });
-    }
-    if (!product.inStock) {
-      return res.status(400).json({ error: `${product.title} is sold out right now.` });
-    }
-
-    const quantity = Math.max(1, Math.min(10, Number.parseInt(item.quantity, 10) || 1));
-    unitsTotal += quantity;
-    if (shouldCountProductTowardBookCounter(product)) {
-      bookUnitsTotal += quantity;
-    }
-    itemsSubtotal += product.priceCents * quantity;
-    if (product.shippingEnabled === true) {
-      shippableUnits += quantity;
-    }
-    cartSummaryParts.push(`${product.title} x${quantity}`);
-    lineItems.push({
-      price_data: {
-        currency,
-        unit_amount: product.priceCents,
-        product_data: {
-          name: product.title,
-          description: product.subtitle
-        }
-      },
-      quantity
-    });
-  }
-
-  const shippingEstimate = calculateShippingFromUnits(shippableUnits, customerState);
-  const shippingTotal = shippingEstimate.shippingCents;
-  const shippingWeightLbs = shippingEstimate.shippingWeightLbs;
-  const shippingBillableWeightLbs = shippingEstimate.shippingBillableWeightLbs;
-  const shippingZone = shippingEstimate.shippingZone;
-  const shippingZoneMultiplier = shippingEstimate.shippingZoneMultiplier;
-  const shippingBaseRateCents = shippingEstimate.shippingBaseRateCents;
-  const salesTaxExemptByState = manualNonTaxStates.has(customerState);
-  const taxBase = itemsSubtotal + (manualSalesTaxApplyToShipping ? shippingTotal : 0);
-  const manualSalesTaxTotal = manualSalesTaxEnabled && !salesTaxExemptByState
-    ? Math.max(0, Math.round(taxBase * (manualSalesTaxRatePercent / 100)))
-    : 0;
-
-  if (shippingTotal > 0) {
-    lineItems.push({
-      price_data: {
-        currency,
-        unit_amount: shippingTotal,
-        product_data: {
-          name: "Shipping",
-          description: `USPS Ground Advantage (est.) - Zone ${shippingZone}, ${shippingBillableWeightLbs} lb billable`
-        }
-      },
-      quantity: 1
-    });
-    cartSummaryParts.push("Shipping x1");
-  }
-
-  if (manualSalesTaxTotal > 0) {
-    lineItems.push({
-      price_data: {
-        currency,
-        unit_amount: manualSalesTaxTotal,
-        product_data: {
-          name: "Sales Tax",
-          description: `Manual sales tax (${manualSalesTaxRatePercent.toFixed(2)}%)`
-        }
-      },
-      quantity: 1
-    });
-    cartSummaryParts.push("Sales Tax x1");
-  }
-
   try {
     const appUrl = getAppUrl(req);
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      payment_method_types: ["card"],
-      line_items: lineItems,
-      automatic_tax: {
-        enabled: manualSalesTaxEnabled ? false : stripeAutomaticTaxEnabled
-      },
-      billing_address_collection: "required",
-      phone_number_collection: {
-        enabled: true
-      },
-      shipping_address_collection: {
-        allowed_countries: allowedShippingCountries
-      },
-      allow_promotion_codes: true,
-      success_url: `${appUrl}/success.html?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${appUrl}/cancel.html`,
-      metadata: {
-        storefront: "publishearts.com",
-        units_total: String(unitsTotal),
-        book_units_total: String(bookUnitsTotal),
-        shippable_units: String(shippableUnits),
-        shipping_weight_lbs: String(shippingWeightLbs),
-        shipping_billable_weight_lbs: String(shippingBillableWeightLbs),
-        shipping_zone: String(shippingZone),
-        shipping_zone_multiplier: String(shippingZoneMultiplier),
-        shipping_base_rate_cents: String(shippingBaseRateCents),
-        items_subtotal_cents: String(itemsSubtotal),
-        shipping_total_cents: String(shippingTotal),
-        manual_sales_tax_rate_pct: String(manualSalesTaxRatePercent),
-        manual_sales_tax_cents: String(manualSalesTaxTotal),
-        customer_state: customerState,
-        shipping_state_match_required: "true",
-        customer_tax_exempt_by_state: String(salesTaxExemptByState),
-        cart_summary: cartSummaryParts.join(" | ").slice(0, 500)
-      }
+    const cart = Array.isArray(req.body?.cart) ? req.body.cart : [];
+    const customerState = req.body?.customerState;
+    const { session } = await createCheckoutSessionForCart(req, cart, customerState, {
+      shippingRequired: true,
+      orderSource: "storefront",
+      successUrl: `${appUrl}/success.html?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${appUrl}/cancel.html`,
+      allowPromotionCodes: true,
+      allowHiddenProducts: false
     });
-
     return res.json({ url: session.url });
   } catch (error) {
     console.error("Failed creating checkout session:", error);
     const details = typeof error?.message === "string" ? error.message : "";
-    return res.status(500).json({
+    return res.status(isCheckoutValidationErrorMessage(details) ? 400 : 500).json({
       error: details ? `Could not start checkout: ${details}` : "Could not start checkout right now."
+    });
+  }
+});
+
+app.post("/api/admin/pos/create-checkout-session", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  try {
+    const appUrl = getAppUrl(req);
+    const cart = Array.isArray(req.body?.cart) ? req.body.cart : [];
+    const customerState = req.body?.customerState;
+    const needsShipping = parseBooleanFlag(req.body?.needsShipping, false) === true;
+    const shippingDetails = needsShipping
+      ? normalizeCheckoutShippingInput(req.body?.shippingInfo, customerState)
+      : null;
+    const { session } = await createCheckoutSessionForCart(req, cart, customerState, {
+      shippingRequired: needsShipping,
+      requireShippingDetails: needsShipping,
+      shippingDetails,
+      orderSource: "admin_pos",
+      successUrl: `${appUrl}/pos?pos=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${appUrl}/pos?pos=cancel`,
+      allowPromotionCodes: true,
+      allowHiddenProducts: true
+    });
+    return res.json({
+      url: session.url,
+      sessionId: session.id
+    });
+  } catch (error) {
+    console.error("Failed creating admin POS checkout session:", error);
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(isCheckoutValidationErrorMessage(details) ? 400 : 500).json({
+      error: details ? `Could not start POS checkout: ${details}` : "Could not start POS checkout right now."
     });
   }
 });
@@ -3615,18 +3965,31 @@ app.get("/api/order/:sessionId", async (req, res) => {
       session.payment_intent && typeof session.payment_intent === "object"
         ? session.payment_intent.metadata || {}
         : {};
+    const createdAt = Number(session.created) || 0;
+    const shippingRequired = isSessionShippingRequired(session, { paymentIntentMetadata });
+    const resolvedShipping = buildStripeStyleShippingDetails(
+      getOrderShippingAddress(session, { paymentIntentMetadata })
+    );
+    const orderSource = getSessionOrderSource(session, { paymentIntentMetadata });
     const stateMatchResult = evaluateCheckoutStateMatch(session, {
       paymentIntentMetadata
     });
+    const customerName = String(
+      session.customer_details?.name || resolvedShipping.name || session.shipping_details?.name || ""
+    ).trim();
 
     return res.json({
       id: session.id,
+      createdAt,
+      createdAtIso: createdAt > 0 ? new Date(createdAt * 1000).toISOString() : "",
       amountSubtotal: totals.amountSubtotal,
       amountShipping: totals.amountShipping,
       amountTax: totals.amountTax,
       amountDiscount: session.total_details?.amount_discount || 0,
       amountTotal: totals.amountTotal,
       currency: session.currency || currency,
+      shippingRequired,
+      orderSource,
       customerState: stateMatchResult.selectedState,
       shippingState: stateMatchResult.shippingState || stateMatchResult.shippingStateRaw || "",
       shippingCountry: stateMatchResult.shippingCountry,
@@ -3637,7 +4000,8 @@ app.get("/api/order/:sessionId", async (req, res) => {
           .trim()
           .toLowerCase() === "true",
       customerEmail: session.customer_details?.email || session.customer_email || "",
-      shippingDetails: session.shipping_details || null,
+      customerName,
+      shippingDetails: resolvedShipping,
       lineItems
     });
   } catch {
@@ -3651,6 +4015,14 @@ app.get("/health", (req, res) => {
 
 app.get("/admin", (req, res) => {
   res.redirect("/admin.html");
+});
+
+app.get("/pos", (req, res) => {
+  res.redirect("/pos.html");
+});
+
+app.get("/fulfillment", (req, res) => {
+  res.redirect("/fulfillment.html");
 });
 
 app.use((error, req, res, next) => {
