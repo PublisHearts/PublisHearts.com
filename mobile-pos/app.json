@@ -1,0 +1,78 @@
+{
+  "expo": {
+    "name": "PublisHearts POS",
+    "slug": "publishearts-mobile-pos",
+    "version": "1.0.0",
+    "description": "PublisHearts mobile point-of-sale app for cash checkout, browser checkout, and Stripe Terminal Tap to Pay.",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#f6efe6",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "scheme": "publishearts-pos",
+    "ios": {
+      "supportsTablet": true,
+      "buildNumber": "1",
+      "bundleIdentifier": "com.publishearts.mobilepos",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "Location access is required to accept in-person payments.",
+        "NSBluetoothAlwaysUsageDescription": "Bluetooth is used to connect to supported Stripe readers.",
+        "UIBackgroundModes": [
+          "bluetooth-central"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.publishearts.mobilepos",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_SCAN",
+        "NFC"
+      ]
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
+      ],
+      [
+        "@stripe/stripe-terminal-react-native",
+        {
+          "bluetoothBackgroundMode": true,
+          "locationWhenInUsePermission": "Location access is required to accept in-person Tap to Pay payments.",
+          "bluetoothPeripheralPermission": "Bluetooth may be used to connect to supported Stripe readers.",
+          "bluetoothAlwaysUsagePermission": "Bluetooth may be used to connect to supported Stripe readers.",
+          "localNetworkUsagePermission": "Local network access can be used to connect to supported Stripe readers.",
+          "tapToPayCheck": true,
+          "appDelegate": true
+        }
+      ]
+    ],
+    "extra": {
+      "apiBaseUrl": "https://publishearts.com",
+      "stripePublishableKey": "pk_test_replace_me",
+      "eas": {
+        "projectId": "a0bdce2e-ce88-4e42-b134-e8ec86b6d8b6"
+      }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/a0bdce2e-ce88-4e42-b134-e8ec86b6d8b6"
+    }
+  }
+}

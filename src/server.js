@@ -53,11 +53,19 @@ import {
   listManualOrders,
   updateManualOrder
 } from "./data/manualOrderStore.js";
+import {
+  TerminalIntentValidationError,
+  deleteTerminalIntent,
+  ensureTerminalIntentStore,
+  findTerminalIntentById,
+  upsertTerminalIntent
+} from "./data/terminalIntentStore.js";
 
 dotenv.config();
 const execFileAsync = promisify(execFile);
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const stripeTerminalLocationId = String(process.env.STRIPE_TERMINAL_LOCATION_ID || "").trim();
 const currency = (process.env.STRIPE_CURRENCY || "usd").toLowerCase();
 const port = Number(process.env.PORT || 4242);
 const stripeAutomaticTaxEnabled = (process.env.STRIPE_AUTOMATIC_TAX || "true").trim().toLowerCase() !== "false";
@@ -1581,6 +1589,92 @@ function buildManualCashOrder({ cartDetails, shippingRequired, shippingDetails, 
     customerPhone,
     cashReceivedCents: cashReceived,
     cashChangeDueCents: Math.max(0, cashReceived - amountTotal)
+  };
+}
+
+function buildStoredTerminalCartDetails(cartDetails) {
+  return {
+    customerState: cartDetails.customerState,
+    items: Array.isArray(cartDetails.items) ? cartDetails.items : [],
+    unitsTotal: Number(cartDetails.unitsTotal) || 0,
+    bookUnitsTotal: Number(cartDetails.bookUnitsTotal) || 0,
+    shippableUnits: Number(cartDetails.shippableUnits) || 0,
+    amountSubtotal: Number(cartDetails.amountSubtotal) || 0,
+    shippingTotal: Number(cartDetails.shippingTotal) || 0,
+    manualSalesTaxTotal: Number(cartDetails.manualSalesTaxTotal) || 0,
+    amountTotal: Number(cartDetails.amountTotal) || 0,
+    shippingWeightLbs: Number(cartDetails.shippingWeightLbs) || 0,
+    shippingBillableWeightLbs: Number(cartDetails.shippingBillableWeightLbs) || 0,
+    shippingZone: Number(cartDetails.shippingZone) || 0,
+    customerTaxExemptByState: cartDetails.customerTaxExemptByState === true
+  };
+}
+
+function buildTerminalManualOrderId(paymentIntentId) {
+  return `pos_terminal_${String(paymentIntentId || "").trim()}`;
+}
+
+function buildTerminalIntentContext({ paymentIntentId, cartDetails, customerEmail = "", customerName = "" }) {
+  return {
+    id: String(paymentIntentId || "").trim(),
+    createdAt: Math.floor(Date.now() / 1000),
+    customerEmail: String(customerEmail || "").trim().toLowerCase(),
+    customerName: String(customerName || "").trim(),
+    cartDetails: buildStoredTerminalCartDetails(cartDetails)
+  };
+}
+
+function buildManualTerminalCardOrder({ paymentIntent, terminalIntent }) {
+  const cartDetails = terminalIntent?.cartDetails || {};
+  const createdAt = Number(paymentIntent?.created) || Math.floor(Date.now() / 1000);
+  const paymentIntentId = String(paymentIntent?.id || terminalIntent?.id || "").trim();
+  const normalizedCustomerEmail = String(terminalIntent?.customerEmail || "").trim().toLowerCase();
+  const normalizedCustomerName = String(terminalIntent?.customerName || "").trim();
+
+  return {
+    id: buildTerminalManualOrderId(paymentIntentId),
+    createdAt,
+    paymentStatus: "paid",
+    paymentMethod: "card",
+    paymentIntentId,
+    currency: String(paymentIntent?.currency || currency).trim().toLowerCase() || currency,
+    amountSubtotal: Number(cartDetails.amountSubtotal) || 0,
+    amountShipping: Number(cartDetails.shippingTotal) || 0,
+    amountTax: Number(cartDetails.manualSalesTaxTotal) || 0,
+    amountTotal: Number(paymentIntent?.amount_received || paymentIntent?.amount || cartDetails.amountTotal) || 0,
+    unitsTotal: Number(cartDetails.unitsTotal) || 0,
+    bookUnitsTotal: Number(cartDetails.bookUnitsTotal) || 0,
+    shippableUnits: 0,
+    shippingWeightLbs: 0,
+    shippingBillableWeightLbs: 0,
+    shippingZone: 0,
+    items: Array.isArray(cartDetails.items) ? cartDetails.items : [],
+    fulfillmentStatus: "pending",
+    shippedAt: 0,
+    packagedAt: 0,
+    packageWeightValue: "",
+    shipmentCarrier: "",
+    shipmentTrackingNumber: "",
+    shipmentTrackingUrl: "",
+    shipmentNote: "",
+    shipmentLabelId: "",
+    shipmentLabelUrl: "",
+    shipmentPostageCents: 0,
+    fulfillmentHoldReason: "",
+    shippingRequired: false,
+    shippingDetails: null,
+    orderSource: "mobile_pos_terminal",
+    customerState: normalizeUsStateCode(cartDetails.customerState),
+    shippingState: "",
+    shippingCountry: "US",
+    shippingStateMatchesCustomerState: true,
+    shippingStateMismatchReason: "",
+    customerTaxExemptByState: cartDetails.customerTaxExemptByState === true,
+    customerName: normalizedCustomerName || "Walk-in Customer",
+    customerEmail: normalizedCustomerEmail,
+    customerPhone: "",
+    cashReceivedCents: 0,
+    cashChangeDueCents: 0
   };
 }
 
@@ -3266,6 +3360,8 @@ app.get("/api/admin/health", requireAdmin, (req, res) => {
   res.json({
     status: "ok",
     stripeConfigured: Boolean(stripeSecretKey),
+    terminalTapToPayEnabled: Boolean(stripeSecretKey && stripeTerminalLocationId),
+    terminalLocationId: stripeTerminalLocationId,
     smtpConfigured: emailHealth.smtpConfigured,
     emailSendingEnabled: emailHealth.emailSendingEnabled,
     ownerNotificationEnabled: emailHealth.ownerNotificationEnabled,
@@ -5049,6 +5145,209 @@ app.post("/api/custom-story-quote", async (req, res) => {
   }
 });
 
+app.post("/api/admin/terminal/connection-token", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  try {
+    const requestedLocationId = String(req.body?.locationId || "").trim();
+    const locationId = requestedLocationId || stripeTerminalLocationId;
+    const token = await stripe.terminal.connectionTokens.create(locationId ? { location: locationId } : {});
+    return res.json({
+      secret: token.secret,
+      locationId
+    });
+  } catch (error) {
+    console.error("Failed creating Stripe Terminal connection token:", error);
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not start Tap to Pay: ${details}` : "Could not start Tap to Pay right now."
+    });
+  }
+});
+
+app.post("/api/admin/terminal/create-payment-intent", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  try {
+    const cart = Array.isArray(req.body?.cart) ? req.body.cart : [];
+    const customerState = req.body?.customerState;
+    const customerEmail = normalizeCustomerEmail(req.body?.customerEmail);
+    const customerName = String(req.body?.customerName || "").trim().slice(0, 120);
+    const needsShipping = parseBooleanFlag(req.body?.needsShipping, false) === true;
+
+    if (needsShipping) {
+      return res.status(409).json({
+        error: "The first Tap to Pay build supports in-person card sales only. Use browser checkout when shipping is required."
+      });
+    }
+
+    const cartDetails = await buildCheckoutSessionCartDetails(cart, customerState, {
+      shippingRequired: false,
+      allowHiddenProducts: true
+    });
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: cartDetails.amountTotal,
+      currency,
+      payment_method_types: ["card_present"],
+      capture_method: "automatic",
+      metadata: {
+        ...cartDetails.metadata,
+        order_source: "mobile_pos_terminal",
+        terminal_checkout: "true",
+        fulfillment_shipping_required: "false",
+        fulfillment_selected_state: cartDetails.customerState,
+        fulfillment_hold_reason: "",
+        fulfillment_state_match: "true"
+      }
+    });
+
+    await upsertTerminalIntent(
+      buildTerminalIntentContext({
+        paymentIntentId: paymentIntent.id,
+        cartDetails,
+        customerEmail,
+        customerName
+      })
+    );
+
+    return res.json({
+      ok: true,
+      paymentIntentId: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
+      amountTotal: cartDetails.amountTotal,
+      currency
+    });
+  } catch (error) {
+    console.error("Failed creating Stripe Terminal payment intent:", error);
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(
+      error instanceof TerminalIntentValidationError || isCheckoutValidationErrorMessage(details) ? 400 : 500
+    ).json({
+      error: details ? `Could not prepare Tap to Pay: ${details}` : "Could not prepare Tap to Pay right now."
+    });
+  }
+});
+
+app.post("/api/admin/terminal/cancel-payment-intent", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const paymentIntentId = String(req.body?.paymentIntentId || "").trim();
+  if (!paymentIntentId) {
+    return res.status(400).json({ error: "Payment intent ID is required." });
+  }
+
+  try {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    if (!paymentIntent) {
+      return res.status(404).json({ error: "Tap to Pay payment intent was not found." });
+    }
+    if (paymentIntent.status === "succeeded") {
+      return res.status(409).json({ error: "This Tap to Pay payment already succeeded and cannot be canceled." });
+    }
+    if (paymentIntent.status !== "canceled") {
+      await stripe.paymentIntents.cancel(paymentIntentId);
+    }
+    await deleteTerminalIntent(paymentIntentId);
+    return res.json({
+      ok: true,
+      paymentIntentId,
+      canceled: true
+    });
+  } catch (error) {
+    console.error("Failed canceling Stripe Terminal payment intent:", error);
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(500).json({
+      error: details ? `Could not cancel Tap to Pay: ${details}` : "Could not cancel Tap to Pay right now."
+    });
+  }
+});
+
+app.post("/api/admin/terminal/finalize-payment-intent", requireAdmin, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const paymentIntentId = String(req.body?.paymentIntentId || "").trim();
+  if (!paymentIntentId) {
+    return res.status(400).json({ error: "Payment intent ID is required." });
+  }
+
+  try {
+    const existingOrder = await findNormalizedManualOrderById(buildTerminalManualOrderId(paymentIntentId));
+    if (existingOrder) {
+      return res.json({
+        ok: true,
+        existing: true,
+        order: buildManualOrderReceiptPayload(existingOrder)
+      });
+    }
+
+    const terminalIntent = await findTerminalIntentById(paymentIntentId);
+    if (!terminalIntent) {
+      return res.status(404).json({
+        error: "Tap to Pay session data was not found. Create the payment again before finalizing."
+      });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    if (!paymentIntent) {
+      return res.status(404).json({ error: "Tap to Pay payment intent was not found." });
+    }
+    if (paymentIntent.status !== "succeeded") {
+      return res.status(409).json({
+        error: `Tap to Pay payment is ${paymentIntent.status || "not ready"} and cannot be finalized yet.`
+      });
+    }
+
+    const createdOrder = await createManualOrder(
+      buildManualTerminalCardOrder({
+        paymentIntent,
+        terminalIntent
+      })
+    );
+    await deleteTerminalIntent(paymentIntentId);
+    invalidateSoldCopiesCache();
+
+    const receiptPayload = buildManualOrderReceiptPayload(createdOrder);
+    const customerEmail = String(createdOrder.customerEmail || "").trim().toLowerCase();
+    let emailed = false;
+
+    if (customerEmail && getEmailHealth().emailSendingEnabled) {
+      try {
+        await sendCustomerReceipt({
+          customerEmail,
+          ...buildCustomerReceiptEmailPayload(receiptPayload)
+        });
+        emailed = true;
+      } catch (error) {
+        console.error("Failed sending Tap to Pay receipt email:", error);
+      }
+    }
+
+    return res.status(201).json({
+      ok: true,
+      order: receiptPayload,
+      emailed,
+      email: customerEmail
+    });
+  } catch (error) {
+    console.error("Failed finalizing Stripe Terminal payment intent:", error);
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(
+      error instanceof ManualOrderValidationError || error instanceof TerminalIntentValidationError ? 400 : 500
+    ).json({
+      error: details ? `Could not finalize Tap to Pay sale: ${details}` : "Could not finalize Tap to Pay sale right now."
+    });
+  }
+});
+
 app.post("/api/admin/pos/create-checkout-session", requireAdmin, async (req, res) => {
   if (!requireStripe(res)) {
     return;
@@ -5319,6 +5618,7 @@ async function start() {
   await ensureAddressBookStore();
   await ensureOrderExclusionStore();
   await ensureManualOrderStore();
+  await ensureTerminalIntentStore();
   await fs.mkdir(uploadsDir, { recursive: true });
 
   app.listen(port, () => {

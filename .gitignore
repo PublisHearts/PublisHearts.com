@@ -2,3 +2,7 @@ node_modules
 .env
 npm-debug.log*
 !public/uploads/.gitkeep
+mobile-pos/.expo
+mobile-pos/android
+mobile-pos/ios
+mobile-pos/dist
