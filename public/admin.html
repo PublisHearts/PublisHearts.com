@@ -45,6 +45,7 @@
           <div class="admin-toolbar-actions">
             <button id="publish-btn" class="primary-btn" type="button">Publish Live Changes</button>
             <button id="new-product-btn" class="ghost-btn" type="button">Add New Book</button>
+            <button id="new-merch-btn" class="ghost-btn" type="button">Add New Merch</button>
             <a class="ghost-btn ghost-link" href="/fulfillment">Fulfillment</a>
             <a class="ghost-btn ghost-link" href="/completed-orders">Completed</a>
             <a class="ghost-btn ghost-link" href="/pos">POS</a>
@@ -63,6 +64,14 @@
           </div>
           <div id="admin-health" class="admin-health-grid"></div>
           <p id="health-message" class="checkout-message"></p>
+        </section>
+
+        <section class="admin-section">
+          <div class="admin-section-head">
+            <h2>Quick Links</h2>
+            <p>Open the tools you use to run the store.</p>
+          </div>
+          <div id="admin-quick-links" class="admin-quick-links"></div>
         </section>
 
         <section class="admin-section">
@@ -229,19 +238,27 @@
         <section class="admin-section">
           <div class="admin-section-head">
             <h2>Products</h2>
-            <p>Add new books, upload cover images, and update prices instantly.</p>
+            <p>Add books or merch, upload images, and update prices instantly.</p>
           </div>
           <form id="product-form" class="admin-form" enctype="multipart/form-data">
             <input id="product-id" name="productId" type="hidden" />
+            <input id="product-category" name="productCategory" type="hidden" value="book" />
             <div class="admin-form-grid">
               <label>
                 Title
                 <input id="product-title" name="title" type="text" maxlength="140" required />
               </label>
               <label>
+                Product Type
+                <input id="product-category-label" type="text" value="Book" readonly />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
                 Price (USD)
                 <input id="product-price" name="price" type="number" step="0.01" min="0.50" required />
               </label>
+              <div></div>
             </div>
             <div class="admin-form-grid">
               <label class="checkbox-row">

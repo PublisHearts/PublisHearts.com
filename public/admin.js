@@ -6,6 +6,8 @@ const loginMessageEl = document.getElementById("login-message");
 const productsEl = document.getElementById("admin-products");
 const productForm = document.getElementById("product-form");
 const productIdInput = document.getElementById("product-id");
+const productCategoryInput = document.getElementById("product-category");
+const productCategoryLabelInput = document.getElementById("product-category-label");
 const titleInput = document.getElementById("product-title");
 const subtitleInput = document.getElementById("product-subtitle");
 const includedInput = document.getElementById("product-included");
@@ -26,12 +28,14 @@ const removeImageInput = document.getElementById("remove-image");
 const saveProductBtn = document.getElementById("save-product-btn");
 const cancelEditBtn = document.getElementById("cancel-edit-btn");
 const newProductBtn = document.getElementById("new-product-btn");
+const newMerchBtn = document.getElementById("new-merch-btn");
 const logoutBtn = document.getElementById("logout-btn");
 const publishBtn = document.getElementById("publish-btn");
 const productMessageEl = document.getElementById("admin-message");
 const publishMessageEl = document.getElementById("publish-message");
 const refreshHealthBtn = document.getElementById("refresh-health-btn");
 const adminHealthEl = document.getElementById("admin-health");
+const adminQuickLinksEl = document.getElementById("admin-quick-links");
 const healthMessageEl = document.getElementById("health-message");
 const refreshOrdersBtn = document.getElementById("refresh-orders-btn");
 const exportOrdersCsvBtn = document.getElementById("export-orders-csv-btn");
@@ -298,6 +302,8 @@ async function adminRequest(url, options = {}) {
 }
 
 function resetForm() {
+  productCategoryInput.value = "book";
+  productCategoryLabelInput.value = "Book";
   productIdInput.value = "";
   titleInput.value = "";
   subtitleInput.value = "";
@@ -318,6 +324,27 @@ function resetForm() {
   removeImageInput.checked = false;
   saveProductBtn.textContent = "Save Product";
   syncShippingInputs();
+}
+
+function normalizeProductCategory(value) {
+  return String(value || "").trim().toLowerCase() === "merch" ? "merch" : "book";
+}
+
+function setProductCategory(category) {
+  const normalized = normalizeProductCategory(category);
+  productCategoryInput.value = normalized;
+  if (productCategoryLabelInput) {
+    productCategoryLabelInput.value = normalized === "merch" ? "Merch" : "Book";
+  }
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function resetSiteSettingsDraftFields() {
@@ -451,7 +478,9 @@ function getPosUnitsTotal() {
 }
 
 function getPosBookUnitsTotal() {
-  return getPosCartRows().reduce((sum, item) => sum + item.quantity, 0);
+  return getPosCartRows().reduce((sum, item) => {
+    return normalizeProductCategory(item?.productCategory) === "merch" ? sum : sum + item.quantity;
+  }, 0);
 }
 
 function getPosSubtotal() {
@@ -617,6 +646,7 @@ function beginEdit(productId) {
   }
 
   productIdInput.value = product.id;
+  setProductCategory(product.productCategory);
   titleInput.value = product.title;
   subtitleInput.value = product.subtitle || "";
   includedInput.value = product.included || "";
@@ -678,6 +708,58 @@ function formatEditionOrdinal(value) {
     }
   }
   return `${edition}${suffix}`;
+}
+
+function getDefaultAdminQuickLinks() {
+  return [
+    { id: "stripe", label: "Stripe", href: "https://dashboard.stripe.com/" },
+    { id: "render", label: "Render", href: "https://dashboard.render.com/" },
+    { id: "facebook", label: "Facebook", href: "https://business.facebook.com/latest/home" },
+    { id: "amazon-kdp", label: "Amazon KDP", href: "https://kdp.amazon.com/" },
+    { id: "shippo", label: "Shippo", href: SHIPPO_MANUAL_LABEL_URL }
+  ];
+}
+
+function normalizeAdminQuickLinks(links) {
+  const fallbackById = new Map(getDefaultAdminQuickLinks().map((link) => [link.id, link]));
+  const provided = Array.isArray(links) ? links : [];
+  const normalized = provided
+    .map((entry) => {
+      const id = String(entry?.id || "")
+        .trim()
+        .toLowerCase();
+      const fallback = fallbackById.get(id);
+      const href = String(entry?.href || fallback?.href || "").trim();
+      const label = String(entry?.label || fallback?.label || "").trim();
+      if (!href || !label) {
+        return null;
+      }
+      return { id: id || label.toLowerCase(), label, href };
+    })
+    .filter(Boolean);
+
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  return getDefaultAdminQuickLinks();
+}
+
+function renderAdminQuickLinks(links) {
+  if (!adminQuickLinksEl) {
+    return;
+  }
+
+  const items = normalizeAdminQuickLinks(links);
+  adminQuickLinksEl.innerHTML = items
+    .map(
+      (item) => `<a
+        class="ghost-btn ghost-link admin-quick-link"
+        href="${escapeHtml(item.href)}"
+        target="_blank"
+        rel="noopener noreferrer"
+      >${escapeHtml(item.label)}</a>`
+    )
+    .join("");
 }
 
 function getEditionProgress(totalCopies) {
@@ -1056,15 +1138,6 @@ function updateSoldCounter(orders) {
   }
 }
 
-function escapeHtml(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 function sanitizeExportValue(value) {
   return String(value ?? "")
     .replace(/\r?\n/g, " ")
@@ -1410,6 +1483,7 @@ function renderHealth(health) {
 
   if (!health || typeof health !== "object") {
     adminHealthEl.innerHTML = `<p class="cart-item-sub">Health data unavailable.</p>`;
+    renderAdminQuickLinks();
     return;
   }
 
@@ -1455,6 +1529,7 @@ function renderHealth(health) {
       <p><strong>Missing fields:</strong> ${escapeHtml(uspsMissing || "(none)")}</p>
     </article>
   `;
+  renderAdminQuickLinks(health.quickLinks);
 }
 
 function renderOrders(payload) {
@@ -1697,7 +1772,7 @@ function isShippingEnabled(product) {
 
 function renderProducts() {
   if (state.products.length === 0) {
-    productsEl.innerHTML = `<p class="cart-item-sub">No products yet. Add your first book above.</p>`;
+    productsEl.innerHTML = `<p class="cart-item-sub">No products yet. Add your first book or merch item above.</p>`;
     return;
   }
 
@@ -1713,6 +1788,7 @@ function renderProducts() {
         const allowPreorder = product.allowPreorder === true;
         const productGalleryCount = normalizeImageList(product.productImageUrls).length;
         const includedGalleryCount = normalizeImageList(product.includedImageUrls).length;
+        const productCategory = normalizeProductCategory(product.productCategory);
 
         return `<article class="admin-product-card" draggable="true" data-id="${product.id}">
         <img class="admin-product-image" src="${product.imageUrl}" alt="${product.title} cover" />
@@ -1726,6 +1802,9 @@ function renderProducts() {
           <p>Product gallery images: <strong>${productGalleryCount}</strong></p>
           <p>Included images: <strong>${includedGalleryCount}</strong></p>
           <div class="admin-badges">
+            <span class="admin-stock-badge ${productCategory === "merch" ? "sold-out" : "in-stock"}">
+              ${productCategory === "merch" ? "Merch" : "Book"}
+            </span>
             <span class="admin-stock-badge ${product.inStock === false ? "sold-out" : "in-stock"}">
               ${product.inStock === false ? "Sold Out" : "In Stock"}
             </span>
@@ -2672,11 +2751,6 @@ publishBtn.addEventListener("click", async () => {
   }
 });
 
-newProductBtn.addEventListener("click", () => {
-  resetForm();
-  setProductMessage("Create mode enabled.");
-});
-
 cancelEditBtn.addEventListener("click", () => {
   resetForm();
   setProductMessage("Edit canceled.");
@@ -2946,6 +3020,7 @@ productForm.addEventListener("submit", async (event) => {
 
   const formData = new FormData();
   formData.append("title", titleInput.value);
+  formData.append("productCategory", productCategoryInput.value);
   formData.append("subtitle", subtitleInput.value);
   formData.append("included", includedInput.value);
   formData.append("price", priceInput.value);
@@ -2994,9 +3069,10 @@ productForm.addEventListener("submit", async (event) => {
       method,
       body: formData
     });
+    const savedCategory = normalizeProductCategory(productCategoryInput.value);
     resetForm();
     await loadProducts();
-    setProductMessage(editingId ? "Product updated." : "Product created.");
+    setProductMessage(editingId ? "Product updated." : savedCategory === "merch" ? "Merch item created." : "Book created.");
   } catch (error) {
     if (error.status === 401) {
       logoutBtn.click();
@@ -3006,6 +3082,20 @@ productForm.addEventListener("submit", async (event) => {
   } finally {
     setProductBusy(false);
   }
+});
+
+newProductBtn?.addEventListener("click", () => {
+  resetForm();
+  setProductCategory("book");
+  setProductMessage("Ready to add a new book.");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+newMerchBtn?.addEventListener("click", () => {
+  resetForm();
+  setProductCategory("merch");
+  setProductMessage("Ready to add a new merch item.");
+  window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
 shippingEnabledInput.addEventListener("change", () => {
@@ -3080,6 +3170,7 @@ siteSettingsForm.addEventListener("submit", async (event) => {
 syncShippingInputs();
 populatePosStateOptions();
 resetPosDraft();
+renderAdminQuickLinks();
 
 ensureAuthenticated().catch(() => {
   showLogin();

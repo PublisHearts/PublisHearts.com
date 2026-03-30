@@ -21,6 +21,7 @@ import {
 } from "./data/productStore.js";
 import {
   getEmailHealth,
+  sendCustomStoryQuoteRequest,
   sendCustomerReceipt,
   sendOwnerNotification,
   sendShipmentNotification
@@ -131,6 +132,11 @@ const githubRepoOwner = (process.env.GITHUB_REPO_OWNER || "PublisHearts").trim()
 const githubBranch = (process.env.GITHUB_BRANCH || "main").trim() || "main";
 const githubAuthorName = (process.env.GITHUB_AUTHOR_NAME || "PublisHearts Admin Bot").trim();
 const githubAuthorEmail = (process.env.GITHUB_AUTHOR_EMAIL || "admin@publishearts.com").trim();
+const adminStripeUrl = (process.env.ADMIN_STRIPE_URL || "https://dashboard.stripe.com/").trim();
+const adminRenderUrl = (process.env.ADMIN_RENDER_URL || "https://dashboard.render.com/").trim();
+const adminFacebookUrl = (process.env.ADMIN_FACEBOOK_URL || "https://business.facebook.com/latest/home").trim();
+const adminAmazonKdpUrl = (process.env.ADMIN_AMAZON_KDP_URL || "https://kdp.amazon.com/").trim();
+const adminShippoUrl = (process.env.ADMIN_SHIPPO_URL || "https://apps.goshippo.com/orders").trim();
 const parsedShippingBaseWeightLbs = Number.parseFloat(
   String(process.env.SHIPPING_BASE_WEIGHT_LBS || process.env.SHIPPING_WEIGHT_PER_UNIT_LBS || "1.5")
 );
@@ -544,7 +550,13 @@ function isCounterBookItemName(value) {
 function calculateBookUnitsFromCartEntries(entries) {
   const safeEntries = Array.isArray(entries) ? entries : [];
   return safeEntries.reduce((sum, entry) => {
-    if (!isCounterBookItemName(entry?.name)) {
+    const productCategory = String(entry?.productCategory || "")
+      .trim()
+      .toLowerCase();
+    if (productCategory === "merch") {
+      return sum;
+    }
+    if (productCategory !== "book" && !isCounterBookItemName(entry?.name)) {
       return sum;
     }
     return sum + Math.max(0, Number(entry?.quantity) || 0);
@@ -557,6 +569,15 @@ function shouldCountProductTowardBookCounter(product) {
   }
   if (product.excludeFromBookCounter === true || product.countTowardBookCounter === false) {
     return false;
+  }
+  const productCategory = String(product.productCategory || "")
+    .trim()
+    .toLowerCase();
+  if (productCategory === "merch") {
+    return false;
+  }
+  if (productCategory === "book") {
+    return true;
   }
   return isCounterBookItemName(product.title);
 }
@@ -674,6 +695,7 @@ async function buildCheckoutSessionCartDetails(cart, customerState, options = {}
     cartSummaryParts.push(`${product.title} x${quantity}`);
     items.push({
       productId: product.id,
+      productCategory: String(product.productCategory || "book").trim().toLowerCase() === "merch" ? "merch" : "book",
       name: product.title,
       quantity,
       unitAmount: product.priceCents,
@@ -1108,6 +1130,7 @@ function normalizeManualOrderItems(rawItems = []) {
       const amountTotal = Number.isFinite(amountTotalRaw) ? Math.max(0, Math.round(amountTotalRaw)) : unitAmount * quantity;
       return {
         productId: String(item?.productId || item?.id || "").trim(),
+        productCategory: String(item?.productCategory || "").trim().toLowerCase() === "merch" ? "merch" : "book",
         name,
         quantity,
         unitAmount,
@@ -2110,6 +2133,13 @@ function normalizeCustomerEmail(value) {
     throw new Error("Enter a valid email address.");
   }
   return email;
+}
+
+function cleanQuoteRequestText(value, maxLength = 2000) {
+  return String(value || "")
+    .trim()
+    .replace(/\r\n/g, "\n")
+    .slice(0, maxLength);
 }
 
 function normalizeCheckoutShippingInput(input = {}, fallbackState = "") {
@@ -3249,6 +3279,13 @@ app.get("/api/admin/health", requireAdmin, (req, res) => {
     uspsMissingConfig,
     uspsApiBaseUrl,
     appUrl: (process.env.APP_URL || "").trim(),
+    quickLinks: [
+      { id: "stripe", label: "Stripe", href: adminStripeUrl },
+      { id: "render", label: "Render", href: adminRenderUrl },
+      { id: "facebook", label: "Facebook", href: adminFacebookUrl },
+      { id: "amazon-kdp", label: "Amazon KDP", href: adminAmazonKdpUrl },
+      { id: "shippo", label: "Shippo", href: adminShippoUrl }
+    ],
     deployCommit,
     deployCommitRaw
   });
@@ -4818,6 +4855,7 @@ app.post("/api/admin/products", requireAdmin, productUpload, async (req, res) =>
   try {
     const created = await createProduct({
       title: req.body?.title,
+      productCategory: req.body?.productCategory,
       subtitle: req.body?.subtitle,
       included: req.body?.included,
       priceCents: priceToCents(req.body?.price),
@@ -4865,6 +4903,7 @@ app.put("/api/admin/products/:id", requireAdmin, productUpload, async (req, res)
   try {
     const updated = await updateProduct(req.params.id, {
       title: req.body?.title !== undefined ? req.body.title : undefined,
+      productCategory: req.body?.productCategory !== undefined ? req.body.productCategory : undefined,
       subtitle: req.body?.subtitle !== undefined ? req.body.subtitle : undefined,
       included: req.body?.included !== undefined ? req.body.included : undefined,
       priceCents: nextPriceRaw ? nextPrice : undefined,
@@ -4957,6 +4996,55 @@ app.post("/api/create-checkout-session", async (req, res) => {
     const details = typeof error?.message === "string" ? error.message : "";
     return res.status(isCheckoutValidationErrorMessage(details) ? 400 : 500).json({
       error: details ? `Could not start checkout: ${details}` : "Could not start checkout right now."
+    });
+  }
+});
+
+app.post("/api/custom-story-quote", async (req, res) => {
+  const emailHealth = getEmailHealth();
+  if (!emailHealth.emailSendingEnabled || !emailHealth.ownerEmailConfigured) {
+    return res.status(503).json({
+      error: "Quote requests are not configured right now. Please try again later."
+    });
+  }
+
+  try {
+    const customerName = cleanQuoteRequestText(req.body?.name, 120);
+    const customerEmail = normalizeCustomerEmail(req.body?.email);
+    const customerPhone = cleanQuoteRequestText(req.body?.phone, 40);
+    const storyInspiration = cleanQuoteRequestText(req.body?.storyInspiration, 2000);
+    const audienceDetails = cleanQuoteRequestText(req.body?.audienceDetails, 1200);
+    const timelineDetails = cleanQuoteRequestText(req.body?.timelineDetails, 600);
+    const extraNotes = cleanQuoteRequestText(req.body?.extraNotes, 2000);
+
+    if (!customerName) {
+      return res.status(400).json({ error: "Name is required." });
+    }
+    if (!customerEmail) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+    if (!storyInspiration) {
+      return res.status(400).json({ error: "Tell us what story you want created." });
+    }
+
+    await sendCustomStoryQuoteRequest({
+      customerName,
+      customerEmail,
+      customerPhone,
+      storyInspiration,
+      audienceDetails,
+      timelineDetails,
+      extraNotes
+    });
+
+    return res.json({
+      ok: true,
+      message: "Quote request sent."
+    });
+  } catch (error) {
+    const details = typeof error?.message === "string" ? error.message : "";
+    return res.status(details === "Enter a valid email address." ? 400 : 500).json({
+      error: details || "Could not send quote request right now."
     });
   }
 });

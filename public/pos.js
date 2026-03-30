@@ -305,6 +305,10 @@ function formatPaymentMethodLabel(value) {
   return "Card";
 }
 
+function normalizeProductCategory(value) {
+  return String(value || "").trim().toLowerCase() === "merch" ? "merch" : "book";
+}
+
 function formatIsoDateTime(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) {
@@ -1010,6 +1014,9 @@ function renderCatalog() {
           </div>
           <p>${escapeHtml(product.subtitle || "No description.")}</p>
           <div class="admin-badges">
+            <span class="admin-stock-badge ${normalizeProductCategory(product.productCategory) === "merch" ? "sold-out" : "in-stock"}">
+              ${normalizeProductCategory(product.productCategory) === "merch" ? "Merch" : "Book"}
+            </span>
             ${isHidden ? '<span class="admin-stock-badge sold-out">Hidden Online</span>' : ""}
             ${product.allowPreorder === true && product.isComingSoon === true ? '<span class="admin-stock-badge in-stock">Preorder</span>' : ""}
             ${
@@ -1438,7 +1445,7 @@ checkoutBtn.addEventListener("click", async () => {
     quantity: item.quantity
   }));
   if (cart.length === 0) {
-    setPosMessage("Add at least one book before opening checkout.", true);
+    setPosMessage("Add at least one item before opening checkout.", true);
     return;
   }
   if (!stateSelect.value) {
@@ -1497,7 +1504,7 @@ cashBtn?.addEventListener("click", async () => {
     quantity: item.quantity
   }));
   if (cart.length === 0) {
-    setPosMessage("Add at least one book before recording a cash sale.", true);
+    setPosMessage("Add at least one item before recording a cash sale.", true);
     return;
   }
   if (!stateSelect.value) {

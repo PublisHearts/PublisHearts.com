@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Custom Story Quote | PublisHearts</title>
+    <meta
+      name="description"
+      content="Request a quote for a custom PublisHearts story written, illustrated, and inspired by your work, message, or idea for kids."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-glow page-glow-a"></div>
+    <div class="page-glow page-glow-b"></div>
+
+    <header class="site-header">
+      <div class="container row-between">
+        <a class="brand" href="/">
+          <span class="brand-mark">P</span>
+          <span>PublisHearts</span>
+        </a>
+        <div class="header-actions">
+          <a class="ghost-btn ghost-link" href="/">Home</a>
+          <a class="ghost-btn ghost-link" href="/shop.html">Shop</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="container custom-story-page">
+      <section class="custom-story-hero">
+        <p class="eyebrow">Custom Story Quote</p>
+        <h1>Commission a story no one else in the world has.</h1>
+        <p class="hero-copy">
+          PublisHearts can create a fully unique story written and illustrated around your work, mission, life
+          experience, or message for children, then develop it as a published title as well.
+        </p>
+      </section>
+
+      <section class="custom-story-layout">
+        <article class="custom-story-info">
+          <h2>What this includes</h2>
+          <ul class="custom-story-list">
+            <li>A story concept shaped around what you do and what you want kids to take away from it</li>
+            <li>Original illustrations created for the project</li>
+            <li>A quote based on scope, length, and art direction</li>
+            <li>A path toward publishing and future sale through PublisHearts</li>
+          </ul>
+
+          <h2>Great fit for</h2>
+          <ul class="custom-story-list">
+            <li>Content creators with a message for kids</li>
+            <li>Adults whose work can inspire children</li>
+            <li>Educators, founders, athletes, artists, and community leaders</li>
+            <li>Original educational or inspirational publishing concepts</li>
+          </ul>
+        </article>
+
+        <section class="custom-story-form-card">
+          <div class="section-head">
+            <h2>Request Your Quote</h2>
+            <p>Tell PublisHearts what you do, what you want children to feel inspired by, and how you want that turned into a story.</p>
+          </div>
+          <form id="custom-story-form" class="admin-form">
+            <div class="admin-form-grid">
+              <label>
+                Your Name
+                <input id="custom-story-name" name="name" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Email
+                <input id="custom-story-email" name="email" type="email" maxlength="320" required />
+              </label>
+            </div>
+            <label>
+              Phone
+              <input id="custom-story-phone" name="phone" type="tel" maxlength="40" />
+            </label>
+            <label>
+              Story Inspiration
+              <textarea
+                id="custom-story-inspiration"
+                name="storyInspiration"
+                rows="5"
+                maxlength="2000"
+                placeholder="What do you do, what message do you want kids to receive, and what kind of story should carry it?"
+                required
+              ></textarea>
+            </label>
+            <label>
+              Audience / Reader Details
+              <textarea
+                id="custom-story-audience"
+                name="audienceDetails"
+                rows="4"
+                maxlength="1200"
+                placeholder="Age range, reader type, tone, themes to include, and anything else that helps shape the story for children."
+              ></textarea>
+            </label>
+            <label>
+              Timeline / Occasion
+              <textarea
+                id="custom-story-timeline"
+                name="timelineDetails"
+                rows="3"
+                maxlength="600"
+                placeholder="Launch goal, campaign timing, special event, or preferred delivery window."
+              ></textarea>
+            </label>
+            <label>
+              Extra Notes
+              <textarea
+                id="custom-story-notes"
+                name="extraNotes"
+                rows="4"
+                maxlength="2000"
+                placeholder="Anything else PublisHearts should know before preparing a quote."
+              ></textarea>
+            </label>
+            <div class="admin-form-actions">
+              <button id="custom-story-submit" class="primary-btn" type="submit">Send Quote Request</button>
+            </div>
+          </form>
+          <p id="custom-story-message" class="checkout-message"></p>
+        </section>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container row-between">
+        <a class="footer-link-btn" href="/about.html">PublisHearts</a>
+        <a class="footer-link-btn" href="/shop.html">Browse the shop</a>
+      </div>
+    </footer>
+
+    <script type="module" src="/custom-story.js"></script>
+  </body>
+</html>

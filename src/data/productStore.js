@@ -45,6 +45,7 @@ function cloneProduct(product) {
   return {
     id: product.id,
     title: product.title,
+    productCategory: product.productCategory,
     subtitle: product.subtitle,
     included: product.included,
     priceCents: product.priceCents,
@@ -61,6 +62,16 @@ function cloneProduct(product) {
     inStock: parseStoredBoolean(product.inStock, true),
     sortOrder: Number.isFinite(product.sortOrder) ? product.sortOrder : 0
   };
+}
+
+function cleanProductCategory(value, defaultValue = "book") {
+  const text = String(value || defaultValue)
+    .trim()
+    .toLowerCase();
+  if (text === "merch") {
+    return "merch";
+  }
+  return "book";
 }
 
 function cleanText(value, maxLength, fieldName) {
@@ -303,6 +314,7 @@ function buildIdFromTitle(title, existingIds) {
 
 function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
   const title = cleanText(raw.title, 140, "Title");
+  const productCategory = cleanProductCategory(raw.productCategory, "book");
   const subtitle = cleanOptionalText(raw.subtitle, 600, "Description");
   const included = cleanOptionalText(raw.included, 800, "What's included");
   const priceCents = cleanPriceCents(raw.priceCents);
@@ -323,6 +335,7 @@ function normalizeStoredProduct(raw, fallbackSortOrder = 0) {
   return {
     id: idCandidate,
     title,
+    productCategory,
     subtitle,
     included,
     priceCents,
@@ -426,6 +439,7 @@ export async function findProductById(productId) {
 
 export async function createProduct({
   title,
+  productCategory,
   subtitle,
   included,
   priceCents,
@@ -442,6 +456,7 @@ export async function createProduct({
   await ensureLoaded();
 
   const cleanTitle = cleanText(title, 140, "Title");
+  const normalizedProductCategory = cleanProductCategory(productCategory, "book");
   const cleanSubtitle = cleanOptionalText(subtitle, 600, "Description");
   const cleanIncluded = cleanOptionalText(included, 800, "What's included");
   const cleanPrice = cleanPriceCents(priceCents);
@@ -462,6 +477,7 @@ export async function createProduct({
   const created = {
     id,
     title: cleanTitle,
+    productCategory: normalizedProductCategory,
     subtitle: cleanSubtitle,
     included: cleanIncluded,
     priceCents: cleanPrice,
@@ -505,6 +521,10 @@ export async function updateProduct(productId, changes) {
   const updated = {
     ...current,
     title: changes.title !== undefined ? cleanText(changes.title, 140, "Title") : current.title,
+    productCategory:
+      changes.productCategory !== undefined
+        ? cleanProductCategory(changes.productCategory, current.productCategory || "book")
+        : cleanProductCategory(current.productCategory, "book"),
     subtitle:
       changes.subtitle !== undefined
         ? cleanOptionalText(changes.subtitle, 600, "Description")

@@ -411,3 +411,73 @@ ${textItems}`,
     </div>`
   });
 }
+
+export async function sendCustomStoryQuoteRequest({
+  customerName,
+  customerEmail,
+  customerPhone,
+  storyInspiration,
+  audienceDetails,
+  timelineDetails,
+  extraNotes
+}) {
+  if (!emailConfigured()) {
+    return false;
+  }
+
+  if (!ownerEmail) {
+    if (!printedOwnerWarning) {
+      printedOwnerWarning = true;
+      console.warn("OWNER_EMAIL is missing. Store owner notifications are disabled.");
+    }
+    return false;
+  }
+
+  const safeName = String(customerName || "").trim() || "Unknown";
+  const safeEmail = String(customerEmail || "").trim().toLowerCase() || "Unknown";
+  const safePhone = String(customerPhone || "").trim() || "Not provided";
+  const safeStoryInspiration = String(storyInspiration || "").trim() || "Not provided";
+  const safeAudienceDetails = String(audienceDetails || "").trim() || "Not provided";
+  const safeTimelineDetails = String(timelineDetails || "").trim() || "Not provided";
+  const safeExtraNotes = String(extraNotes || "").trim() || "None";
+
+  await transporter.sendMail({
+    from: fromEmail,
+    to: ownerEmail,
+    replyTo: safeEmail !== "Unknown" ? safeEmail : undefined,
+    subject: `Custom story quote request - ${safeName}`,
+    text: `New custom story quote request.
+
+Name: ${safeName}
+Email: ${safeEmail}
+Phone: ${safePhone}
+
+Story inspiration:
+${safeStoryInspiration}
+
+Audience / reader details:
+${safeAudienceDetails}
+
+Timeline / occasion:
+${safeTimelineDetails}
+
+Extra notes:
+${safeExtraNotes}`,
+    html: `<div style="font-family:Arial,sans-serif; color:#1f2937; line-height:1.5;">
+      <h2 style="margin:0 0 12px;">New custom story quote request</h2>
+      <p style="margin:0 0 4px;">Name: <strong>${escapeHtml(safeName)}</strong></p>
+      <p style="margin:0 0 4px;">Email: <strong>${escapeHtml(safeEmail)}</strong></p>
+      <p style="margin:0 0 16px;">Phone: <strong>${escapeHtml(safePhone)}</strong></p>
+      <h3 style="margin:0 0 8px;">Story inspiration</h3>
+      <p style="margin:0 0 16px; white-space:pre-wrap;">${escapeHtml(safeStoryInspiration)}</p>
+      <h3 style="margin:0 0 8px;">Audience / reader details</h3>
+      <p style="margin:0 0 16px; white-space:pre-wrap;">${escapeHtml(safeAudienceDetails)}</p>
+      <h3 style="margin:0 0 8px;">Timeline / occasion</h3>
+      <p style="margin:0 0 16px; white-space:pre-wrap;">${escapeHtml(safeTimelineDetails)}</p>
+      <h3 style="margin:0 0 8px;">Extra notes</h3>
+      <p style="margin:0; white-space:pre-wrap;">${escapeHtml(safeExtraNotes)}</p>
+    </div>`
+  });
+
+  return true;
+}
