@@ -28,6 +28,7 @@ const state = {
   adminPassword: window.localStorage.getItem(ADMIN_KEY) || "",
   ordersBusy: false,
   ordersPayload: null,
+  selectedOrderIds: new Set(),
   soldCounterValue: 0,
   soldCounterAnimationFrame: 0,
   soldCounterEdition: 1
@@ -67,6 +68,9 @@ function setOrdersBusy(isBusy) {
     button.disabled = isBusy;
   });
   ordersEl?.querySelectorAll("input[data-action='save-package-weight']").forEach((input) => {
+    input.disabled = isBusy;
+  });
+  ordersEl?.querySelectorAll("input[data-action='toggle-selected-order']").forEach((input) => {
     input.disabled = isBusy;
   });
   editionBoardEl?.querySelectorAll("input[data-action='save-package-weight']").forEach((input) => {
@@ -271,6 +275,40 @@ function formatShortOrderLabel(orderId) {
 
 function isOrderShippingRequired(order) {
   return order?.shippingRequired !== false;
+}
+
+function isOrderBlockedForStateMismatch(order) {
+  if (!isOrderShippingRequired(order)) {
+    return false;
+  }
+  return (
+    order?.shippingStateMatchesCustomerState === false ||
+    String(order?.fulfillmentHoldReason || "").trim() === "state_mismatch"
+  );
+}
+
+function isOrderBulkShippable(order) {
+  return isOrderShippingRequired(order) && String(order?.fulfillmentStatus || "pending") !== "shipped" && !isOrderBlockedForStateMismatch(order);
+}
+
+function syncSelectedOrderIds(orders) {
+  const validIds = new Set(
+    (Array.isArray(orders) ? orders : [])
+      .filter((order) => isOrderBulkShippable(order))
+      .map((order) => String(order.id || "").trim())
+      .filter(Boolean)
+  );
+  state.selectedOrderIds = new Set(
+    Array.from(state.selectedOrderIds).filter((orderId) => validIds.has(String(orderId || "").trim()))
+  );
+}
+
+function getSelectedBulkOrders(orders) {
+  const safeOrders = Array.isArray(orders) ? orders : [];
+  return safeOrders.filter((order) => {
+    const orderId = String(order?.id || "").trim();
+    return orderId && state.selectedOrderIds.has(orderId) && isOrderBulkShippable(order);
+  });
 }
 
 function formatOrderSourceLabel(orderSource) {
@@ -877,6 +915,7 @@ function renderOrders(payload) {
   }
 
   const { allOrders, orders, customers, query } = getFilteredOrdersForDisplay(payload);
+  syncSelectedOrderIds(allOrders);
   updateSoldCounter(allOrders);
   renderEditionBoard(allOrders);
   renderSummary(allOrders);
@@ -904,6 +943,7 @@ function renderOrders(payload) {
 
   if (orders.length === 0) {
     ordersEl.innerHTML = `<p class="cart-item-sub">${query ? "No orders matched your search." : "No paid orders found yet."}</p>`;
+    setOrdersBusy(state.ordersBusy);
     return;
   }
 
@@ -911,6 +951,8 @@ function renderOrders(payload) {
   const pendingShippingOrders = shippingOrders.filter((order) => String(order.fulfillmentStatus || "pending") !== "shipped");
   const shippedOrders = shippingOrders.filter((order) => String(order.fulfillmentStatus || "pending") === "shipped");
   const pickupOrders = orders.filter((order) => !isOrderShippingRequired(order));
+  const visibleBulkEligibleOrders = pendingShippingOrders.filter((order) => isOrderBulkShippable(order));
+  const selectedBulkOrders = getSelectedBulkOrders(allOrders);
 
   const renderOrderCard = (order) => {
     const itemSummary =
@@ -954,11 +996,11 @@ function renderOrders(payload) {
     const shippingStateMatchesCustomerState = order.shippingStateMatchesCustomerState !== false;
     const shippingStateMismatchReason = String(order.shippingStateMismatchReason || "").trim();
     const fulfillmentHoldReason = String(order.fulfillmentHoldReason || "").trim();
-    const blockedForStateMismatch =
-      shippingRequired &&
-      (!shippingStateMatchesCustomerState || fulfillmentHoldReason === "state_mismatch");
+    const blockedForStateMismatch = isOrderBlockedForStateMismatch(order);
     const canUseShippingStateFallback =
       blockedForStateMismatch && !selectedState && Boolean(shippingState) && shippingCountry === "US";
+    const bulkShippable = isOrderBulkShippable(order);
+    const selectedForBulkShip = bulkShippable && state.selectedOrderIds.has(String(order.id || "").trim());
     const stateCheckText = shippingRequired
       ? blockedForStateMismatch
         ? `Blocked - ${shippingStateMismatchReason || `Selected ${selectedState || "Unknown"} vs shipping ${shippingState || "Unknown"} (${shippingCountry})`}`
@@ -994,9 +1036,24 @@ function renderOrders(payload) {
              </button>`
       : "";
 
-    return `<article class="admin-order-card">
-      <div class="row-between">
-        <h4>${escapeHtml(order.id)}</h4>
+    return `<article class="admin-order-card ${selectedForBulkShip ? "is-selected" : ""}">
+      <div class="row-between fulfillment-order-head">
+        <div class="fulfillment-order-head-main">
+          ${
+            bulkShippable
+              ? `<label class="fulfillment-select-toggle">
+                   <input
+                     type="checkbox"
+                     data-action="toggle-selected-order"
+                     data-id="${escapeHtml(order.id)}"
+                     ${selectedForBulkShip ? "checked" : ""}
+                   />
+                   <span>Select</span>
+                 </label>`
+              : ""
+          }
+          <h4>${escapeHtml(order.id)}</h4>
+        </div>
         <strong>${formatMoney(order.amountTotal || 0)}</strong>
       </div>
       <p><strong>Status:</strong> <span class="admin-order-status ${fulfillmentClass}">${fulfillmentLabel}</span>${shipDate ? ` - ${escapeHtml(shipDate)}` : ""}</p>
@@ -1057,6 +1114,28 @@ function renderOrders(payload) {
 
   ordersEl.innerHTML = `
     <h3>Needs Fulfillment (${pendingShippingOrders.length}${query ? ` / ${allOrders.length} total` : ""})</h3>
+    ${
+      visibleBulkEligibleOrders.length > 0
+        ? `<div class="fulfillment-bulk-toolbar">
+             <div class="fulfillment-bulk-copy">
+               <p><strong>${formatWholeNumber(selectedBulkOrders.length)}</strong> selected for bulk ship</p>
+               <p>${formatWholeNumber(visibleBulkEligibleOrders.length)} visible eligible order${visibleBulkEligibleOrders.length === 1 ? "" : "s"}${query ? " in this search" : ""}</p>
+             </div>
+             <div class="admin-card-actions">
+               <button class="ghost-btn" type="button" data-action="select-visible-orders">Select Visible</button>
+               <button class="ghost-btn" type="button" data-action="clear-selected-orders">Clear Selection</button>
+               <button
+                 class="primary-btn"
+                 type="button"
+                 data-action="bulk-mark-shipped-orders"
+                 ${selectedBulkOrders.length === 0 ? "disabled" : ""}
+               >
+                 Mark Selected Shipped
+               </button>
+             </div>
+           </div>`
+        : ""
+    }
     <div class="admin-orders-list">
       ${
         pendingShippingOrders.length > 0
@@ -1077,6 +1156,7 @@ function renderOrders(payload) {
       ${shippedOrders.length > 0 ? shippedOrders.map(renderOrderCard).join("") : '<p class="cart-item-sub">No shipped orders yet.</p>'}
     </div>
   `;
+  setOrdersBusy(state.ordersBusy);
 }
 
 async function loadOrders() {
@@ -1085,20 +1165,34 @@ async function loadOrders() {
   renderOrders(payload);
 }
 
-function promptShipmentDetails() {
-  const carrier = window.prompt("Carrier name (optional):", "");
+function promptShipmentDetails(options = {}) {
+  const multiple = options?.multiple === true;
+  const count = Math.max(1, Math.round(Number(options?.count) || 1));
+  const carrier = window.prompt(
+    multiple ? `Carrier name (optional, applies to ${count} orders):` : "Carrier name (optional):",
+    ""
+  );
   if (carrier === null) {
     return null;
   }
-  const trackingNumber = window.prompt("Tracking number (optional):", "");
+  const trackingNumber = window.prompt(
+    multiple ? "Tracking number (optional, leave blank if each order has its own label):" : "Tracking number (optional):",
+    ""
+  );
   if (trackingNumber === null) {
     return null;
   }
-  const trackingUrl = window.prompt("Tracking URL (optional):", "");
+  const trackingUrl = window.prompt(
+    multiple ? "Tracking URL (optional, applies to all selected orders):" : "Tracking URL (optional):",
+    ""
+  );
   if (trackingUrl === null) {
     return null;
   }
-  const note = window.prompt("Optional shipment note for customer email:", "");
+  const note = window.prompt(
+    multiple ? "Optional shipment note for every selected customer email:" : "Optional shipment note for customer email:",
+    ""
+  );
   if (note === null) {
     return null;
   }
@@ -1108,6 +1202,19 @@ function promptShipmentDetails() {
     trackingUrl: String(trackingUrl || "").trim(),
     note: String(note || "").trim()
   };
+}
+
+async function shipOrder(orderId, shipmentDetails, extraPayload = {}) {
+  return adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/ship`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      ...(shipmentDetails || {}),
+      ...(extraPayload || {})
+    })
+  });
 }
 
 function promptShippingAddressUpdate(order) {
@@ -1269,6 +1376,7 @@ logoutBtn.addEventListener("click", () => {
   state.adminPassword = "";
   window.localStorage.removeItem(ADMIN_KEY);
   state.ordersPayload = null;
+  state.selectedOrderIds = new Set();
   showLogin();
   setLoginMessage("");
   setOrdersMessage("");
@@ -1438,6 +1546,26 @@ editionBoardEl?.addEventListener("change", async (event) => {
 });
 
 ordersEl?.addEventListener("change", async (event) => {
+  const selectionInput = event.target.closest("input[data-action='toggle-selected-order']");
+  if (selectionInput) {
+    if (state.ordersBusy) {
+      return;
+    }
+    const orderId = String(selectionInput.dataset.id || "").trim();
+    if (!orderId) {
+      return;
+    }
+    if (selectionInput.checked) {
+      state.selectedOrderIds.add(orderId);
+    } else {
+      state.selectedOrderIds.delete(orderId);
+    }
+    if (state.ordersPayload) {
+      renderOrders(state.ordersPayload);
+    }
+    return;
+  }
+
   const input = event.target.closest("input[data-action='save-package-weight']");
   if (!input) {
     return;
@@ -1461,8 +1589,115 @@ ordersEl?.addEventListener("click", async (event) => {
   if (!button) {
     return;
   }
+  if (state.ordersBusy) {
+    return;
+  }
 
   const action = button.dataset.action;
+  if (action === "select-visible-orders") {
+    if (!state.ordersPayload) {
+      return;
+    }
+    const { orders } = getFilteredOrdersForDisplay(state.ordersPayload);
+    const visibleIds = orders.filter((order) => isOrderBulkShippable(order)).map((order) => String(order.id || "").trim());
+    if (visibleIds.length === 0) {
+      setOrdersMessage("No visible eligible orders to select.", true);
+      return;
+    }
+    visibleIds.forEach((orderId) => state.selectedOrderIds.add(orderId));
+    renderOrders(state.ordersPayload);
+    setOrdersMessage(`Selected ${visibleIds.length} visible order${visibleIds.length === 1 ? "" : "s"} for bulk ship.`);
+    return;
+  }
+
+  if (action === "clear-selected-orders") {
+    const selectedCount = getSelectedBulkOrders(state.ordersPayload?.orders).length;
+    state.selectedOrderIds = new Set();
+    if (state.ordersPayload) {
+      renderOrders(state.ordersPayload);
+    }
+    setOrdersMessage(
+      selectedCount > 0 ? `Cleared ${selectedCount} selected order${selectedCount === 1 ? "" : "s"}.` : "No bulk ship selection to clear."
+    );
+    return;
+  }
+
+  if (action === "bulk-mark-shipped-orders") {
+    const selectedOrders = getSelectedBulkOrders(state.ordersPayload?.orders);
+    if (selectedOrders.length === 0) {
+      setOrdersMessage("Select at least one pending order first.", true);
+      return;
+    }
+
+    const shipmentDetails = promptShipmentDetails({
+      multiple: true,
+      count: selectedOrders.length
+    });
+    if (!shipmentDetails) {
+      return;
+    }
+
+    const sameTrackingWarning = shipmentDetails.trackingNumber
+      ? `\n\nTracking number "${shipmentDetails.trackingNumber}" will be applied to every selected order.`
+      : "";
+    const confirmed = window.confirm(
+      `Mark ${selectedOrders.length} selected order${selectedOrders.length === 1 ? "" : "s"} as shipped now?${sameTrackingWarning}`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setOrdersBusy(true);
+    setOrdersMessage(`Marking ${selectedOrders.length} selected orders shipped and queueing customer emails...`);
+    try {
+      const successes = [];
+      const failures = [];
+
+      for (const order of selectedOrders) {
+        try {
+          await shipOrder(order.id, shipmentDetails);
+          successes.push(order.id);
+        } catch (error) {
+          if (error.status === 401) {
+            logoutBtn.click();
+            return;
+          }
+          failures.push({
+            id: order.id,
+            message: error.message || "Unknown error"
+          });
+        }
+      }
+
+      await loadOrders();
+
+      if (successes.length > 0 && failures.length === 0) {
+        setOrdersMessage(`Marked ${successes.length} order${successes.length === 1 ? "" : "s"} shipped. Shipment emails queued.`);
+        return;
+      }
+
+      if (successes.length > 0) {
+        const firstFailure = failures[0];
+        setOrdersMessage(
+          `Marked ${successes.length} shipped, but ${failures.length} failed. First failure: ${firstFailure.id} - ${firstFailure.message}`,
+          true
+        );
+        return;
+      }
+
+      setOrdersMessage(`Could not mark any selected orders shipped. ${failures[0]?.message || ""}`.trim(), true);
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setOrdersMessage(error.message || "Could not bulk mark orders as shipped.", true);
+    } finally {
+      setOrdersBusy(false);
+    }
+    return;
+  }
+
   const orderId = String(button.dataset.id || "").trim();
   if (!orderId || state.ordersBusy) {
     return;
@@ -1661,13 +1896,7 @@ ordersEl?.addEventListener("click", async (event) => {
     setOrdersBusy(true);
     setOrdersMessage("Marking order shipped and queueing customer email...");
     try {
-      await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/ship`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(shipmentDetails)
-      });
+      await shipOrder(orderId, shipmentDetails);
       await loadOrders();
       setOrdersMessage(`Order ${orderId} marked shipped. Shipment email queued.`);
     } catch (error) {
@@ -1703,15 +1932,8 @@ ordersEl?.addEventListener("click", async (event) => {
     setOrdersBusy(true);
     setOrdersMessage("Overriding state block, marking shipped, and queueing customer email...");
     try {
-      await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/ship`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          ...shipmentDetails,
-          overrideStateMismatch: true
-        })
+      await shipOrder(orderId, shipmentDetails, {
+        overrideStateMismatch: true
       });
       await loadOrders();
       setOrdersMessage(`Override applied. Order ${orderId} marked shipped. Shipment email queued.`);
@@ -1735,14 +1957,8 @@ ordersEl?.addEventListener("click", async (event) => {
     setOrdersBusy(true);
     setOrdersMessage("Queueing shipment email...");
     try {
-      await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/ship`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          resendEmail: true
-        })
+      await shipOrder(orderId, {}, {
+        resendEmail: true
       });
       setOrdersMessage(`Shipment email queued again for order ${orderId}.`);
     } catch (error) {
