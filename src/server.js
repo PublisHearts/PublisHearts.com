@@ -3499,18 +3499,23 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
       });
     }
 
-    const shippedAtUnix = Math.floor(Date.now() / 1000);
+    const existingShippedAtUnix = readMetadataInteger(currentMetadata, "fulfillment_shipped_at") || 0;
+    const shippedAtUnix =
+      existingStatus === "shipped" && resendEmail && existingShippedAtUnix > 0
+        ? existingShippedAtUnix
+        : Math.floor(Date.now() / 1000);
+    const nextMetadata = {
+      ...currentMetadata,
+      fulfillment_status: "shipped",
+      fulfillment_shipped_at: String(shippedAtUnix),
+      fulfillment_packaged_at: String(readMetadataInteger(currentMetadata, "fulfillment_packaged_at") || shippedAtUnix),
+      fulfillment_carrier: carrier,
+      fulfillment_tracking_number: trackingNumber,
+      fulfillment_tracking_url: trackingUrl,
+      fulfillment_note: note
+    };
     await stripe.paymentIntents.update(paymentIntentId, {
-      metadata: {
-        ...currentMetadata,
-        fulfillment_status: "shipped",
-        fulfillment_shipped_at: String(shippedAtUnix),
-        fulfillment_packaged_at: String(readMetadataInteger(currentMetadata, "fulfillment_packaged_at") || shippedAtUnix),
-        fulfillment_carrier: carrier,
-        fulfillment_tracking_number: trackingNumber,
-        fulfillment_tracking_url: trackingUrl,
-        fulfillment_note: note
-      }
+      metadata: nextMetadata
     });
 
     const customerEmail = String(session.customer_details?.email || session.customer_email || "").trim();
@@ -3519,38 +3524,55 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
         ok: true,
         shipped: true,
         emailed: false,
+        shippedAt: shippedAtUnix,
         message: "Order marked shipped, but customer email was missing."
       });
     }
+    const shippingDetails = buildStripeStyleShippingDetails(
+      getOrderShippingAddress(session, {
+        paymentIntentMetadata: nextMetadata
+      })
+    );
+    const customerName = String(session.customer_details?.name || shippingDetails.name || "").trim();
 
-    const lineItemsResponse = await stripe.checkout.sessions.listLineItems(session.id, {
-      limit: 100
-    });
-    const lineItems = (lineItemsResponse?.data || [])
-      .map((item) => ({
-        name: item.description || "Book",
-        quantity: item.quantity || 1,
-        amountTotal: item.amount_total || 0
-      }))
-      .filter((item) => !isShippingLineItem(item) && !isTaxLineItem(item));
+    setImmediate(() => {
+      void (async () => {
+        try {
+          const lineItemsResponse = await stripe.checkout.sessions.listLineItems(session.id, {
+            limit: 100
+          });
+          const lineItems = (lineItemsResponse?.data || [])
+            .map((item) => ({
+              name: item.description || "Book",
+              quantity: item.quantity || 1,
+              amountTotal: item.amount_total || 0
+            }))
+            .filter((item) => !isShippingLineItem(item) && !isTaxLineItem(item));
 
-    await sendShipmentNotification({
-      customerEmail,
-      customerName: session.customer_details?.name || session.shipping_details?.name || "",
-      orderId: session.id,
-      currency: session.currency || currency,
-      lineItems,
-      shippingDetails: session.shipping_details || {},
-      carrier,
-      trackingNumber,
-      trackingUrl,
-      note
+          await sendShipmentNotification({
+            customerEmail,
+            customerName,
+            orderId: session.id,
+            currency: session.currency || currency,
+            lineItems,
+            shippingDetails,
+            carrier,
+            trackingNumber,
+            trackingUrl,
+            note
+          });
+          console.log(`Shipment email sent for order ${session.id} -> ${customerEmail}`);
+        } catch (error) {
+          console.error(`Failed to send shipment notification for order ${session.id}:`, error);
+        }
+      })();
     });
 
     return res.json({
       ok: true,
       shipped: true,
       emailed: true,
+      emailQueued: true,
       shippedAt: shippedAtUnix
     });
   } catch (error) {

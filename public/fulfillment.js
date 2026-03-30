@@ -1659,7 +1659,7 @@ ordersEl?.addEventListener("click", async (event) => {
     }
 
     setOrdersBusy(true);
-    setOrdersMessage("Marking order shipped and sending customer email...");
+    setOrdersMessage("Marking order shipped and queueing customer email...");
     try {
       await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/ship`, {
         method: "POST",
@@ -1669,7 +1669,7 @@ ordersEl?.addEventListener("click", async (event) => {
         body: JSON.stringify(shipmentDetails)
       });
       await loadOrders();
-      setOrdersMessage(`Order ${orderId} marked shipped and customer emailed.`);
+      setOrdersMessage(`Order ${orderId} marked shipped. Shipment email queued.`);
     } catch (error) {
       if (error.status === 401) {
         logoutBtn.click();
@@ -1701,7 +1701,7 @@ ordersEl?.addEventListener("click", async (event) => {
     }
 
     setOrdersBusy(true);
-    setOrdersMessage("Overriding state block, marking shipped, and sending customer email...");
+    setOrdersMessage("Overriding state block, marking shipped, and queueing customer email...");
     try {
       await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/ship`, {
         method: "POST",
@@ -1714,7 +1714,7 @@ ordersEl?.addEventListener("click", async (event) => {
         })
       });
       await loadOrders();
-      setOrdersMessage(`Override applied. Order ${orderId} marked shipped and customer emailed.`);
+      setOrdersMessage(`Override applied. Order ${orderId} marked shipped. Shipment email queued.`);
     } catch (error) {
       if (error.status === 401) {
         logoutBtn.click();
@@ -1733,7 +1733,7 @@ ordersEl?.addEventListener("click", async (event) => {
     }
 
     setOrdersBusy(true);
-    setOrdersMessage("Resending shipment email...");
+    setOrdersMessage("Queueing shipment email...");
     try {
       await adminRequest(`/api/admin/orders/${encodeURIComponent(orderId)}/ship`, {
         method: "POST",
@@ -1744,7 +1744,7 @@ ordersEl?.addEventListener("click", async (event) => {
           resendEmail: true
         })
       });
-      setOrdersMessage(`Shipment email re-sent for order ${orderId}.`);
+      setOrdersMessage(`Shipment email queued again for order ${orderId}.`);
     } catch (error) {
       if (error.status === 401) {
         logoutBtn.click();
