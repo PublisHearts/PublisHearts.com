@@ -385,7 +385,12 @@ function evaluateCheckoutStateMatch(session, options = {}) {
   const selectedStateFromPaymentIntent =
     normalizeUsStateCode(paymentIntentMetadata.fulfillment_selected_state_override) ||
     normalizeUsStateCode(paymentIntentMetadata.fulfillment_selected_state);
-  const selectedState = selectedStateFromSession || selectedStateFromPaymentIntent;
+  const selectedState = selectedStateFromPaymentIntent || selectedStateFromSession;
+  const selectedStateSource = selectedStateFromPaymentIntent
+    ? "payment_intent"
+    : selectedStateFromSession
+      ? "session_metadata"
+      : "";
   const shippingRequired = isSessionShippingRequired(session, { paymentIntentMetadata });
   const shipping = getOrderShippingAddress(session, { paymentIntentMetadata });
   const shippingCountry = normalizeIsoCountry(shipping?.country, "US");
@@ -397,7 +402,7 @@ function evaluateCheckoutStateMatch(session, options = {}) {
   if (!shippingRequired) {
     return {
       selectedState,
-      selectedStateSource: selectedStateFromSession ? "session_metadata" : selectedStateFromPaymentIntent ? "payment_intent" : "",
+      selectedStateSource,
       shippingState,
       shippingStateRaw,
       shippingCountry,
@@ -427,7 +432,7 @@ function evaluateCheckoutStateMatch(session, options = {}) {
 
   return {
     selectedState,
-    selectedStateSource: selectedStateFromSession ? "session_metadata" : selectedStateFromPaymentIntent ? "payment_intent" : "",
+    selectedStateSource,
     shippingState,
     shippingStateRaw,
     shippingCountry,
