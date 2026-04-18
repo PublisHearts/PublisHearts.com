@@ -1226,13 +1226,21 @@ function renderOrders(payload) {
                <p><strong>${formatWholeNumber(selectedBulkOrders.length)}</strong> selected for bulk ship</p>
                <p>${formatWholeNumber(visibleBulkEligibleOrders.length)} visible eligible order${visibleBulkEligibleOrders.length === 1 ? "" : "s"}${query ? " in this search" : ""}</p>
              </div>
-             <div class="admin-card-actions">
-               <button class="ghost-btn" type="button" data-action="select-visible-orders">Select Visible</button>
-               <button class="ghost-btn" type="button" data-action="clear-selected-orders">Clear Selection</button>
-               <button
-                 class="primary-btn"
-                 type="button"
-                 data-action="bulk-mark-shipped-orders"
+              <div class="admin-card-actions">
+                <button class="ghost-btn" type="button" data-action="select-visible-orders">Select Visible</button>
+                <button class="ghost-btn" type="button" data-action="clear-selected-orders">Clear Selection</button>
+                <button
+                  class="ghost-btn"
+                  type="button"
+                  data-action="bulk-mark-shipped-from-pdf"
+                  ${selectedBulkOrders.length === 0 ? "disabled" : ""}
+                >
+                  Ship from Labels PDF
+                </button>
+                <button
+                  class="primary-btn"
+                  type="button"
+                  data-action="bulk-mark-shipped-orders"
                  ${selectedBulkOrders.length === 0 ? "disabled" : ""}
                >
                  Mark Selected Shipped
@@ -1316,6 +1324,299 @@ async function shipOrder(orderId, shipmentDetails, extraPayload = {}) {
       ...(extraPayload || {})
     })
   });
+}
+
+function normalizeTrackingNumber(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^0-9A-Z]/g, "");
+}
+
+function normalizeCarrierName(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const lower = raw.toLowerCase();
+  if (lower.includes("usps") || lower.includes("postal")) {
+    return "USPS";
+  }
+  if (lower.includes("ups")) {
+    return "UPS";
+  }
+  if (lower.includes("fedex") || lower.includes("federal express")) {
+    return "FedEx";
+  }
+  if (lower.includes("dhl")) {
+    return "DHL";
+  }
+  return raw;
+}
+
+function inferCarrierFromTrackingNumber(trackingNumber, fallbackCarrier = "") {
+  const normalizedTracking = normalizeTrackingNumber(trackingNumber);
+  if (!normalizedTracking) {
+    return normalizeCarrierName(fallbackCarrier);
+  }
+  if (normalizedTracking.startsWith("1Z") && normalizedTracking.length >= 18) {
+    return "UPS";
+  }
+  if (
+    /^(92|93|94|95|96|97)\d{18,24}$/.test(normalizedTracking) ||
+    /^420\d{5}9\d{20,24}$/.test(normalizedTracking) ||
+    /^9\d{20,25}$/.test(normalizedTracking)
+  ) {
+    return "USPS";
+  }
+  if (/^\d{12,15}$/.test(normalizedTracking)) {
+    return normalizeCarrierName(fallbackCarrier) || "FedEx";
+  }
+  return normalizeCarrierName(fallbackCarrier);
+}
+
+function buildCarrierTrackingUrl(carrier, trackingNumber) {
+  const normalizedTracking = normalizeTrackingNumber(trackingNumber);
+  if (!normalizedTracking) {
+    return "";
+  }
+  const normalizedCarrier = inferCarrierFromTrackingNumber(normalizedTracking, carrier);
+  if (normalizedCarrier === "USPS") {
+    return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(normalizedTracking)}`;
+  }
+  if (normalizedCarrier === "UPS") {
+    return `https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(normalizedTracking)}`;
+  }
+  if (normalizedCarrier === "FedEx") {
+    return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(normalizedTracking)}`;
+  }
+  if (normalizedCarrier === "DHL") {
+    return `https://www.dhl.com/us-en/home/tracking.html?tracking-id=${encodeURIComponent(normalizedTracking)}`;
+  }
+  return "";
+}
+
+function normalizeMatchToken(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^0-9A-Z]/g, "");
+}
+
+function normalizePostalCode(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/\d{5}/);
+  return match ? match[0] : "";
+}
+
+function getOrderIdTokensForMatching(orderId) {
+  const normalized = normalizeMatchToken(orderId);
+  if (!normalized) {
+    return [];
+  }
+  const tokens = [normalized];
+  if (normalized.length > 8) {
+    tokens.push(normalized.slice(-8));
+  }
+  return Array.from(new Set(tokens.filter((token) => token.length >= 6)));
+}
+
+function getOrderNameTokensForMatching(order) {
+  const source = String(order?.shippingName || order?.customerName || "");
+  return Array.from(
+    new Set(
+      source
+        .toUpperCase()
+        .split(/[^A-Z0-9]+/g)
+        .map((part) => part.trim())
+        .filter((part) => part.length >= 3)
+    )
+  );
+}
+
+function getLabelZipCodes(label) {
+  const values = Array.isArray(label?.zipCodes) ? label.zipCodes : [];
+  return Array.from(new Set(values.map((value) => normalizePostalCode(value)).filter(Boolean)));
+}
+
+function choosePdfFile() {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/pdf,.pdf";
+    input.style.position = "fixed";
+    input.style.left = "-9999px";
+    document.body.appendChild(input);
+    let settled = false;
+    let focusTimer = 0;
+    const finish = (file = null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (focusTimer) {
+        window.clearTimeout(focusTimer);
+      }
+      input.remove();
+      resolve(file);
+    };
+
+    input.addEventListener("change", () => {
+      const file = input.files && input.files[0] ? input.files[0] : null;
+      finish(file);
+    });
+    input.addEventListener("cancel", () => {
+      finish(null);
+    });
+    window.addEventListener(
+      "focus",
+      () => {
+        focusTimer = window.setTimeout(() => {
+          if (!settled && (!input.files || input.files.length === 0)) {
+            finish(null);
+          }
+        }, 0);
+      },
+      { once: true }
+    );
+
+    input.click();
+  });
+}
+
+async function parseShippingLabelsPdf(pdfFile) {
+  const formData = new FormData();
+  formData.append("labelsPdf", pdfFile, String(pdfFile?.name || "labels.pdf"));
+  return adminRequest("/api/admin/shipping/parse-label-pdf", {
+    method: "POST",
+    body: formData
+  });
+}
+
+function matchPdfLabelsToOrders(labels, orders, options = {}) {
+  const allowSequentialFallback = options?.allowSequentialFallback === true;
+  const safeLabels = Array.isArray(labels) ? labels : [];
+  const safeOrders = Array.isArray(orders) ? orders : [];
+  const orderMap = new Map(safeOrders.map((order) => [String(order?.id || "").trim(), order]));
+  const remainingOrderIds = new Set(Array.from(orderMap.keys()).filter(Boolean));
+  const usedLabelIndexes = new Set();
+  const assignments = [];
+
+  const assignLabel = (labelIndex, orderId, reason) => {
+    if (!remainingOrderIds.has(orderId) || usedLabelIndexes.has(labelIndex)) {
+      return false;
+    }
+    const label = safeLabels[labelIndex];
+    if (!label) {
+      return false;
+    }
+    assignments.push({
+      orderId,
+      label,
+      reason
+    });
+    remainingOrderIds.delete(orderId);
+    usedLabelIndexes.add(labelIndex);
+    return true;
+  };
+
+  for (let index = 0; index < safeLabels.length; index += 1) {
+    const label = safeLabels[index];
+    const labelText = normalizeMatchToken(`${label?.matchText || label?.preview || ""}`);
+    if (!labelText) {
+      continue;
+    }
+    const idMatches = Array.from(remainingOrderIds).filter((orderId) => {
+      const tokens = getOrderIdTokensForMatching(orderId);
+      return tokens.some((token) => labelText.includes(token));
+    });
+    if (idMatches.length === 1) {
+      assignLabel(index, idMatches[0], "order_id");
+    }
+  }
+
+  for (let index = 0; index < safeLabels.length; index += 1) {
+    if (usedLabelIndexes.has(index)) {
+      continue;
+    }
+    const label = safeLabels[index];
+    const labelZips = getLabelZipCodes(label);
+    if (labelZips.length === 0) {
+      continue;
+    }
+
+    const possibleByZip = Array.from(remainingOrderIds).filter((orderId) => {
+      const order = orderMap.get(orderId);
+      const orderZip = normalizePostalCode(order?.shippingPostalCode || "");
+      return Boolean(orderZip) && labelZips.includes(orderZip);
+    });
+
+    if (possibleByZip.length === 1) {
+      assignLabel(index, possibleByZip[0], "zip_code");
+      continue;
+    }
+    if (possibleByZip.length <= 1) {
+      continue;
+    }
+
+    const labelPreviewUpper = String(label?.matchText || label?.preview || "").toUpperCase();
+    const scored = possibleByZip
+      .map((orderId) => {
+        const order = orderMap.get(orderId);
+        const nameTokens = getOrderNameTokensForMatching(order);
+        const tokenMatches = nameTokens.filter((token) => labelPreviewUpper.includes(token)).length;
+        return {
+          orderId,
+          score: tokenMatches
+        };
+      })
+      .sort((left, right) => right.score - left.score);
+    const best = scored[0];
+    const second = scored[1];
+    if (best && best.score > 0 && (!second || best.score > second.score)) {
+      assignLabel(index, best.orderId, "zip_name");
+    }
+  }
+
+  if (allowSequentialFallback) {
+    const leftoverLabels = safeLabels
+      .map((label, labelIndex) => ({ label, labelIndex }))
+      .filter((entry) => !usedLabelIndexes.has(entry.labelIndex))
+      .sort((left, right) => {
+        const leftIndex = Number(left.label?.index) || left.labelIndex + 1;
+        const rightIndex = Number(right.label?.index) || right.labelIndex + 1;
+        return leftIndex - rightIndex;
+      });
+    const leftoverOrderIds = safeOrders
+      .map((order) => String(order?.id || "").trim())
+      .filter((orderId) => remainingOrderIds.has(orderId));
+    const fallbackCount = Math.min(leftoverLabels.length, leftoverOrderIds.length);
+    for (let index = 0; index < fallbackCount; index += 1) {
+      assignLabel(leftoverLabels[index].labelIndex, leftoverOrderIds[index], "page_order");
+    }
+  }
+
+  const assignedOrderIds = new Set(assignments.map((entry) => entry.orderId));
+  const unresolvedOrders = safeOrders.filter((order) => !assignedOrderIds.has(String(order?.id || "").trim()));
+  const unusedLabels = safeLabels.filter((_, labelIndex) => !usedLabelIndexes.has(labelIndex));
+
+  return {
+    assignments,
+    unresolvedOrders,
+    unusedLabels
+  };
+}
+
+function buildShipmentPayloadFromLabel(label, defaultNote = "Thank you for your order!") {
+  const trackingNumber = normalizeTrackingNumber(label?.trackingNumber);
+  const carrier = inferCarrierFromTrackingNumber(trackingNumber, label?.carrier || "");
+  const trackingUrl = String(label?.trackingUrl || buildCarrierTrackingUrl(carrier, trackingNumber)).trim();
+  return {
+    carrier,
+    trackingNumber,
+    trackingUrl,
+    note: String(defaultNote || "Thank you for your order!").trim()
+  };
 }
 
 function promptShippingAddressUpdate(order) {
@@ -1723,6 +2024,122 @@ ordersEl?.addEventListener("click", async (event) => {
     return;
   }
 
+  if (action === "bulk-mark-shipped-from-pdf") {
+    const selectedOrders = getSelectedBulkOrders(state.ordersPayload?.orders);
+    if (selectedOrders.length === 0) {
+      setOrdersMessage("Select at least one pending order first.", true);
+      return;
+    }
+
+    const pdfFile = await choosePdfFile();
+    if (!pdfFile) {
+      return;
+    }
+    if (!String(pdfFile.type || "").includes("pdf") && !String(pdfFile.name || "").toLowerCase().endsWith(".pdf")) {
+      setOrdersMessage("Choose a PDF file with shipping labels.", true);
+      return;
+    }
+
+    setOrdersBusy(true);
+    setOrdersMessage(`Reading labels from ${pdfFile.name}...`);
+    try {
+      const payload = await parseShippingLabelsPdf(pdfFile);
+      const parsedLabels = Array.isArray(payload?.labels) ? payload.labels : [];
+      if (parsedLabels.length === 0) {
+        throw new Error("No tracking numbers were detected in that labels PDF.");
+      }
+
+      let matchResult = matchPdfLabelsToOrders(parsedLabels, selectedOrders);
+      if (matchResult.unresolvedOrders.length > 0) {
+        const canFallbackByPageOrder =
+          matchResult.unresolvedOrders.length > 0 &&
+          matchResult.unresolvedOrders.length === matchResult.unusedLabels.length;
+        if (canFallbackByPageOrder) {
+          const fallbackConfirmed = window.confirm(
+            `Matched ${matchResult.assignments.length} of ${selectedOrders.length} selected orders automatically.\n\nUse PDF page order to map the remaining ${matchResult.unresolvedOrders.length} order${matchResult.unresolvedOrders.length === 1 ? "" : "s"}?`
+          );
+          if (fallbackConfirmed) {
+            matchResult = matchPdfLabelsToOrders(parsedLabels, selectedOrders, {
+              allowSequentialFallback: true
+            });
+          }
+        }
+      }
+
+      if (matchResult.unresolvedOrders.length > 0) {
+        const preview = matchResult.unresolvedOrders
+          .slice(0, 4)
+          .map((order) => String(order?.id || "").trim())
+          .filter(Boolean)
+          .join(", ");
+        throw new Error(
+          `Could not safely match ${matchResult.unresolvedOrders.length} selected order${matchResult.unresolvedOrders.length === 1 ? "" : "s"} to labels.${preview ? ` Unmatched: ${preview}` : ""}`
+        );
+      }
+
+      const fallbackCount = matchResult.assignments.filter((entry) => entry.reason === "page_order").length;
+      const confirmationMessage = `Mark ${matchResult.assignments.length} order${matchResult.assignments.length === 1 ? "" : "s"} shipped from this PDF and send the thank-you shipment emails now?${
+        fallbackCount > 0 ? `\n\n${fallbackCount} mapping${fallbackCount === 1 ? "" : "s"} used page order fallback.` : ""
+      }`;
+      if (!window.confirm(confirmationMessage)) {
+        setOrdersMessage("PDF shipment import cancelled.");
+        return;
+      }
+
+      const successes = [];
+      const failures = [];
+      setOrdersMessage(`Marking ${matchResult.assignments.length} selected orders shipped from PDF labels...`);
+
+      for (const assignment of matchResult.assignments) {
+        const orderId = String(assignment?.orderId || "").trim();
+        if (!orderId) {
+          continue;
+        }
+        try {
+          await shipOrder(orderId, buildShipmentPayloadFromLabel(assignment.label), {
+            sendEmail: true
+          });
+          successes.push(orderId);
+        } catch (error) {
+          if (error.status === 401) {
+            logoutBtn.click();
+            return;
+          }
+          failures.push({
+            id: orderId,
+            message: error.message || "Unknown error"
+          });
+        }
+      }
+
+      await loadOrders();
+
+      if (successes.length > 0 && failures.length === 0) {
+        setOrdersMessage(`Marked ${successes.length} order${successes.length === 1 ? "" : "s"} shipped from PDF labels.`);
+        return;
+      }
+      if (successes.length > 0) {
+        const firstFailure = failures[0];
+        setOrdersMessage(
+          `Marked ${successes.length} shipped from PDF labels, but ${failures.length} failed. First failure: ${firstFailure.id} - ${firstFailure.message}`,
+          true
+        );
+        return;
+      }
+
+      setOrdersMessage(`Could not mark any selected orders shipped from PDF labels. ${failures[0]?.message || ""}`.trim(), true);
+    } catch (error) {
+      if (error.status === 401) {
+        logoutBtn.click();
+        return;
+      }
+      setOrdersMessage(error.message || "Could not read PDF labels right now.", true);
+    } finally {
+      setOrdersBusy(false);
+    }
+    return;
+  }
+
   if (action === "bulk-mark-shipped-orders") {
     const selectedOrders = getSelectedBulkOrders(state.ordersPayload?.orders);
     if (selectedOrders.length === 0) {
@@ -1756,9 +2173,7 @@ ordersEl?.addEventListener("click", async (event) => {
 
       for (const order of selectedOrders) {
         try {
-          await shipOrder(order.id, shipmentDetails, {
-            sendEmail: false
-          });
+          await shipOrder(order.id, shipmentDetails);
           successes.push(order.id);
         } catch (error) {
           if (error.status === 401) {
@@ -2037,9 +2452,7 @@ ordersEl?.addEventListener("click", async (event) => {
     setOrdersBusy(true);
     setOrdersMessage("Marking order shipped...");
     try {
-      await shipOrder(orderId, shipmentDetails, {
-        sendEmail: false
-      });
+      await shipOrder(orderId, shipmentDetails);
       await loadOrders();
       setOrdersMessage(`Order ${orderId} marked shipped.`);
     } catch (error) {

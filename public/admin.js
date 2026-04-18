@@ -2633,10 +2633,7 @@ ordersEl?.addEventListener("click", async (event) => {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          ...shipmentDetails,
-          sendEmail: false
-        })
+        body: JSON.stringify(shipmentDetails)
       });
       await loadOrders();
       setOrdersMessage(`Order ${orderId} marked shipped.`);

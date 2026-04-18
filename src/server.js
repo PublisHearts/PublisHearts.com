@@ -9,6 +9,7 @@ import Stripe from "stripe";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { fileURLToPath } from "url";
+import { inflateRawSync, inflateSync } from "zlib";
 import {
   ProductValidationError,
   createProduct,
@@ -305,6 +306,22 @@ const upload = multer({
       return;
     }
     cb(null, true);
+  }
+});
+
+const labelPdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 20 * 1024 * 1024
+  },
+  fileFilter: (req, file, cb) => {
+    const mime = String(file?.mimetype || "").toLowerCase();
+    const originalName = String(file?.originalname || "").toLowerCase();
+    if (mime.includes("pdf") || originalName.endsWith(".pdf")) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("Only PDF shipping label uploads are allowed."));
   }
 });
 
@@ -2435,6 +2452,470 @@ function buildUspsTrackingUrl(trackingNumber) {
   return `${uspsTrackingBaseUrl}${encodeURIComponent(value)}`;
 }
 
+function normalizeCarrierName(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const lower = raw.toLowerCase();
+  if (lower.includes("usps") || lower.includes("postal")) {
+    return "USPS";
+  }
+  if (lower.includes("ups")) {
+    return "UPS";
+  }
+  if (lower.includes("fedex") || lower.includes("federal express")) {
+    return "FedEx";
+  }
+  if (lower.includes("dhl")) {
+    return "DHL";
+  }
+  return raw.slice(0, 80);
+}
+
+function normalizeTrackingNumber(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^0-9A-Z]/g, "");
+}
+
+function inferCarrierFromTrackingNumber(trackingNumber, fallbackCarrier = "") {
+  const normalized = normalizeTrackingNumber(trackingNumber);
+  if (!normalized) {
+    return normalizeCarrierName(fallbackCarrier);
+  }
+  if (normalized.startsWith("1Z") && normalized.length >= 18) {
+    return "UPS";
+  }
+  if (
+    /^(92|93|94|95|96|97)\d{18,24}$/.test(normalized) ||
+    /^420\d{5}9\d{20,24}$/.test(normalized) ||
+    /^9\d{20,25}$/.test(normalized)
+  ) {
+    return "USPS";
+  }
+  if (/^\d{12,15}$/.test(normalized)) {
+    return normalizeCarrierName(fallbackCarrier) || "FedEx";
+  }
+  return normalizeCarrierName(fallbackCarrier);
+}
+
+function buildCarrierTrackingUrl(carrier, trackingNumber) {
+  const normalizedTrackingNumber = normalizeTrackingNumber(trackingNumber);
+  if (!normalizedTrackingNumber) {
+    return "";
+  }
+  const normalizedCarrier = inferCarrierFromTrackingNumber(normalizedTrackingNumber, carrier);
+  if (normalizedCarrier === "USPS") {
+    return buildUspsTrackingUrl(normalizedTrackingNumber);
+  }
+  if (normalizedCarrier === "UPS") {
+    return `https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(normalizedTrackingNumber)}`;
+  }
+  if (normalizedCarrier === "FedEx") {
+    return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(normalizedTrackingNumber)}`;
+  }
+  if (normalizedCarrier === "DHL") {
+    return `https://www.dhl.com/us-en/home/tracking.html?tracking-id=${encodeURIComponent(normalizedTrackingNumber)}`;
+  }
+  return "";
+}
+
+function decodePdfLiteralStringToken(token) {
+  const source = String(token || "");
+  let output = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character !== "\\") {
+      output += character;
+      continue;
+    }
+
+    index += 1;
+    if (index >= source.length) {
+      break;
+    }
+    const escape = source[index];
+
+    if (escape === "n") {
+      output += "\n";
+      continue;
+    }
+    if (escape === "r") {
+      output += "\r";
+      continue;
+    }
+    if (escape === "t") {
+      output += "\t";
+      continue;
+    }
+    if (escape === "b") {
+      output += "\b";
+      continue;
+    }
+    if (escape === "f") {
+      output += "\f";
+      continue;
+    }
+    if (escape === "(" || escape === ")" || escape === "\\") {
+      output += escape;
+      continue;
+    }
+    if (escape === "\r") {
+      if (source[index + 1] === "\n") {
+        index += 1;
+      }
+      continue;
+    }
+    if (escape === "\n") {
+      continue;
+    }
+    if (/[0-7]/.test(escape)) {
+      let octal = escape;
+      for (let digits = 0; digits < 2; digits += 1) {
+        const next = source[index + 1];
+        if (!/[0-7]/.test(next || "")) {
+          break;
+        }
+        octal += next;
+        index += 1;
+      }
+      output += String.fromCharCode(Number.parseInt(octal, 8));
+      continue;
+    }
+
+    output += escape;
+  }
+  return output;
+}
+
+function extractPdfLiteralStrings(sourceText) {
+  const source = String(sourceText || "");
+  const tokens = [];
+  let index = 0;
+
+  while (index < source.length) {
+    if (source[index] !== "(") {
+      index += 1;
+      continue;
+    }
+    index += 1;
+    let depth = 1;
+    let token = "";
+
+    while (index < source.length && depth > 0) {
+      const character = source[index];
+      if (character === "\\") {
+        const next = source[index + 1];
+        if (next !== undefined) {
+          token += character;
+          token += next;
+          index += 2;
+          continue;
+        }
+        index += 1;
+        continue;
+      }
+      if (character === "(") {
+        depth += 1;
+        token += character;
+        index += 1;
+        continue;
+      }
+      if (character === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          index += 1;
+          break;
+        }
+        token += character;
+        index += 1;
+        continue;
+      }
+      token += character;
+      index += 1;
+    }
+
+    const decoded = decodePdfLiteralStringToken(token);
+    if (decoded) {
+      tokens.push(decoded);
+    }
+  }
+
+  return tokens;
+}
+
+function decodePdfHexStringToken(token) {
+  const cleaned = String(token || "").replace(/[^0-9A-Fa-f]/g, "");
+  if (!cleaned) {
+    return "";
+  }
+  const evenLengthHex = cleaned.length % 2 === 0 ? cleaned : `${cleaned}0`;
+  try {
+    return Buffer.from(evenLengthHex, "hex").toString("latin1");
+  } catch {
+    return "";
+  }
+}
+
+function extractPdfHexStrings(sourceText) {
+  const source = String(sourceText || "");
+  const tokens = [];
+  let index = 0;
+
+  while (index < source.length) {
+    if (source[index] !== "<" || source[index + 1] === "<") {
+      index += 1;
+      continue;
+    }
+
+    const endIndex = source.indexOf(">", index + 1);
+    if (endIndex < 0) {
+      break;
+    }
+    if (source[endIndex + 1] === ">") {
+      index = endIndex + 2;
+      continue;
+    }
+
+    const raw = source.slice(index + 1, endIndex);
+    const decoded = decodePdfHexStringToken(raw);
+    if (decoded) {
+      tokens.push(decoded);
+    }
+    index = endIndex + 1;
+  }
+
+  return tokens;
+}
+
+function normalizePdfExtractedText(value) {
+  return String(value || "")
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractPdfTextFromStreamBuffer(streamBuffer) {
+  const texts = [];
+  const pushExtractedText = (bufferValue) => {
+    if (!Buffer.isBuffer(bufferValue) || bufferValue.length === 0) {
+      return;
+    }
+    const source = bufferValue.toString("latin1");
+    const pieces = [...extractPdfLiteralStrings(source), ...extractPdfHexStrings(source)];
+    const extracted = normalizePdfExtractedText(pieces.join(" "));
+    if (extracted) {
+      texts.push(extracted);
+    }
+  };
+
+  pushExtractedText(streamBuffer);
+  try {
+    pushExtractedText(inflateSync(streamBuffer));
+  } catch {}
+  try {
+    pushExtractedText(inflateRawSync(streamBuffer));
+  } catch {}
+
+  const seen = new Set();
+  return texts.filter((entry) => {
+    if (!entry || seen.has(entry)) {
+      return false;
+    }
+    seen.add(entry);
+    return true;
+  });
+}
+
+function extractPdfTextSegments(pdfBuffer) {
+  if (!Buffer.isBuffer(pdfBuffer) || pdfBuffer.length === 0) {
+    return [];
+  }
+  const source = pdfBuffer.toString("latin1");
+  const segments = [];
+  let cursor = 0;
+
+  while (cursor < source.length) {
+    const streamIndex = source.indexOf("stream", cursor);
+    if (streamIndex < 0) {
+      break;
+    }
+    let streamStart = streamIndex + 6;
+    if (source.startsWith("\r\n", streamStart)) {
+      streamStart += 2;
+    } else if (source[streamStart] === "\n") {
+      streamStart += 1;
+    }
+    const streamEnd = source.indexOf("endstream", streamStart);
+    if (streamEnd < 0) {
+      break;
+    }
+    let dataEnd = streamEnd;
+    if (source[dataEnd - 1] === "\n") {
+      dataEnd -= 1;
+    }
+    if (source[dataEnd - 1] === "\r") {
+      dataEnd -= 1;
+    }
+
+    if (dataEnd > streamStart) {
+      const streamBuffer = pdfBuffer.subarray(streamStart, dataEnd);
+      const streamTexts = extractPdfTextFromStreamBuffer(streamBuffer);
+      for (const text of streamTexts) {
+        if (text.length >= 8) {
+          segments.push(text);
+        }
+      }
+    }
+    cursor = streamEnd + 9;
+  }
+
+  if (segments.length === 0) {
+    const fallbackPieces = [...extractPdfLiteralStrings(source), ...extractPdfHexStrings(source)];
+    const fallbackText = normalizePdfExtractedText(fallbackPieces.join(" "));
+    if (fallbackText) {
+      segments.push(fallbackText);
+    }
+  }
+
+  return segments;
+}
+
+function extractTrackingCandidatesFromText(text) {
+  const source = String(text || "").toUpperCase();
+  if (!source) {
+    return [];
+  }
+  const candidates = new Map();
+
+  const pushCandidate = (trackingValue, carrierHint, baseScore, index = 0) => {
+    const normalizedTrackingNumber = normalizeTrackingNumber(trackingValue);
+    if (normalizedTrackingNumber.length < 10) {
+      return;
+    }
+    const inferredCarrier = inferCarrierFromTrackingNumber(normalizedTrackingNumber, carrierHint);
+    const existing = candidates.get(normalizedTrackingNumber);
+    const candidate = {
+      trackingNumber: normalizedTrackingNumber,
+      carrier: inferredCarrier,
+      score: baseScore,
+      index: Number.isFinite(index) ? index : 0
+    };
+    if (!existing || candidate.score > existing.score || (candidate.score === existing.score && candidate.index < existing.index)) {
+      candidates.set(normalizedTrackingNumber, candidate);
+    }
+  };
+
+  for (const match of source.matchAll(/\b1Z[0-9A-Z]{16}\b/g)) {
+    pushCandidate(match[0], "UPS", 130, match.index || 0);
+  }
+
+  for (const match of source.matchAll(/\b420\d{5}(9\d{20,24})\b/g)) {
+    pushCandidate(match[1], "USPS", 125, match.index || 0);
+  }
+
+  for (const match of source.matchAll(/\b(?:92|93|94|95|96|97)\d{18,24}\b/g)) {
+    pushCandidate(match[0], "USPS", 120, match.index || 0);
+  }
+
+  const hasFedexHint = /\bFEDEX\b/.test(source);
+  if (hasFedexHint) {
+    for (const match of source.matchAll(/\b\d{12,15}\b/g)) {
+      pushCandidate(match[0], "FedEx", 90, match.index || 0);
+    }
+  }
+
+  const hasTrackingHint = /\bTRACK(?:ING)?\b/.test(source) || /\bTRK\b/.test(source);
+  if (hasTrackingHint) {
+    for (const match of source.matchAll(/\b\d{18,30}\b/g)) {
+      pushCandidate(match[0], "", 65, match.index || 0);
+    }
+  }
+
+  return Array.from(candidates.values()).sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    return left.index - right.index;
+  });
+}
+
+function extractZipCodesFromText(text) {
+  const matches = String(text || "").match(/\b\d{5}(?:-\d{4})?\b/g) || [];
+  const seen = new Set();
+  const zipCodes = [];
+  for (const match of matches) {
+    const zipCode = String(match || "").slice(0, 5);
+    if (/^\d{5}$/.test(zipCode) && !seen.has(zipCode)) {
+      seen.add(zipCode);
+      zipCodes.push(zipCode);
+    }
+  }
+  return zipCodes.slice(0, 8);
+}
+
+function extractShippingLabelsFromPdfBuffer(pdfBuffer) {
+  const segments = extractPdfTextSegments(pdfBuffer);
+  const labels = [];
+  const seenTrackingNumbers = new Set();
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const normalizedSegmentText = normalizePdfExtractedText(segment);
+    const candidates = extractTrackingCandidatesFromText(segment);
+    if (candidates.length === 0) {
+      continue;
+    }
+    for (const candidate of candidates) {
+      const trackingNumber = normalizeTrackingNumber(candidate.trackingNumber);
+      if (!trackingNumber || seenTrackingNumbers.has(trackingNumber)) {
+        continue;
+      }
+      seenTrackingNumbers.add(trackingNumber);
+      const carrier = inferCarrierFromTrackingNumber(trackingNumber, candidate.carrier);
+      labels.push({
+        index: index + 1,
+        trackingNumber,
+        carrier,
+        trackingUrl: buildCarrierTrackingUrl(carrier, trackingNumber),
+        zipCodes: extractZipCodesFromText(normalizedSegmentText),
+        preview: normalizedSegmentText.slice(0, 220),
+        matchText: normalizedSegmentText.slice(0, 3000)
+      });
+      break;
+    }
+  }
+
+  if (labels.length > 0) {
+    return labels;
+  }
+
+  const fallbackText = normalizePdfExtractedText(pdfBuffer.toString("latin1"));
+  const fallbackCandidates = extractTrackingCandidatesFromText(fallbackText);
+  for (let index = 0; index < fallbackCandidates.length; index += 1) {
+    const candidate = fallbackCandidates[index];
+    const trackingNumber = normalizeTrackingNumber(candidate.trackingNumber);
+    if (!trackingNumber || seenTrackingNumbers.has(trackingNumber)) {
+      continue;
+    }
+    seenTrackingNumbers.add(trackingNumber);
+    const carrier = inferCarrierFromTrackingNumber(trackingNumber, candidate.carrier);
+    labels.push({
+      index: index + 1,
+      trackingNumber,
+      carrier,
+      trackingUrl: buildCarrierTrackingUrl(carrier, trackingNumber),
+      zipCodes: [],
+      preview: "",
+      matchText: ""
+    });
+  }
+
+  return labels;
+}
+
 function buildUspsFromAddress() {
   const sourceName = uspsFromName || uspsFromCompany || "Shipper";
   const name = splitPersonName(sourceName, "Shipper");
@@ -4425,6 +4906,41 @@ app.post("/api/admin/orders/:id/usps-label", requireAdmin, async (req, res) => {
   }
 });
 
+app.post("/api/admin/shipping/parse-label-pdf", requireAdmin, labelPdfUpload.single("labelsPdf"), (req, res) => {
+  const file = req.file;
+  if (!file?.buffer || file.buffer.length === 0) {
+    return res.status(400).json({ error: "Attach a labels PDF before continuing." });
+  }
+
+  const mime = String(file.mimetype || "").toLowerCase();
+  const originalName = String(file.originalname || "").toLowerCase();
+  if (!mime.includes("pdf") && !originalName.endsWith(".pdf")) {
+    return res.status(400).json({ error: "Only PDF shipping label files are supported." });
+  }
+
+  const labels = extractShippingLabelsFromPdfBuffer(file.buffer).map((entry) => ({
+    index: Number(entry?.index) || 0,
+    trackingNumber: normalizeTrackingNumber(entry?.trackingNumber),
+    carrier: normalizeCarrierName(entry?.carrier),
+    trackingUrl: String(entry?.trackingUrl || "").trim(),
+    zipCodes: Array.isArray(entry?.zipCodes) ? entry.zipCodes.filter((zipCode) => /^\d{5}$/.test(String(zipCode || ""))) : [],
+    preview: normalizePdfExtractedText(entry?.preview || "").slice(0, 220),
+    matchText: normalizePdfExtractedText(entry?.matchText || "").slice(0, 3000)
+  }));
+  const validLabels = labels.filter((entry) => Boolean(entry.trackingNumber));
+  if (validLabels.length === 0) {
+    return res.status(400).json({
+      error: "No tracking numbers were found in that PDF. Use a text-based labels PDF, then try again."
+    });
+  }
+
+  return res.json({
+    ok: true,
+    labels: validLabels,
+    totalLabels: validLabels.length
+  });
+});
+
 app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
   const orderId = String(req.params.id || "").trim();
   if (!orderId) {
@@ -5595,6 +6111,9 @@ app.use((error, req, res, next) => {
   if (isApiRequest) {
     if (error instanceof multer.MulterError) {
       if (error.code === "LIMIT_FILE_SIZE") {
+        if (String(error.field || "").trim() === "labelsPdf") {
+          return res.status(400).json({ error: "Labels PDF must be 20MB or smaller." });
+        }
         return res.status(400).json({ error: "Image must be 6MB or smaller." });
       }
       return res.status(400).json({ error: error.message });
