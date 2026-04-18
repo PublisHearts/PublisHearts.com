@@ -2522,6 +2522,187 @@ function buildCarrierTrackingUrl(carrier, trackingNumber) {
   return "";
 }
 
+function parsePdfHexToUnicodeString(value) {
+  const cleaned = String(value || "").replace(/[^0-9A-Fa-f]/g, "");
+  if (!cleaned) {
+    return "";
+  }
+  const evenLength = cleaned.length % 4 === 0 ? cleaned : cleaned.padEnd(cleaned.length + (4 - (cleaned.length % 4)), "0");
+  let output = "";
+  for (let index = 0; index + 3 < evenLength.length; index += 4) {
+    const codeUnit = Number.parseInt(evenLength.slice(index, index + 4), 16);
+    if (Number.isFinite(codeUnit)) {
+      output += String.fromCharCode(codeUnit);
+    }
+  }
+  return output;
+}
+
+function parsePdfCharacterMapFromCMapText(cmapText) {
+  const source = String(cmapText || "");
+  if (!source.includes("begincmap")) {
+    return new Map();
+  }
+
+  const map = new Map();
+  const lines = source.split(/\r?\n/);
+  let mode = "";
+
+  for (const rawLine of lines) {
+    const line = String(rawLine || "").trim();
+    if (!line) {
+      continue;
+    }
+    if (/beginbfchar$/i.test(line)) {
+      mode = "bfchar";
+      continue;
+    }
+    if (/beginbfrange$/i.test(line)) {
+      mode = "bfrange";
+      continue;
+    }
+    if (/^endbfchar$/i.test(line) || /^endbfrange$/i.test(line)) {
+      mode = "";
+      continue;
+    }
+
+    if (mode === "bfchar") {
+      const match = line.match(/^<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/);
+      if (!match) {
+        continue;
+      }
+      const sourceCode = Number.parseInt(match[1], 16);
+      const mappedValue = parsePdfHexToUnicodeString(match[2]);
+      if (Number.isFinite(sourceCode) && mappedValue) {
+        map.set(sourceCode, mappedValue);
+      }
+      continue;
+    }
+
+    if (mode === "bfrange") {
+      let match = line.match(/^<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/);
+      if (match) {
+        const sourceStart = Number.parseInt(match[1], 16);
+        const sourceEnd = Number.parseInt(match[2], 16);
+        const mappedStart = Number.parseInt(match[3], 16);
+        if (
+          Number.isFinite(sourceStart) &&
+          Number.isFinite(sourceEnd) &&
+          Number.isFinite(mappedStart) &&
+          sourceEnd >= sourceStart &&
+          sourceEnd - sourceStart <= 2048
+        ) {
+          for (let code = sourceStart; code <= sourceEnd; code += 1) {
+            map.set(code, String.fromCharCode(mappedStart + (code - sourceStart)));
+          }
+        }
+        continue;
+      }
+
+      match = line.match(/^<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*\[(.+)\]$/);
+      if (!match) {
+        continue;
+      }
+      const sourceStart = Number.parseInt(match[1], 16);
+      const sourceEnd = Number.parseInt(match[2], 16);
+      if (!Number.isFinite(sourceStart) || !Number.isFinite(sourceEnd) || sourceEnd < sourceStart || sourceEnd - sourceStart > 2048) {
+        continue;
+      }
+      const mappedEntries = Array.from(match[3].matchAll(/<([0-9A-Fa-f]+)>/g)).map((entry) =>
+        parsePdfHexToUnicodeString(entry[1])
+      );
+      for (let offset = 0; offset <= sourceEnd - sourceStart && offset < mappedEntries.length; offset += 1) {
+        if (mappedEntries[offset]) {
+          map.set(sourceStart + offset, mappedEntries[offset]);
+        }
+      }
+    }
+  }
+
+  return map;
+}
+
+function decodePdfStreamTextCandidates(streamBuffer) {
+  const decoded = [];
+  const seen = new Set();
+  const pushCandidate = (bufferValue) => {
+    if (!Buffer.isBuffer(bufferValue) || bufferValue.length === 0) {
+      return;
+    }
+    const text = bufferValue.toString("latin1");
+    if (!text || seen.has(text)) {
+      return;
+    }
+    seen.add(text);
+    decoded.push(text);
+  };
+
+  pushCandidate(streamBuffer);
+  try {
+    pushCandidate(inflateSync(streamBuffer));
+  } catch {}
+  try {
+    pushCandidate(inflateRawSync(streamBuffer));
+  } catch {}
+  return decoded;
+}
+
+function extractPdfCharacterMap(pdfBuffer) {
+  if (!Buffer.isBuffer(pdfBuffer) || pdfBuffer.length === 0) {
+    return new Map();
+  }
+  const source = pdfBuffer.toString("latin1");
+  const collectedMaps = [];
+  let cursor = 0;
+
+  while (cursor < source.length) {
+    const streamIndex = source.indexOf("stream", cursor);
+    if (streamIndex < 0) {
+      break;
+    }
+    let streamStart = streamIndex + 6;
+    if (source.startsWith("\r\n", streamStart)) {
+      streamStart += 2;
+    } else if (source[streamStart] === "\n") {
+      streamStart += 1;
+    }
+    const streamEnd = source.indexOf("endstream", streamStart);
+    if (streamEnd < 0) {
+      break;
+    }
+    let dataEnd = streamEnd;
+    if (source[dataEnd - 1] === "\n") {
+      dataEnd -= 1;
+    }
+    if (source[dataEnd - 1] === "\r") {
+      dataEnd -= 1;
+    }
+    if (dataEnd > streamStart) {
+      const streamBuffer = pdfBuffer.subarray(streamStart, dataEnd);
+      for (const streamText of decodePdfStreamTextCandidates(streamBuffer)) {
+        if (!streamText.includes("begincmap")) {
+          continue;
+        }
+        const map = parsePdfCharacterMapFromCMapText(streamText);
+        if (map.size > 0) {
+          collectedMaps.push(map);
+        }
+      }
+    }
+    cursor = streamEnd + 9;
+  }
+
+  const merged = new Map();
+  for (const map of collectedMaps) {
+    for (const [sourceCode, mappedValue] of map.entries()) {
+      if (!merged.has(sourceCode) && mappedValue) {
+        merged.set(sourceCode, mappedValue);
+      }
+    }
+  }
+  return merged;
+}
+
 function decodePdfLiteralStringToken(token) {
   const source = String(token || "");
   let output = "";
@@ -2590,7 +2771,75 @@ function decodePdfLiteralStringToken(token) {
   return output;
 }
 
-function extractPdfLiteralStrings(sourceText) {
+function decodePdfTextWithCharacterMap(value, characterMap = null) {
+  const source = String(value || "");
+  if (!source) {
+    return "";
+  }
+
+  const bytes = Buffer.from(source, "latin1");
+  if (bytes.length === 0) {
+    return "";
+  }
+
+  const hasCharacterMap = characterMap instanceof Map && characterMap.size > 0;
+  if (bytes.length % 2 === 0) {
+    let mappedCount = 0;
+    let output = "";
+    for (let index = 0; index < bytes.length; index += 2) {
+      const code = (bytes[index] << 8) | bytes[index + 1];
+      if (hasCharacterMap && characterMap.has(code)) {
+        output += String(characterMap.get(code) || "");
+        mappedCount += 1;
+        continue;
+      }
+      if (bytes[index] === 0 && bytes[index + 1] >= 0x20 && bytes[index + 1] <= 0x7e) {
+        output += String.fromCharCode(bytes[index + 1]);
+        continue;
+      }
+      if (code === 0x09 || code === 0x0a || code === 0x0d) {
+        output += String.fromCharCode(code);
+        continue;
+      }
+      if (code >= 0x20 && code <= 0x7e) {
+        output += String.fromCharCode(code);
+      } else {
+        output += " ";
+      }
+    }
+    if (mappedCount > 0) {
+      return output;
+    }
+  }
+
+  if (hasCharacterMap) {
+    let mappedCount = 0;
+    let output = "";
+    for (const byteValue of bytes) {
+      if (characterMap.has(byteValue)) {
+        output += String(characterMap.get(byteValue) || "");
+        mappedCount += 1;
+        continue;
+      }
+      if (byteValue === 0x09 || byteValue === 0x0a || byteValue === 0x0d) {
+        output += String.fromCharCode(byteValue);
+        continue;
+      }
+      if (byteValue >= 0x20 && byteValue <= 0x7e) {
+        output += String.fromCharCode(byteValue);
+      } else {
+        output += " ";
+      }
+    }
+    if (mappedCount > 0) {
+      return output;
+    }
+  }
+
+  return source;
+}
+
+function extractPdfLiteralStrings(sourceText, characterMap = null) {
   const source = String(sourceText || "");
   const tokens = [];
   let index = 0;
@@ -2637,7 +2886,7 @@ function extractPdfLiteralStrings(sourceText) {
       index += 1;
     }
 
-    const decoded = decodePdfLiteralStringToken(token);
+    const decoded = decodePdfTextWithCharacterMap(decodePdfLiteralStringToken(token), characterMap);
     if (decoded) {
       tokens.push(decoded);
     }
@@ -2646,20 +2895,21 @@ function extractPdfLiteralStrings(sourceText) {
   return tokens;
 }
 
-function decodePdfHexStringToken(token) {
+function decodePdfHexStringToken(token, characterMap = null) {
   const cleaned = String(token || "").replace(/[^0-9A-Fa-f]/g, "");
   if (!cleaned) {
     return "";
   }
   const evenLengthHex = cleaned.length % 2 === 0 ? cleaned : `${cleaned}0`;
   try {
-    return Buffer.from(evenLengthHex, "hex").toString("latin1");
+    const decoded = Buffer.from(evenLengthHex, "hex").toString("latin1");
+    return decodePdfTextWithCharacterMap(decoded, characterMap);
   } catch {
     return "";
   }
 }
 
-function extractPdfHexStrings(sourceText) {
+function extractPdfHexStrings(sourceText, characterMap = null) {
   const source = String(sourceText || "");
   const tokens = [];
   let index = 0;
@@ -2680,7 +2930,7 @@ function extractPdfHexStrings(sourceText) {
     }
 
     const raw = source.slice(index + 1, endIndex);
-    const decoded = decodePdfHexStringToken(raw);
+    const decoded = decodePdfHexStringToken(raw, characterMap);
     if (decoded) {
       tokens.push(decoded);
     }
@@ -2697,27 +2947,15 @@ function normalizePdfExtractedText(value) {
     .trim();
 }
 
-function extractPdfTextFromStreamBuffer(streamBuffer) {
+function extractPdfTextFromStreamBuffer(streamBuffer, characterMap = null) {
   const texts = [];
-  const pushExtractedText = (bufferValue) => {
-    if (!Buffer.isBuffer(bufferValue) || bufferValue.length === 0) {
-      return;
-    }
-    const source = bufferValue.toString("latin1");
-    const pieces = [...extractPdfLiteralStrings(source), ...extractPdfHexStrings(source)];
+  for (const source of decodePdfStreamTextCandidates(streamBuffer)) {
+    const pieces = [...extractPdfLiteralStrings(source, characterMap), ...extractPdfHexStrings(source, characterMap)];
     const extracted = normalizePdfExtractedText(pieces.join(" "));
     if (extracted) {
       texts.push(extracted);
     }
-  };
-
-  pushExtractedText(streamBuffer);
-  try {
-    pushExtractedText(inflateSync(streamBuffer));
-  } catch {}
-  try {
-    pushExtractedText(inflateRawSync(streamBuffer));
-  } catch {}
+  }
 
   const seen = new Set();
   return texts.filter((entry) => {
@@ -2735,6 +2973,7 @@ function extractPdfTextSegments(pdfBuffer) {
   }
   const source = pdfBuffer.toString("latin1");
   const segments = [];
+  const characterMap = extractPdfCharacterMap(pdfBuffer);
   let cursor = 0;
 
   while (cursor < source.length) {
@@ -2762,7 +3001,7 @@ function extractPdfTextSegments(pdfBuffer) {
 
     if (dataEnd > streamStart) {
       const streamBuffer = pdfBuffer.subarray(streamStart, dataEnd);
-      const streamTexts = extractPdfTextFromStreamBuffer(streamBuffer);
+      const streamTexts = extractPdfTextFromStreamBuffer(streamBuffer, characterMap);
       for (const text of streamTexts) {
         if (text.length >= 8) {
           segments.push(text);
@@ -2773,7 +3012,7 @@ function extractPdfTextSegments(pdfBuffer) {
   }
 
   if (segments.length === 0) {
-    const fallbackPieces = [...extractPdfLiteralStrings(source), ...extractPdfHexStrings(source)];
+    const fallbackPieces = [...extractPdfLiteralStrings(source, characterMap), ...extractPdfHexStrings(source, characterMap)];
     const fallbackText = normalizePdfExtractedText(fallbackPieces.join(" "));
     if (fallbackText) {
       segments.push(fallbackText);
@@ -2868,23 +3107,33 @@ function extractShippingLabelsFromPdfBuffer(pdfBuffer) {
     if (candidates.length === 0) {
       continue;
     }
-    for (const candidate of candidates) {
+    const candidatesByPosition = [...candidates].sort((left, right) => {
+      if (left.index !== right.index) {
+        return left.index - right.index;
+      }
+      return right.score - left.score;
+    });
+    for (let candidateOffset = 0; candidateOffset < candidatesByPosition.length; candidateOffset += 1) {
+      const candidate = candidatesByPosition[candidateOffset];
       const trackingNumber = normalizeTrackingNumber(candidate.trackingNumber);
       if (!trackingNumber || seenTrackingNumbers.has(trackingNumber)) {
         continue;
       }
       seenTrackingNumbers.add(trackingNumber);
       const carrier = inferCarrierFromTrackingNumber(trackingNumber, candidate.carrier);
+      const contextStart = Math.max(0, Math.floor(Number(candidate.index) || 0) - 220);
+      const contextEnd = Math.min(segment.length, Math.floor(Number(candidate.index) || 0) + 260);
+      const contextSource = segment.slice(contextStart, contextEnd);
+      const normalizedContextText = normalizePdfExtractedText(contextSource) || normalizedSegmentText;
       labels.push({
-        index: index + 1,
+        index: index * 100 + candidateOffset + 1,
         trackingNumber,
         carrier,
         trackingUrl: buildCarrierTrackingUrl(carrier, trackingNumber),
-        zipCodes: extractZipCodesFromText(normalizedSegmentText),
-        preview: normalizedSegmentText.slice(0, 220),
-        matchText: normalizedSegmentText.slice(0, 3000)
+        zipCodes: extractZipCodesFromText(normalizedContextText),
+        preview: normalizedContextText.slice(0, 220),
+        matchText: normalizedContextText.slice(0, 3000)
       });
-      break;
     }
   }
 
