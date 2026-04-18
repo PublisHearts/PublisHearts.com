@@ -1448,15 +1448,11 @@ function choosePdfFile() {
     input.style.left = "-9999px";
     document.body.appendChild(input);
     let settled = false;
-    let focusTimer = 0;
     const finish = (file = null) => {
       if (settled) {
         return;
       }
       settled = true;
-      if (focusTimer) {
-        window.clearTimeout(focusTimer);
-      }
       input.remove();
       resolve(file);
     };
@@ -1468,17 +1464,6 @@ function choosePdfFile() {
     input.addEventListener("cancel", () => {
       finish(null);
     });
-    window.addEventListener(
-      "focus",
-      () => {
-        focusTimer = window.setTimeout(() => {
-          if (!settled && (!input.files || input.files.length === 0)) {
-            finish(null);
-          }
-        }, 0);
-      },
-      { once: true }
-    );
 
     input.click();
   });
