@@ -1277,30 +1277,31 @@ async function loadOrders() {
 function promptShipmentDetails(options = {}) {
   const multiple = options?.multiple === true;
   const count = Math.max(1, Math.round(Number(options?.count) || 1));
+  const defaults = options?.defaults || {};
   const carrier = window.prompt(
     multiple ? `Carrier name (optional, applies to ${count} orders):` : "Carrier name (optional):",
-    ""
+    String(defaults.carrier || "")
   );
   if (carrier === null) {
     return null;
   }
   const trackingNumber = window.prompt(
     multiple ? "Tracking number (optional, leave blank if each order has its own label):" : "Tracking number (optional):",
-    ""
+    String(defaults.trackingNumber || "")
   );
   if (trackingNumber === null) {
     return null;
   }
   const trackingUrl = window.prompt(
     multiple ? "Tracking URL (optional, applies to all selected orders):" : "Tracking URL (optional):",
-    ""
+    String(defaults.trackingUrl || "")
   );
   if (trackingUrl === null) {
     return null;
   }
   const note = window.prompt(
     multiple ? "Optional shipment note for every selected customer email:" : "Optional shipment note for customer email:",
-    ""
+    String(defaults.note || "")
   );
   if (note === null) {
     return null;
@@ -2453,14 +2454,35 @@ ordersEl?.addEventListener("click", async (event) => {
   }
 
   if (action === "resend-shipped-email") {
-    if (!window.confirm("Send shipment email to this customer now?")) {
+    const existingShipmentDetails = {
+      carrier: String(selectedOrder?.shipmentCarrier || "").trim(),
+      trackingNumber: String(selectedOrder?.shipmentTrackingNumber || "").trim(),
+      trackingUrl: String(selectedOrder?.shipmentTrackingUrl || "").trim(),
+      note: String(selectedOrder?.shipmentNote || "").trim()
+    };
+    const hasExistingTracking = Boolean(existingShipmentDetails.trackingNumber || existingShipmentDetails.trackingUrl);
+    const firstPrompt = hasExistingTracking
+      ? "Send shipment email to this customer now?"
+      : "This order has no tracking saved yet. Add tracking details now and send the shipment email?";
+    if (!window.confirm(firstPrompt)) {
       return;
+    }
+
+    let shipmentDetails = {};
+    if (!hasExistingTracking || window.confirm("Add or update tracking details before sending this shipment email?")) {
+      const nextDetails = promptShipmentDetails({
+        defaults: existingShipmentDetails
+      });
+      if (!nextDetails) {
+        return;
+      }
+      shipmentDetails = nextDetails;
     }
 
     setOrdersBusy(true);
     setOrdersMessage("Queueing shipment email...");
     try {
-      await shipOrder(orderId, {}, {
+      await shipOrder(orderId, shipmentDetails, {
         resendEmail: true
       });
       setOrdersMessage(`Shipment email queued again for order ${orderId}.`);

@@ -2522,6 +2522,80 @@ function buildCarrierTrackingUrl(carrier, trackingNumber) {
   return "";
 }
 
+function looksLikeTrackingNumber(value) {
+  const normalized = normalizeTrackingNumber(value);
+  if (!normalized || normalized.length < 10 || normalized.length > 34) {
+    return false;
+  }
+  if (/^1Z[0-9A-Z]{16}$/.test(normalized)) {
+    return true;
+  }
+  if (/^(?:92|93|94|95|96|97)\d{18,24}$/.test(normalized)) {
+    return true;
+  }
+  if (/^420\d{5}9\d{20,24}$/.test(normalized)) {
+    return true;
+  }
+  if (/^\d{12,30}$/.test(normalized)) {
+    return true;
+  }
+  return /[0-9]/.test(normalized);
+}
+
+function extractTrackingNumberFromTrackingUrl(trackingUrl) {
+  const source = String(trackingUrl || "").trim();
+  if (!source) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(source);
+    const keys = ["tLabels", "tracknum", "trknbr", "tracking-id", "trackingNumber", "trackingnumber", "tracking"];
+    for (const key of keys) {
+      const candidate = normalizeTrackingNumber(parsed.searchParams.get(key) || "");
+      if (looksLikeTrackingNumber(candidate)) {
+        return candidate;
+      }
+    }
+  } catch {}
+
+  const regexCandidates = [
+    /1Z[0-9A-Z]{16}/i,
+    /(?:92|93|94|95|96|97)\d{18,24}/,
+    /420\d{5}9\d{20,24}/,
+    /\d{12,30}/
+  ];
+  for (const expression of regexCandidates) {
+    const match = source.match(expression);
+    if (!match || !match[0]) {
+      continue;
+    }
+    const candidate = normalizeTrackingNumber(match[0]);
+    if (looksLikeTrackingNumber(candidate)) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
+function resolveTrackingNumberForShipment({ trackingNumber, trackingUrl, labelId } = {}) {
+  const direct = normalizeTrackingNumber(trackingNumber);
+  if (looksLikeTrackingNumber(direct)) {
+    return direct;
+  }
+
+  const fromUrl = extractTrackingNumberFromTrackingUrl(trackingUrl);
+  if (looksLikeTrackingNumber(fromUrl)) {
+    return fromUrl;
+  }
+
+  const fromLabel = normalizeTrackingNumber(labelId);
+  if (looksLikeTrackingNumber(fromLabel)) {
+    return fromLabel;
+  }
+  return "";
+}
+
 function parsePdfHexToUnicodeString(value) {
   const cleaned = String(value || "").replace(/[^0-9A-Fa-f]/g, "");
   if (!cleaned) {
@@ -5227,11 +5301,11 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
         carrierRaw !== undefined
           ? String(carrierRaw || "").trim().slice(0, 80)
           : String(manualOrder.shipmentCarrier || "").trim().slice(0, 80);
-      const trackingNumber =
+      let trackingNumber =
         trackingNumberRaw !== undefined
           ? String(trackingNumberRaw || "").trim().slice(0, 140)
           : String(manualOrder.shipmentTrackingNumber || "").trim().slice(0, 140);
-      const trackingUrl =
+      let trackingUrl =
         trackingUrlRaw !== undefined
           ? String(trackingUrlRaw || "").trim().slice(0, 500)
           : String(manualOrder.shipmentTrackingUrl || "").trim().slice(0, 500);
@@ -5239,12 +5313,26 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
         noteRaw !== undefined
           ? String(noteRaw || "").trim().slice(0, 500)
           : String(manualOrder.shipmentNote || "").trim().slice(0, 500);
+      const fallbackLabelId = String(manualOrder.shipmentLabelId || "").trim();
+      trackingNumber = resolveTrackingNumberForShipment({
+        trackingNumber,
+        trackingUrl,
+        labelId: fallbackLabelId
+      }).slice(0, 140);
+      if (!trackingUrl && trackingNumber) {
+        trackingUrl = buildCarrierTrackingUrl(carrier, trackingNumber).slice(0, 500);
+      }
       const existingStatus = normalizeFulfillmentStatus(manualOrder.fulfillmentStatus);
       if (existingStatus === "shipped" && !resendEmail) {
         return res.json({
           ok: true,
           alreadyShipped: true,
           message: "Order already marked shipped. Use resendEmail=true to re-send shipment email."
+        });
+      }
+      if (sendEmail && !trackingNumber && !trackingUrl) {
+        return res.status(400).json({
+          error: "Tracking number or tracking URL is required before sending a shipment email."
         });
       }
 
@@ -5363,11 +5451,11 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
       carrierRaw !== undefined
         ? String(carrierRaw || "").trim().slice(0, 80)
         : String(currentMetadata.fulfillment_carrier || "").trim().slice(0, 80);
-    const trackingNumber =
+    let trackingNumber =
       trackingNumberRaw !== undefined
         ? String(trackingNumberRaw || "").trim().slice(0, 140)
         : String(currentMetadata.fulfillment_tracking_number || "").trim().slice(0, 140);
-    const trackingUrl =
+    let trackingUrl =
       trackingUrlRaw !== undefined
         ? String(trackingUrlRaw || "").trim().slice(0, 500)
         : String(currentMetadata.fulfillment_tracking_url || "").trim().slice(0, 500);
@@ -5375,12 +5463,26 @@ app.post("/api/admin/orders/:id/ship", requireAdmin, async (req, res) => {
       noteRaw !== undefined
         ? String(noteRaw || "").trim().slice(0, 500)
         : String(currentMetadata.fulfillment_note || "").trim().slice(0, 500);
+    const fallbackLabelId = String(currentMetadata.fulfillment_label_id || "").trim();
+    trackingNumber = resolveTrackingNumberForShipment({
+      trackingNumber,
+      trackingUrl,
+      labelId: fallbackLabelId
+    }).slice(0, 140);
+    if (!trackingUrl && trackingNumber) {
+      trackingUrl = buildCarrierTrackingUrl(carrier, trackingNumber).slice(0, 500);
+    }
     const existingStatus = normalizeFulfillmentStatus(currentMetadata.fulfillment_status);
     if (existingStatus === "shipped" && !resendEmail) {
       return res.json({
         ok: true,
         alreadyShipped: true,
         message: "Order already marked shipped. Use resendEmail=true to re-send shipment email."
+      });
+    }
+    if (sendEmail && !trackingNumber && !trackingUrl) {
+      return res.status(400).json({
+        error: "Tracking number or tracking URL is required before sending a shipment email."
       });
     }
 

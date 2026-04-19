@@ -65,6 +65,31 @@ function formatAddress(address) {
     .join(", ");
 }
 
+function extractPrimaryEmailAddress(value = "") {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  const angleMatch = text.match(/<([^>]+)>/);
+  if (angleMatch && angleMatch[1]) {
+    return String(angleMatch[1]).trim().toLowerCase();
+  }
+  const first = text.split(",")[0];
+  return String(first || "").trim().toLowerCase();
+}
+
+function buildOwnerBccAddressForRecipient(recipientEmail = "") {
+  if (!ownerEmail) {
+    return undefined;
+  }
+  const ownerNormalized = extractPrimaryEmailAddress(ownerEmail);
+  const recipientNormalized = extractPrimaryEmailAddress(recipientEmail);
+  if (!ownerNormalized || ownerNormalized === recipientNormalized) {
+    return undefined;
+  }
+  return ownerEmail;
+}
+
 function formatOrderSourceLabel(orderSource) {
   const normalized = String(orderSource || "").trim().toLowerCase();
   if (normalized === "admin_pos") {
@@ -182,6 +207,7 @@ export async function sendShipmentNotification({
   const safeTrackingNumber = String(trackingNumber || "").trim();
   const safeTrackingUrl = String(trackingUrl || "").trim();
   const safeNote = String(note || "").trim();
+  const ownerBcc = buildOwnerBccAddressForRecipient(customerEmail);
   const trackingBlockText = safeTrackingUrl
     ? `Tracking: ${safeTrackingUrl}`
     : safeTrackingNumber
@@ -196,6 +222,7 @@ export async function sendShipmentNotification({
   await transporter.sendMail({
     from: fromEmail,
     to: customerEmail,
+    bcc: ownerBcc,
     subject: `PublisHearts shipping update - Order ${orderId}`,
     text: `Good news - your PublisHearts order is on the way.
 
@@ -262,10 +289,12 @@ export async function sendCustomerReceipt({
   const shippingName = shippingDetails?.name || "Not provided";
   const shippingAddress = requiresShipping ? formatAddress(shippingDetails?.address) : "No shipping address required";
   const fulfillmentMode = requiresShipping ? "Ship this order" : "In-person / no shipping required";
+  const ownerBcc = buildOwnerBccAddressForRecipient(customerEmail);
 
   await transporter.sendMail({
     from: fromEmail,
     to: customerEmail,
+    bcc: ownerBcc,
     subject: `PublisHearts receipt - Order ${orderId}`,
     text: `Thank you for your order from PublisHearts.
 

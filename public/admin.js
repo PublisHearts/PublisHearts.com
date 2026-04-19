@@ -1865,20 +1865,21 @@ async function loadOrders() {
   renderOrders(payload);
 }
 
-function promptShipmentDetails() {
-  const carrier = window.prompt("Carrier name (optional):", "");
+function promptShipmentDetails(options = {}) {
+  const defaults = options?.defaults || {};
+  const carrier = window.prompt("Carrier name (optional):", String(defaults.carrier || ""));
   if (carrier === null) {
     return null;
   }
-  const trackingNumber = window.prompt("Tracking number (optional):", "");
+  const trackingNumber = window.prompt("Tracking number (optional):", String(defaults.trackingNumber || ""));
   if (trackingNumber === null) {
     return null;
   }
-  const trackingUrl = window.prompt("Tracking URL (optional):", "");
+  const trackingUrl = window.prompt("Tracking URL (optional):", String(defaults.trackingUrl || ""));
   if (trackingUrl === null) {
     return null;
   }
-  const note = window.prompt("Optional shipment note for customer email:", "");
+  const note = window.prompt("Optional shipment note for customer email:", String(defaults.note || ""));
   if (note === null) {
     return null;
   }
@@ -2650,8 +2651,29 @@ ordersEl?.addEventListener("click", async (event) => {
   }
 
   if (action === "resend-shipped-email") {
-    if (!window.confirm("Send shipment email to this customer now?")) {
+    const existingShipmentDetails = {
+      carrier: String(selectedOrder?.shipmentCarrier || "").trim(),
+      trackingNumber: String(selectedOrder?.shipmentTrackingNumber || "").trim(),
+      trackingUrl: String(selectedOrder?.shipmentTrackingUrl || "").trim(),
+      note: String(selectedOrder?.shipmentNote || "").trim()
+    };
+    const hasExistingTracking = Boolean(existingShipmentDetails.trackingNumber || existingShipmentDetails.trackingUrl);
+    const firstPrompt = hasExistingTracking
+      ? "Send shipment email to this customer now?"
+      : "This order has no tracking saved yet. Add tracking details now and send the shipment email?";
+    if (!window.confirm(firstPrompt)) {
       return;
+    }
+
+    let shipmentDetails = {};
+    if (!hasExistingTracking || window.confirm("Add or update tracking details before sending this shipment email?")) {
+      const nextDetails = promptShipmentDetails({
+        defaults: existingShipmentDetails
+      });
+      if (!nextDetails) {
+        return;
+      }
+      shipmentDetails = nextDetails;
     }
 
     setOrdersBusy(true);
@@ -2663,6 +2685,7 @@ ordersEl?.addEventListener("click", async (event) => {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
+          ...shipmentDetails,
           resendEmail: true
         })
       });
