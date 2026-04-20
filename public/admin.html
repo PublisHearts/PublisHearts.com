@@ -75,6 +75,137 @@
         </section>
 
         <section class="admin-section">
+          <div class="admin-section-head row-between">
+            <div>
+              <h2>Member Admin</h2>
+              <p>Promote premium members to member-admin role and review account status.</p>
+            </div>
+            <button id="refresh-members-btn" class="ghost-btn" type="button">Refresh Members</button>
+          </div>
+          <form id="member-admin-form" class="admin-form">
+            <div class="admin-form-grid">
+              <label>
+                Member Email
+                <input
+                  id="member-admin-email"
+                  name="memberAdminEmail"
+                  type="email"
+                  maxlength="180"
+                  placeholder="member@example.com"
+                  required
+                />
+              </label>
+              <div class="admin-form-actions">
+                <button id="member-admin-promote-btn" class="primary-btn" type="submit">Make Member Admin</button>
+              </div>
+            </div>
+          </form>
+          <p id="member-admin-message" class="checkout-message"></p>
+          <div id="admin-member-list" class="admin-products"></div>
+        </section>
+
+        <section class="admin-section">
+          <div class="admin-section-head row-between">
+            <div>
+              <h2>Membership Fulfillment</h2>
+              <p>Track owed monthly stickers/books, mark shipments sent, and monitor cancellations in real time.</p>
+            </div>
+            <button id="refresh-member-fulfillment-btn" class="ghost-btn" type="button">Refresh Fulfillment</button>
+          </div>
+          <form id="member-fulfillment-controls" class="admin-form">
+            <div class="admin-form-grid">
+              <label>
+                Month
+                <input id="member-fulfillment-month" type="month" required />
+              </label>
+              <div class="admin-form-actions">
+                <button id="member-fulfillment-load-btn" class="primary-btn" type="submit">Load Month</button>
+              </div>
+            </div>
+          </form>
+          <p id="member-fulfillment-summary" class="cart-item-sub"></p>
+          <p id="member-fulfillment-message" class="checkout-message"></p>
+          <div id="admin-member-fulfillment-list" class="admin-products"></div>
+        </section>
+
+        <section class="admin-section">
+          <div class="admin-section-head row-between">
+            <div>
+              <h2>Premium Ebook Library</h2>
+              <p>Upload member-only monthly ebooks and optional covers for subscriber access.</p>
+            </div>
+            <button id="refresh-premium-library-btn" class="ghost-btn" type="button">Refresh Library</button>
+          </div>
+          <form id="premium-library-form" class="admin-form" enctype="multipart/form-data">
+            <input id="premium-library-id" name="id" type="hidden" />
+            <div class="admin-form-grid">
+              <label>
+                Ebook Title
+                <input id="premium-library-title" name="title" type="text" maxlength="180" required />
+              </label>
+              <label>
+                Month Label
+                <input id="premium-library-month-label" name="monthLabel" type="text" maxlength="60" placeholder="April 2026" required />
+              </label>
+            </div>
+            <label>
+              Description
+              <textarea id="premium-library-description" name="description" rows="3" maxlength="1000" required></textarea>
+            </label>
+            <div class="admin-form-grid">
+              <label>
+                Upload Ebook PDF
+                <input id="premium-library-file" name="ebookFile" type="file" accept=".pdf,application/pdf" />
+              </label>
+              <label>
+                Or Existing Protected File URL
+                <input
+                  id="premium-library-file-url"
+                  name="fileUrl"
+                  type="text"
+                  maxlength="800"
+                  placeholder="/uploads/premium-ebooks/your-file.pdf"
+                />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="premium-library-remove-file" name="removeFile" type="checkbox" />
+              Remove existing ebook file
+            </label>
+            <div class="admin-form-grid">
+              <label>
+                Upload Cover Image
+                <input id="premium-library-cover-file" name="coverImage" type="file" accept="image/*" />
+              </label>
+              <label>
+                Or Cover Image URL
+                <input
+                  id="premium-library-cover-url"
+                  name="coverImageUrl"
+                  type="url"
+                  maxlength="800"
+                  placeholder="https://example.com/ebook-cover.jpg"
+                />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="premium-library-remove-cover" name="removeCoverImage" type="checkbox" />
+              Remove cover image
+            </label>
+            <div class="admin-form-actions">
+              <button id="save-premium-library-btn" class="primary-btn" type="submit">Save Ebook</button>
+              <button id="cancel-premium-library-edit-btn" class="ghost-btn" type="button">Cancel Edit</button>
+              <button id="new-premium-library-item-btn" class="ghost-btn" type="button">Add New Ebook</button>
+            </div>
+          </form>
+          <p id="premium-library-message" class="checkout-message"></p>
+          <p class="admin-help">
+            Tip: PDF uploads stay protected under <code>/uploads/premium-ebooks</code> and can only be opened by active members.
+          </p>
+          <div id="admin-premium-library-list" class="admin-products"></div>
+        </section>
+
+        <section class="admin-section">
           <div class="admin-section-head">
             <h2>Storefront Design</h2>
             <p>Control brand/logo, all customer-facing text, and colors.</p>

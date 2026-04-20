@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 import express from "express";
-import { createHash, randomUUID, timingSafeEqual } from "crypto";
+import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "crypto";
 import fs from "fs/promises";
 import multer from "multer";
 import os from "os";
@@ -61,6 +61,45 @@ import {
   findTerminalIntentById,
   upsertTerminalIntent
 } from "./data/terminalIntentStore.js";
+import {
+  MemberValidationError,
+  createMember,
+  ensureMemberStore,
+  findMemberByAuthTokenHash,
+  findMemberByEmail,
+  findMemberById,
+  findMemberByStripeCustomerId,
+  listMembers,
+  updateMember
+} from "./data/memberStore.js";
+import {
+  PremiumLibraryValidationError,
+  createPremiumLibraryItem,
+  deletePremiumLibraryItem,
+  ensurePremiumLibraryStore,
+  findPremiumLibraryItemById,
+  updatePremiumLibraryItem,
+  listPremiumLibraryItems
+} from "./data/premiumLibraryStore.js";
+import {
+  MemberCommunityValidationError,
+  createMemberCommunityPost,
+  ensureMemberCommunityStore,
+  listMemberCommunityPosts
+} from "./data/memberCommunityStore.js";
+import {
+  MemberEbookLoanValidationError,
+  ensureMemberEbookLoanStore,
+  findMemberEbookLoan,
+  upsertMemberEbookLoan
+} from "./data/memberEbookLoanStore.js";
+import {
+  MemberPerkFulfillmentValidationError,
+  ensureMemberPerkFulfillmentStore,
+  findMemberPerkFulfillmentRecord,
+  listMemberPerkFulfillmentRecords,
+  upsertMemberPerkFulfillmentRecord
+} from "./data/memberPerkFulfillmentStore.js";
 
 dotenv.config();
 const execFileAsync = promisify(execFile);
@@ -135,6 +174,10 @@ const parsedManualNonTaxStates = (process.env.MANUAL_NON_TAX_STATES || "AK,DE,MT
   .filter((code) => usStateCodes.has(code));
 const manualNonTaxStates = new Set(parsedManualNonTaxStates.length > 0 ? parsedManualNonTaxStates : ["AK", "DE", "MT", "NH", "OR"]);
 const adminPassword = (process.env.ADMIN_PASSWORD || "").trim();
+const stripeTierStandardPriceId = String(process.env.STRIPE_TIER_STANDARD_PRICE_ID || "").trim();
+const stripeTierPlusPriceId = String(process.env.STRIPE_TIER_PLUS_PRICE_ID || "").trim();
+const stripeTierPremiumPriceId = String(process.env.STRIPE_TIER_PREMIUM_PRICE_ID || "").trim();
+const memberPortalReturnPath = String(process.env.MEMBER_PORTAL_RETURN_PATH || "/membership.html").trim() || "/membership.html";
 const githubPushToken = (process.env.GITHUB_PUSH_TOKEN || "").trim();
 const githubRepoRaw = (process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY || "").trim();
 const githubRepoOwner = (process.env.GITHUB_REPO_OWNER || "PublisHearts").trim() || "PublisHearts";
@@ -146,6 +189,14 @@ const adminRenderUrl = (process.env.ADMIN_RENDER_URL || "https://dashboard.rende
 const adminFacebookUrl = (process.env.ADMIN_FACEBOOK_URL || "https://business.facebook.com/latest/home").trim();
 const adminAmazonKdpUrl = (process.env.ADMIN_AMAZON_KDP_URL || "https://kdp.amazon.com/").trim();
 const adminShippoUrl = (process.env.ADMIN_SHIPPO_URL || "https://apps.goshippo.com/orders").trim();
+const premiumEbookTokenSecret = String(
+  process.env.PREMIUM_EBOOK_TOKEN_SECRET || stripeSecretKey || adminPassword || "publishearts-premium-ebooks"
+).trim();
+const premiumEbookDownloadTokenTtlSeconds = Math.max(
+  60,
+  Number.parseInt(String(process.env.PREMIUM_EBOOK_TOKEN_TTL_SECONDS || "900"), 10) || 900
+);
+const premiumEbookProtectedUploadsPrefix = "/uploads/premium-ebooks/";
 const parsedShippingBaseWeightLbs = Number.parseFloat(
   String(process.env.SHIPPING_BASE_WEIGHT_LBS || process.env.SHIPPING_WEIGHT_PER_UNIT_LBS || "1.5")
 );
@@ -284,7 +335,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "../public");
 const uploadsDir = (process.env.UPLOADS_DIR || "").trim() || path.join(publicDir, "uploads");
+const premiumEbookUploadsDir = path.join(uploadsDir, "premium-ebooks");
 const allowedImageMimes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const allowedPdfMimes = new Set(["application/pdf", "application/x-pdf", "application/acrobat"]);
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
@@ -306,6 +359,55 @@ const upload = multer({
       return;
     }
     cb(null, true);
+  }
+});
+
+const premiumLibraryStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const fieldName = String(file?.fieldname || "").trim();
+    const targetDir = fieldName === "ebookFile" ? premiumEbookUploadsDir : uploadsDir;
+    fs.mkdir(targetDir, { recursive: true })
+      .then(() => cb(null, targetDir))
+      .catch((error) => cb(error));
+  },
+  filename: (req, file, cb) => {
+    const fieldName = String(file?.fieldname || "").trim();
+    const extension = path.extname(file?.originalname || "").toLowerCase().slice(0, 10);
+    const safeExt = /^\.[a-z0-9]+$/.test(extension)
+      ? extension
+      : fieldName === "ebookFile"
+        ? ".pdf"
+        : ".jpg";
+    cb(null, `${Date.now()}-${randomUUID().slice(0, 8)}${safeExt}`);
+  }
+});
+
+const premiumLibraryUpload = multer({
+  storage: premiumLibraryStorage,
+  limits: {
+    fileSize: 30 * 1024 * 1024
+  },
+  fileFilter: (req, file, cb) => {
+    const fieldName = String(file?.fieldname || "").trim();
+    const mime = String(file?.mimetype || "").trim().toLowerCase();
+    const originalName = String(file?.originalname || "").trim().toLowerCase();
+    if (fieldName === "ebookFile") {
+      if (allowedPdfMimes.has(mime) || mime.includes("pdf") || originalName.endsWith(".pdf")) {
+        cb(null, true);
+        return;
+      }
+      cb(new Error("Only PDF ebook uploads are allowed."));
+      return;
+    }
+    if (fieldName === "coverImage") {
+      if (allowedImageMimes.has(mime)) {
+        cb(null, true);
+        return;
+      }
+      cb(new Error("Only JPG, PNG, WEBP, or GIF cover uploads are allowed."));
+      return;
+    }
+    cb(new Error("Unsupported premium library upload field."));
   }
 });
 
@@ -2058,6 +2160,1027 @@ function secureEquals(left, right) {
   return timingSafeEqual(leftHash, rightHash);
 }
 
+const activePremiumSubscriptionStatuses = new Set(["active", "trialing"]);
+const membershipTierCatalog = {
+  standard: {
+    key: "standard",
+    label: "Standard",
+    monthlyPriceLabel: "$10.99 / month",
+    monthlyPriceCents: 1099,
+    ebookMonthlyLimit: 2,
+    allEbooksAccess: false,
+    includesRandomPaperback: false,
+    includesStickers: true,
+    priceId: stripeTierStandardPriceId
+  },
+  plus: {
+    key: "plus",
+    label: "Plus",
+    monthlyPriceLabel: "$11.99 / month",
+    monthlyPriceCents: 1199,
+    ebookMonthlyLimit: 4,
+    allEbooksAccess: false,
+    includesRandomPaperback: false,
+    includesStickers: true,
+    priceId: stripeTierPlusPriceId
+  },
+  premium: {
+    key: "premium",
+    label: "Premium",
+    monthlyPriceLabel: "$20.99 / month",
+    monthlyPriceCents: 2099,
+    ebookMonthlyLimit: null,
+    allEbooksAccess: true,
+    includesRandomPaperback: true,
+    includesStickers: true,
+    priceId: stripeTierPremiumPriceId
+  }
+};
+const membershipTierKeysInDisplayOrder = ["standard", "plus", "premium"];
+const membershipPlanPricingCacheTtlMs = 5 * 60 * 1000;
+const membershipPlanPricingCache = {
+  expiresAtMs: 0,
+  overridesByTierKey: new Map(),
+  invalidTierKeys: new Set()
+};
+
+function getMembershipTierPriceEnvVarName(tierKey) {
+  const key = normalizeMembershipTierKey(tierKey);
+  if (key === "standard") {
+    return "STRIPE_TIER_STANDARD_PRICE_ID";
+  }
+  if (key === "plus") {
+    return "STRIPE_TIER_PLUS_PRICE_ID";
+  }
+  if (key === "premium") {
+    return "STRIPE_TIER_PREMIUM_PRICE_ID";
+  }
+  return "STRIPE_TIER_<TIER>_PRICE_ID";
+}
+
+function extractMissingStripePriceIdFromErrorMessage(message) {
+  const text = String(message || "").trim();
+  if (!text) {
+    return "";
+  }
+  const singleQuoted = text.match(/No such price:\s*'([^']+)'/i);
+  if (singleQuoted?.[1]) {
+    return String(singleQuoted[1]).trim();
+  }
+  const doubleQuoted = text.match(/No such price:\s*"([^"]+)"/i);
+  if (doubleQuoted?.[1]) {
+    return String(doubleQuoted[1]).trim();
+  }
+  return "";
+}
+
+function isStripeMissingPriceError(error, expectedPriceId = "") {
+  const code = String(error?.code || "")
+    .trim()
+    .toLowerCase();
+  const message = String(error?.message || "")
+    .trim()
+    .toLowerCase();
+  if (message.includes("no such price")) {
+    return true;
+  }
+  if (code === "resource_missing" && message.includes("price")) {
+    return true;
+  }
+  const missingPriceId = extractMissingStripePriceIdFromErrorMessage(error?.message || "");
+  if (expectedPriceId && missingPriceId && missingPriceId === String(expectedPriceId).trim()) {
+    return true;
+  }
+  return false;
+}
+
+function formatCurrencyAmount(cents, currencyCode = "usd") {
+  const amount = (Number(cents) || 0) / 100;
+  const normalizedCurrency = String(currencyCode || "usd").trim().toUpperCase() || "USD";
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: normalizedCurrency
+    }).format(amount);
+  } catch {
+    return `$${amount.toFixed(2)}`;
+  }
+}
+
+function formatRecurringInterval(interval, intervalCount = 1) {
+  const normalized = String(interval || "")
+    .trim()
+    .toLowerCase();
+  if (!["day", "week", "month", "year"].includes(normalized)) {
+    return "";
+  }
+  const parsedCount = Number.parseInt(String(intervalCount || "1"), 10);
+  const count = Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : 1;
+  if (count === 1) {
+    return normalized;
+  }
+  return `${count} ${normalized}s`;
+}
+
+function formatMembershipTierPriceLabel({ amountCents = 0, currencyCode = "usd", interval = "month", intervalCount = 1 } = {}) {
+  const money = formatCurrencyAmount(amountCents, currencyCode);
+  const intervalLabel = formatRecurringInterval(interval, intervalCount);
+  if (!intervalLabel) {
+    return money;
+  }
+  return `${money} / ${intervalLabel}`;
+}
+
+function parseStripeUnitAmountCents(price) {
+  const direct = Number(price?.unit_amount);
+  if (Number.isFinite(direct)) {
+    return Math.round(direct);
+  }
+  const decimalRaw = String(price?.unit_amount_decimal || "").trim();
+  if (!decimalRaw) {
+    return Number.NaN;
+  }
+  const decimal = Number.parseFloat(decimalRaw);
+  return Number.isFinite(decimal) ? Math.round(decimal) : Number.NaN;
+}
+
+function cleanMemberDisplayName(value) {
+  const text = String(value || "").trim().slice(0, 80);
+  if (!text) {
+    throw new Error("Display name is required.");
+  }
+  if (text.length < 2) {
+    throw new Error("Display name must be at least 2 characters.");
+  }
+  return text;
+}
+
+function cleanMemberPassword(value) {
+  const password = String(value || "");
+  if (!password) {
+    throw new Error("Password is required.");
+  }
+  if (password.length < 8) {
+    throw new Error("Password must be at least 8 characters.");
+  }
+  if (password.length > 200) {
+    throw new Error("Password is too long.");
+  }
+  return password;
+}
+
+function createMemberPasswordSaltHex() {
+  return randomBytes(16).toString("hex");
+}
+
+function hashMemberPassword(password, saltHex) {
+  return scryptSync(password, saltHex, 64).toString("hex");
+}
+
+function createMemberAuthToken() {
+  return `${randomUUID().replace(/-/g, "")}${randomBytes(24).toString("hex")}`;
+}
+
+function hashMemberAuthToken(token) {
+  return createHash("sha256").update(String(token || ""), "utf8").digest("hex");
+}
+
+function readBearerToken(req) {
+  const rawHeader = String(req.headers?.authorization || "").trim();
+  if (!rawHeader.toLowerCase().startsWith("bearer ")) {
+    return "";
+  }
+  return rawHeader.slice(7).trim();
+}
+
+function isMemberPremiumActive(member) {
+  const status = String(member?.subscriptionStatus || "inactive")
+    .trim()
+    .toLowerCase();
+  return activePremiumSubscriptionStatuses.has(status);
+}
+
+function isMemberAdmin(member) {
+  const role = String(member?.role || "member")
+    .trim()
+    .toLowerCase();
+  return role === "admin";
+}
+
+function normalizeMembershipTierKey(value) {
+  const tier = String(value || "none")
+    .trim()
+    .toLowerCase();
+  if (tier in membershipTierCatalog) {
+    return tier;
+  }
+  return "none";
+}
+
+function getMembershipTierConfigByKey(tierKey) {
+  const key = normalizeMembershipTierKey(tierKey);
+  return key === "none" ? null : membershipTierCatalog[key];
+}
+
+function getMembershipTierConfigByPriceId(priceId) {
+  const target = String(priceId || "").trim();
+  if (!target) {
+    return null;
+  }
+  return membershipTierKeysInDisplayOrder
+    .map((key) => membershipTierCatalog[key])
+    .find((config) => String(config?.priceId || "").trim() === target) || null;
+}
+
+function getCurrentMonthKey(dateInput = new Date()) {
+  const date = dateInput instanceof Date ? dateInput : new Date(dateInput);
+  const year = date.getUTCFullYear();
+  const month = `${date.getUTCMonth() + 1}`.padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function cleanMonthKeyOrCurrent(value) {
+  const monthKey = String(value || "").trim();
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
+    return monthKey;
+  }
+  return getCurrentMonthKey();
+}
+
+function getMemberMonthlyPerkEligibility(member) {
+  const tierSummary = getMemberTierSummary(member);
+  const premiumActive = isMemberPremiumActive(member);
+  return {
+    stickersEligible: premiumActive && Boolean(tierSummary.includesStickers),
+    paperbackEligible: premiumActive && Boolean(tierSummary.includesRandomPaperback),
+    premiumActive
+  };
+}
+
+function normalizeAdminFulfillmentPerk(value) {
+  const perk = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (perk === "stickers" || perk === "paperback") {
+    return perk;
+  }
+  return "";
+}
+
+function parseAdminBoolean(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (["true", "1", "yes", "on"].includes(text)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(text)) {
+    return false;
+  }
+  return fallback;
+}
+
+function getMemberTierConfig(member) {
+  const tierKey = normalizeMembershipTierKey(member?.membershipTier);
+  const explicit = getMembershipTierConfigByKey(tierKey);
+  if (explicit) {
+    return explicit;
+  }
+  if (isMemberPremiumActive(member)) {
+    return membershipTierCatalog.standard;
+  }
+  return null;
+}
+
+function getMemberTierSummary(member) {
+  const tierConfig = getMemberTierConfig(member);
+  if (!tierConfig) {
+    return {
+      membershipTier: "none",
+      membershipTierLabel: "Free",
+      monthlyPriceLabel: "",
+      ebookMonthlyLimit: 0,
+      allEbooksAccess: false,
+      includesRandomPaperback: false,
+      includesStickers: false
+    };
+  }
+  return {
+    membershipTier: tierConfig.key,
+    membershipTierLabel: tierConfig.label,
+    monthlyPriceLabel: tierConfig.monthlyPriceLabel,
+    ebookMonthlyLimit: tierConfig.ebookMonthlyLimit,
+    allEbooksAccess: Boolean(tierConfig.allEbooksAccess),
+    includesRandomPaperback: Boolean(tierConfig.includesRandomPaperback),
+    includesStickers: Boolean(tierConfig.includesStickers)
+  };
+}
+
+function getMemberOrderLookupEmails(member) {
+  const emails = Array.isArray(member?.orderLookupEmails) ? member.orderLookupEmails : [];
+  const normalized = [];
+  const seen = new Set();
+  const addEmail = (value) => {
+    const email = safeNormalizeCustomerEmail(value);
+    if (!email || seen.has(email)) {
+      return;
+    }
+    seen.add(email);
+    normalized.push(email);
+  };
+  addEmail(member?.email);
+  for (const entry of emails) {
+    addEmail(entry);
+  }
+  return normalized;
+}
+
+function getMemberOrderLookupPhones(member) {
+  const phones = Array.isArray(member?.orderLookupPhones) ? member.orderLookupPhones : [];
+  return normalizePhoneList(phones);
+}
+
+function memberMatchesOrderContacts(memberContactSets, orderContacts) {
+  const memberEmails = memberContactSets?.emails instanceof Set ? memberContactSets.emails : new Set();
+  const memberPhones = memberContactSets?.phones instanceof Set ? memberContactSets.phones : new Set();
+  const orderEmails = Array.isArray(orderContacts?.emails) ? orderContacts.emails : [];
+  const orderPhones = Array.isArray(orderContacts?.phones) ? orderContacts.phones : [];
+  for (const email of orderEmails) {
+    if (email && memberEmails.has(email)) {
+      return true;
+    }
+  }
+  for (const phone of orderPhones) {
+    if (phone && memberPhones.has(phone)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getSubscriptionPriceIdFromStripeSubscription(subscription) {
+  const items = Array.isArray(subscription?.items?.data) ? subscription.items.data : [];
+  for (const item of items) {
+    const priceId = String(item?.price?.id || item?.plan?.id || "").trim();
+    if (priceId) {
+      return priceId;
+    }
+  }
+  return "";
+}
+
+function getSubscriptionTierConfig(subscription) {
+  const metadataTier = String(subscription?.metadata?.membership_tier || "").trim().toLowerCase();
+  const metadataConfig = getMembershipTierConfigByKey(metadataTier);
+  if (metadataConfig) {
+    return metadataConfig;
+  }
+  const priceId = getSubscriptionPriceIdFromStripeSubscription(subscription);
+  return getMembershipTierConfigByPriceId(priceId);
+}
+
+function getPublicMembershipPlans() {
+  return membershipTierKeysInDisplayOrder.map((key) => {
+    const config = membershipTierCatalog[key];
+    return {
+      key: config.key,
+      label: config.label,
+      monthlyPriceLabel: config.monthlyPriceLabel,
+      monthlyPriceCents: config.monthlyPriceCents,
+      ebookMonthlyLimit: config.ebookMonthlyLimit,
+      allEbooksAccess: Boolean(config.allEbooksAccess),
+      includesRandomPaperback: Boolean(config.includesRandomPaperback),
+      includesStickers: Boolean(config.includesStickers),
+      configured: Boolean(String(config.priceId || "").trim())
+    };
+  });
+}
+
+async function getPublicMembershipPlansWithLivePricing() {
+  const plans = getPublicMembershipPlans().map((plan) => ({ ...plan }));
+  if (!stripe) {
+    return plans;
+  }
+
+  const nowMs = Date.now();
+  if (membershipPlanPricingCache.expiresAtMs > nowMs) {
+    return plans.map((plan) => ({
+      ...plan,
+      ...(membershipPlanPricingCache.overridesByTierKey.get(plan.key) || {}),
+      configured: Boolean(plan.configured) && !membershipPlanPricingCache.invalidTierKeys.has(plan.key)
+    }));
+  }
+
+  const liveOverridesByTierKey = new Map();
+  const invalidTierKeys = new Set();
+  await Promise.all(
+    membershipTierKeysInDisplayOrder.map(async (tierKey) => {
+      const config = membershipTierCatalog[tierKey];
+      const priceId = String(config?.priceId || "").trim();
+      if (!priceId) {
+        return;
+      }
+      try {
+        const price = await stripe.prices.retrieve(priceId);
+        const amountCents = parseStripeUnitAmountCents(price);
+        if (!Number.isFinite(amountCents) || amountCents < 0) {
+          return;
+        }
+        const currencyCode = String(price?.currency || currency || "usd")
+          .trim()
+          .toLowerCase();
+        const interval = String(price?.recurring?.interval || "month")
+          .trim()
+          .toLowerCase();
+        const intervalCount = Number.parseInt(String(price?.recurring?.interval_count || "1"), 10) || 1;
+        liveOverridesByTierKey.set(tierKey, {
+          monthlyPriceCents: amountCents,
+          monthlyPriceLabel: formatMembershipTierPriceLabel({
+            amountCents,
+            currencyCode,
+            interval,
+            intervalCount
+          })
+        });
+      } catch (error) {
+        if (isStripeMissingPriceError(error, priceId)) {
+          invalidTierKeys.add(tierKey);
+          const envVarName = getMembershipTierPriceEnvVarName(tierKey);
+          console.warn(
+            `Membership tier "${tierKey}" has invalid Stripe price ID ${priceId}. Update ${envVarName} to a valid recurring Stripe price ID.`
+          );
+          return;
+        }
+        console.warn(`Could not load Stripe price for ${tierKey} membership tier:`, error);
+      }
+    })
+  );
+
+  membershipPlanPricingCache.expiresAtMs = Date.now() + membershipPlanPricingCacheTtlMs;
+  membershipPlanPricingCache.overridesByTierKey = liveOverridesByTierKey;
+  membershipPlanPricingCache.invalidTierKeys = invalidTierKeys;
+
+  return plans.map((plan) => ({
+    ...plan,
+    ...(liveOverridesByTierKey.get(plan.key) || {}),
+    configured: Boolean(plan.configured) && !invalidTierKeys.has(plan.key)
+  }));
+}
+
+function isBlockingPremiumSubscriptionStatus(status) {
+  const normalized = String(status || "")
+    .trim()
+    .toLowerCase();
+  return ["active", "trialing", "past_due", "unpaid", "incomplete", "paused"].includes(normalized);
+}
+
+function hasMemberBlockingPremiumSubscription(member) {
+  return isBlockingPremiumSubscriptionStatus(member?.subscriptionStatus);
+}
+
+function isProtectedPremiumEbookFileUrl(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized.startsWith(premiumEbookProtectedUploadsPrefix)) {
+    return false;
+  }
+  return !normalized.includes("\\") && !normalized.includes("..");
+}
+
+function resolvePremiumEbookFilePath(fileUrl) {
+  if (!isProtectedPremiumEbookFileUrl(fileUrl)) {
+    return "";
+  }
+  const relativePath = String(fileUrl || "")
+    .trim()
+    .slice(premiumEbookProtectedUploadsPrefix.length)
+    .replace(/^\/+/, "");
+  if (!relativePath) {
+    return "";
+  }
+  const baseDir = path.resolve(path.join(uploadsDir, "premium-ebooks"));
+  const absolutePath = path.resolve(path.join(baseDir, relativePath));
+  if (!absolutePath.startsWith(`${baseDir}${path.sep}`) && absolutePath !== baseDir) {
+    return "";
+  }
+  return absolutePath;
+}
+
+function buildPremiumEbookTokenPayload({ memberId, ebookId, monthKey, expiresAtUnix }) {
+  return `${String(memberId || "").trim()}|${String(ebookId || "").trim()}|${String(monthKey || "").trim()}|${String(
+    expiresAtUnix || ""
+  ).trim()}`;
+}
+
+function signPremiumEbookTokenPayload(payload) {
+  return createHmac("sha256", premiumEbookTokenSecret).update(payload, "utf8").digest("hex");
+}
+
+function createPremiumEbookDownloadToken({ memberId, ebookId, monthKey, nowUnix = Math.floor(Date.now() / 1000) }) {
+  const expiresAtUnix = nowUnix + premiumEbookDownloadTokenTtlSeconds;
+  const payload = buildPremiumEbookTokenPayload({
+    memberId,
+    ebookId,
+    monthKey,
+    expiresAtUnix
+  });
+  const signature = signPremiumEbookTokenPayload(payload);
+  return `${expiresAtUnix}.${signature}`;
+}
+
+function verifyPremiumEbookDownloadToken({ token, memberId, ebookId, monthKey, nowUnix = Math.floor(Date.now() / 1000) }) {
+  const text = String(token || "").trim();
+  const dotIndex = text.indexOf(".");
+  if (dotIndex <= 0) {
+    return false;
+  }
+  const expiresAtRaw = text.slice(0, dotIndex).trim();
+  const suppliedSignature = text.slice(dotIndex + 1).trim().toLowerCase();
+  const expiresAtUnix = Number.parseInt(expiresAtRaw, 10);
+  if (!Number.isFinite(expiresAtUnix) || expiresAtUnix <= nowUnix) {
+    return false;
+  }
+  if (!/^[a-f0-9]{64}$/.test(suppliedSignature)) {
+    return false;
+  }
+  const payload = buildPremiumEbookTokenPayload({
+    memberId,
+    ebookId,
+    monthKey,
+    expiresAtUnix
+  });
+  const expectedSignature = signPremiumEbookTokenPayload(payload);
+  return secureEquals(suppliedSignature, expectedSignature);
+}
+
+function pickDeterministicIndex(seed, size) {
+  if (!Number.isFinite(size) || size <= 0) {
+    return 0;
+  }
+  const digest = createHash("sha256").update(String(seed || ""), "utf8").digest();
+  const numeric = digest.readUInt32BE(0);
+  return numeric % size;
+}
+
+async function getMonthlyRandomPaperbackForMember(member, monthKey = getCurrentMonthKey()) {
+  const tierConfig = getMemberTierConfig(member);
+  if (!tierConfig || !tierConfig.includesRandomPaperback) {
+    return null;
+  }
+  const products = await listProducts();
+  const bookCandidates = products.filter((product) => {
+    const category = String(product?.productCategory || "book")
+      .trim()
+      .toLowerCase();
+    if (category !== "book") {
+      return false;
+    }
+    if (product?.inStock === false) {
+      return false;
+    }
+    if (product?.isComingSoon === true) {
+      return false;
+    }
+    return true;
+  });
+  if (bookCandidates.length === 0) {
+    return null;
+  }
+  const index = pickDeterministicIndex(`${member.id}:${monthKey}:paperback`, bookCandidates.length);
+  const selected = bookCandidates[index];
+  return {
+    id: selected.id,
+    title: selected.title,
+    imageUrl: selected.imageUrl || "",
+    monthKey
+  };
+}
+
+async function getMemberPremiumEbookAccessSnapshot(member) {
+  const tierConfig = getMemberTierConfig(member);
+  if (!tierConfig) {
+    return {
+      tierConfig: null,
+      monthKey: getCurrentMonthKey(),
+      items: [],
+      selectedIds: [],
+      selectedIdSet: new Set(),
+      maxSelections: 0
+    };
+  }
+
+  const monthKey = getCurrentMonthKey();
+  const items = await listPremiumLibraryItems();
+  const validItemIdSet = new Set(items.map((item) => item.id));
+  const currentLoan = await findMemberEbookLoan(member.id, monthKey);
+  const maxSelections = tierConfig.allEbooksAccess ? items.length : Math.max(0, Number(tierConfig.ebookMonthlyLimit) || 0);
+  const selectedIds = tierConfig.allEbooksAccess
+    ? items.map((item) => item.id)
+    : Array.isArray(currentLoan?.ebookIds)
+      ? currentLoan.ebookIds.filter((ebookId) => validItemIdSet.has(ebookId)).slice(0, maxSelections)
+      : [];
+  return {
+    tierConfig,
+    monthKey,
+    items,
+    selectedIds,
+    selectedIdSet: new Set(selectedIds),
+    maxSelections
+  };
+}
+
+function toIsoFromStripeTimestamp(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return "";
+  }
+  return new Date(parsed * 1000).toISOString();
+}
+
+function buildMemberClientPayload(member) {
+  if (!member) {
+    return null;
+  }
+  const tierSummary = getMemberTierSummary(member);
+  const orderLookupEmails = getMemberOrderLookupEmails(member);
+  const orderLookupPhones = getMemberOrderLookupPhones(member);
+  return {
+    id: member.id,
+    displayName: member.displayName,
+    email: member.email,
+    role: isMemberAdmin(member) ? "admin" : "member",
+    stripeCustomerId: member.stripeCustomerId || "",
+    stripeSubscriptionId: member.stripeSubscriptionId || "",
+    subscriptionStatus: member.subscriptionStatus || "inactive",
+    subscriptionCurrentPeriodEnd: member.subscriptionCurrentPeriodEnd || "",
+    subscriptionCancelAtPeriodEnd: Boolean(member.subscriptionCancelAtPeriodEnd),
+    premiumAccess: isMemberPremiumActive(member),
+    membershipTier: tierSummary.membershipTier,
+    membershipTierLabel: tierSummary.membershipTierLabel,
+    monthlyPriceLabel: tierSummary.monthlyPriceLabel,
+    ebookMonthlyLimit: tierSummary.ebookMonthlyLimit,
+    allEbooksAccess: tierSummary.allEbooksAccess,
+    includesRandomPaperback: tierSummary.includesRandomPaperback,
+    includesStickers: tierSummary.includesStickers,
+    orderLookupEmails,
+    orderLookupPhones,
+    createdAt: member.createdAt || "",
+    updatedAt: member.updatedAt || ""
+  };
+}
+
+function buildMemberAdminPayload(member) {
+  const profile = buildMemberClientPayload(member);
+  if (!profile) {
+    return null;
+  }
+  return {
+    ...profile,
+    lastLoginAt: member.lastLoginAt || "",
+    authTokenIssuedAt: member.authTokenIssuedAt || ""
+  };
+}
+
+function isTerminatedSubscriptionStatus(status) {
+  const normalized = String(status || "")
+    .trim()
+    .toLowerCase();
+  return ["canceled", "unpaid", "incomplete_expired"].includes(normalized);
+}
+
+function buildAdminMemberFulfillmentPayload(member, monthKey, record) {
+  const profile = buildMemberAdminPayload(member);
+  if (!profile) {
+    return null;
+  }
+
+  const eligibility = getMemberMonthlyPerkEligibility(member);
+  const stickersFulfilledAt = String(record?.stickersFulfilledAt || "").trim();
+  const paperbackFulfilledAt = String(record?.paperbackFulfilledAt || "").trim();
+  const premiumActive = eligibility.premiumActive;
+  const cancellationPending = premiumActive && Boolean(profile.subscriptionCancelAtPeriodEnd);
+  const terminated = !premiumActive && isTerminatedSubscriptionStatus(profile.subscriptionStatus);
+
+  return {
+    ...profile,
+    monthKey,
+    cancellationPending,
+    terminated,
+    perks: {
+      stickers: {
+        eligible: eligibility.stickersEligible,
+        fulfilled: Boolean(stickersFulfilledAt),
+        fulfilledAt: stickersFulfilledAt,
+        owed: eligibility.stickersEligible && !stickersFulfilledAt,
+        trackingNumber: String(record?.stickersTrackingNumber || "").trim(),
+        note: String(record?.stickersNote || "").trim()
+      },
+      paperback: {
+        eligible: eligibility.paperbackEligible,
+        fulfilled: Boolean(paperbackFulfilledAt),
+        fulfilledAt: paperbackFulfilledAt,
+        owed: eligibility.paperbackEligible && !paperbackFulfilledAt,
+        trackingNumber: String(record?.paperbackTrackingNumber || "").trim(),
+        note: String(record?.paperbackNote || "").trim()
+      }
+    }
+  };
+}
+
+async function resolveMemberFromAuthHeader(req) {
+  const token = readBearerToken(req);
+  if (!token) {
+    return null;
+  }
+  const tokenHash = hashMemberAuthToken(token);
+  return findMemberByAuthTokenHash(tokenHash);
+}
+
+async function requireMember(req, res, next) {
+  try {
+    const member = await resolveMemberFromAuthHeader(req);
+    if (!member) {
+      return res.status(401).json({ error: "Sign in required." });
+    }
+    req.member = member;
+    return next();
+  } catch (error) {
+    return res.status(500).json({ error: "Could not validate member session." });
+  }
+}
+
+async function requireActivePremiumMember(req, res, next) {
+  try {
+    const member = await resolveMemberFromAuthHeader(req);
+    if (!member) {
+      return res.status(401).json({ error: "Sign in required." });
+    }
+    if (!isMemberPremiumActive(member)) {
+      return res.status(403).json({
+        error: "Premium subscription required.",
+        subscriptionStatus: member.subscriptionStatus || "inactive"
+      });
+    }
+    req.member = member;
+    return next();
+  } catch (error) {
+    return res.status(500).json({ error: "Could not validate premium access." });
+  }
+}
+
+function requirePremiumPriceConfigForTier(tierKey, res) {
+  const config = getMembershipTierConfigByKey(tierKey);
+  if (!config) {
+    res.status(400).json({
+      error: "Select a valid membership tier."
+    });
+    return null;
+  }
+  if (!String(config.priceId || "").trim()) {
+    res.status(503).json({
+      error: `${config.label} membership is not configured. Add its Stripe price ID in environment variables.`
+    });
+    return null;
+  }
+  return config;
+}
+
+async function ensureStripeCustomerForMember(member) {
+  if (!stripe) {
+    throw new Error("Stripe is not configured.");
+  }
+
+  const existingCustomerId = String(member?.stripeCustomerId || "").trim();
+  if (existingCustomerId) {
+    return existingCustomerId;
+  }
+
+  const customer = await stripe.customers.create({
+    email: member.email,
+    name: member.displayName,
+    metadata: {
+      member_id: member.id
+    }
+  });
+
+  const createdCustomerId = String(customer?.id || "").trim();
+  if (!createdCustomerId) {
+    throw new Error("Stripe did not return a customer ID.");
+  }
+
+  await updateMember(member.id, {
+    stripeCustomerId: createdCustomerId
+  });
+  return createdCustomerId;
+}
+
+async function findBlockingStripeSubscriptionForCustomer(customerId) {
+  if (!stripe) {
+    return null;
+  }
+  const cleanCustomerId = String(customerId || "").trim();
+  if (!cleanCustomerId) {
+    return null;
+  }
+
+  let startingAfter = "";
+  let hasMore = true;
+  let pagesFetched = 0;
+  while (hasMore && pagesFetched < 5) {
+    const response = await stripe.subscriptions.list({
+      customer: cleanCustomerId,
+      status: "all",
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {})
+    });
+    const subscriptions = Array.isArray(response?.data) ? response.data : [];
+    const blocking = subscriptions.find((subscription) => isBlockingPremiumSubscriptionStatus(subscription?.status));
+    if (blocking) {
+      return blocking;
+    }
+    hasMore = Boolean(response?.has_more);
+    startingAfter = subscriptions.length > 0 ? String(subscriptions[subscriptions.length - 1]?.id || "").trim() : "";
+    if (!startingAfter) {
+      hasMore = false;
+    }
+    pagesFetched += 1;
+  }
+
+  return null;
+}
+
+async function resolveMemberForStripeEvent({ memberId = "", customerId = "", email = "" } = {}) {
+  const cleanMemberId = String(memberId || "").trim();
+  if (cleanMemberId) {
+    const byId = await findMemberById(cleanMemberId);
+    if (byId) {
+      return byId;
+    }
+  }
+
+  const cleanCustomerId = String(customerId || "").trim();
+  if (cleanCustomerId) {
+    const byCustomer = await findMemberByStripeCustomerId(cleanCustomerId);
+    if (byCustomer) {
+      return byCustomer;
+    }
+  }
+
+  try {
+    const cleanEmail = normalizeCustomerEmail(email);
+    if (cleanEmail) {
+      const byEmail = await findMemberByEmail(cleanEmail);
+      if (byEmail) {
+        return byEmail;
+      }
+    }
+  } catch {
+    // Ignore invalid emails from webhook payloads.
+  }
+
+  return null;
+}
+
+async function applyMemberSubscriptionFromStripeSubscription(subscription, { memberIdHint = "" } = {}) {
+  if (!subscription || typeof subscription !== "object") {
+    return null;
+  }
+
+  const subscriptionId = String(subscription.id || "").trim();
+  const customerId =
+    typeof subscription.customer === "string"
+      ? String(subscription.customer || "").trim()
+      : String(subscription.customer?.id || "").trim();
+  const subscriptionStatus = String(subscription.status || "inactive")
+    .trim()
+    .toLowerCase();
+  const metadata = subscription.metadata && typeof subscription.metadata === "object" ? subscription.metadata : {};
+  const metadataMemberId = String(metadata.member_id || "").trim();
+  const subscriptionTierConfig = getSubscriptionTierConfig(subscription);
+
+  const member = await resolveMemberForStripeEvent({
+    memberId: memberIdHint || metadataMemberId,
+    customerId
+  });
+  if (!member) {
+    console.warn(
+      `No member account found for subscription update ${subscriptionId || "unknown"} (customer ${customerId || "unknown"})`
+    );
+    return null;
+  }
+
+  const updated = await updateMember(member.id, {
+    stripeCustomerId: customerId || member.stripeCustomerId,
+    stripeSubscriptionId: subscriptionId || member.stripeSubscriptionId,
+    subscriptionStatus,
+    membershipTier: subscriptionTierConfig?.key || member.membershipTier || "none",
+    subscriptionCurrentPeriodEnd: toIsoFromStripeTimestamp(subscription.current_period_end),
+    subscriptionCancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end)
+  });
+  return updated;
+}
+
+async function processPremiumCheckoutCompletedSession(session) {
+  if (!stripe || !session || typeof session !== "object") {
+    return;
+  }
+
+  const metadata = session.metadata && typeof session.metadata === "object" ? session.metadata : {};
+  const customerId =
+    typeof session.customer === "string"
+      ? String(session.customer || "").trim()
+      : String(session.customer?.id || "").trim();
+  const subscriptionId =
+    typeof session.subscription === "string"
+      ? String(session.subscription || "").trim()
+      : String(session.subscription?.id || "").trim();
+  const memberId = String(metadata.member_id || session.client_reference_id || "").trim();
+  const requestedTierKey = normalizeMembershipTierKey(metadata.membership_tier || "none");
+  const customerEmail = String(session.customer_details?.email || session.customer_email || "").trim().toLowerCase();
+
+  const member = await resolveMemberForStripeEvent({
+    memberId,
+    customerId,
+    email: customerEmail
+  });
+  if (!member) {
+    console.warn(
+      `No member account found for premium checkout session ${String(session.id || "unknown")} (customer ${customerId || "unknown"})`
+    );
+    return;
+  }
+
+  await updateMember(member.id, {
+    stripeCustomerId: customerId || member.stripeCustomerId,
+    stripeSubscriptionId: subscriptionId || member.stripeSubscriptionId,
+    membershipTier: requestedTierKey !== "none" ? requestedTierKey : member.membershipTier || "none"
+  });
+
+  if (subscriptionId) {
+    try {
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      await applyMemberSubscriptionFromStripeSubscription(subscription, {
+        memberIdHint: member.id
+      });
+    } catch (error) {
+      console.error(`Failed syncing premium subscription ${subscriptionId}:`, error);
+    }
+  }
+}
+
+function checkoutSessionBelongsToMember(session, member) {
+  if (!session || typeof session !== "object" || !member || typeof member !== "object") {
+    return false;
+  }
+
+  const metadata = session.metadata && typeof session.metadata === "object" ? session.metadata : {};
+  const sessionMemberId = String(metadata.member_id || session.client_reference_id || "").trim();
+  const memberId = String(member.id || "").trim();
+  if (sessionMemberId) {
+    return Boolean(memberId) && sessionMemberId === memberId;
+  }
+
+  const sessionCustomerId =
+    typeof session.customer === "string"
+      ? String(session.customer || "").trim()
+      : String(session.customer?.id || "").trim();
+  const memberCustomerId = String(member.stripeCustomerId || "").trim();
+  if (sessionCustomerId && memberCustomerId && sessionCustomerId === memberCustomerId) {
+    return true;
+  }
+
+  const sessionEmail = safeNormalizeCustomerEmail(session.customer_details?.email || session.customer_email || "");
+  const memberEmail = safeNormalizeCustomerEmail(member.email || "");
+  if (sessionEmail && memberEmail && sessionEmail === memberEmail) {
+    return true;
+  }
+
+  return false;
+}
+
+async function processPremiumInvoiceEvent(invoice) {
+  if (!stripe || !invoice || typeof invoice !== "object") {
+    return;
+  }
+
+  const subscriptionId =
+    typeof invoice.subscription === "string"
+      ? String(invoice.subscription || "").trim()
+      : String(invoice.subscription?.id || "").trim();
+  if (!subscriptionId) {
+    return;
+  }
+
+  try {
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    await applyMemberSubscriptionFromStripeSubscription(subscription);
+  } catch (error) {
+    console.error(`Failed syncing premium invoice subscription ${subscriptionId}:`, error);
+  }
+}
+
 function requireAdmin(req, res, next) {
   if (!adminPassword) {
     return res.status(503).json({
@@ -2145,6 +3268,39 @@ function uploadedImageUrl(files, fieldName) {
     return undefined;
   }
   return `/uploads/${file.filename}`;
+}
+
+function uploadedPremiumEbookUrl(files, fieldName = "ebookFile") {
+  const file = Array.isArray(files?.[fieldName]) ? files[fieldName][0] : null;
+  if (!file?.filename) {
+    return undefined;
+  }
+  return `${premiumEbookProtectedUploadsPrefix}${file.filename}`;
+}
+
+function resolveUploadsAbsolutePathFromPublicUrl(publicUrl) {
+  const url = String(publicUrl || "").trim();
+  if (!url.startsWith("/uploads/") || url.includes("..") || url.includes("\\")) {
+    return "";
+  }
+  const relativePath = url.slice("/uploads/".length).replace(/^\/+/, "");
+  if (!relativePath) {
+    return "";
+  }
+  const baseDir = path.resolve(uploadsDir);
+  const absolutePath = path.resolve(path.join(baseDir, relativePath));
+  if (!absolutePath.startsWith(`${baseDir}${path.sep}`) && absolutePath !== baseDir) {
+    return "";
+  }
+  return absolutePath;
+}
+
+async function removeUploadsFileByPublicUrl(publicUrl) {
+  const absolutePath = resolveUploadsAbsolutePathFromPublicUrl(publicUrl);
+  if (!absolutePath) {
+    return;
+  }
+  await fs.unlink(absolutePath).catch(() => {});
 }
 
 function uploadedImageUrls(files, fieldName) {
@@ -2244,6 +3400,45 @@ function normalizeCustomerEmail(value) {
     throw new Error("Enter a valid email address.");
   }
   return email;
+}
+
+function safeNormalizeCustomerEmail(value) {
+  try {
+    return normalizeCustomerEmail(value);
+  } catch {
+    return "";
+  }
+}
+
+function normalizePhoneForLookup(value) {
+  const digits = String(value || "")
+    .replace(/[^\d]/g, "")
+    .trim();
+  if (!digits) {
+    return "";
+  }
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return digits.slice(1);
+  }
+  if (digits.length < 7 || digits.length > 15) {
+    return "";
+  }
+  return digits;
+}
+
+function normalizePhoneList(values) {
+  const list = Array.isArray(values) ? values : [values];
+  const seen = new Set();
+  const normalized = [];
+  for (const value of list) {
+    const phone = normalizePhoneForLookup(value);
+    if (!phone || seen.has(phone)) {
+      continue;
+    }
+    seen.add(phone);
+    normalized.push(phone);
+  }
+  return normalized;
 }
 
 function cleanQuoteRequestText(value, maxLength = 2000) {
@@ -3777,18 +4972,21 @@ async function syncPublishContent(targetRoot) {
   const sourceSettings = path.join(process.cwd(), "data/site-settings.json");
   const sourceAddressBook = path.join(process.cwd(), "data/address-book.json");
   const sourceOrderExclusions = path.join(process.cwd(), "data/order-exclusions.json");
+  const sourcePremiumLibrary = path.join(process.cwd(), "data/premium-library.json");
   const sourceUploads = path.join(process.cwd(), "public/uploads");
 
   const targetProducts = path.join(targetRoot, "data/products.json");
   const targetSettings = path.join(targetRoot, "data/site-settings.json");
   const targetAddressBook = path.join(targetRoot, "data/address-book.json");
   const targetOrderExclusions = path.join(targetRoot, "data/order-exclusions.json");
+  const targetPremiumLibrary = path.join(targetRoot, "data/premium-library.json");
   const targetUploads = path.join(targetRoot, "public/uploads");
 
   await fs.mkdir(path.dirname(targetProducts), { recursive: true });
   await fs.mkdir(path.dirname(targetSettings), { recursive: true });
   await fs.mkdir(path.dirname(targetAddressBook), { recursive: true });
   await fs.mkdir(path.dirname(targetOrderExclusions), { recursive: true });
+  await fs.mkdir(path.dirname(targetPremiumLibrary), { recursive: true });
   await fs.copyFile(sourceProducts, targetProducts);
   await fs.copyFile(sourceSettings, targetSettings);
   if (await pathExists(sourceAddressBook)) {
@@ -3800,6 +4998,11 @@ async function syncPublishContent(targetRoot) {
     await fs.copyFile(sourceOrderExclusions, targetOrderExclusions);
   } else {
     await fs.writeFile(targetOrderExclusions, "[]\n", "utf8");
+  }
+  if (await pathExists(sourcePremiumLibrary)) {
+    await fs.copyFile(sourcePremiumLibrary, targetPremiumLibrary);
+  } else {
+    await fs.writeFile(targetPremiumLibrary, "[]\n", "utf8");
   }
 
   await fs.rm(targetUploads, { recursive: true, force: true });
@@ -3837,6 +5040,7 @@ async function publishAdminSnapshot(commitMessageInput = "") {
       "data/site-settings.json",
       "data/address-book.json",
       "data/order-exclusions.json",
+      "data/premium-library.json",
       "public/uploads"
     ]);
 
@@ -3878,7 +5082,17 @@ async function publishAdminSnapshot(commitMessageInput = "") {
 
     await syncPublishContent(tempDir);
     await runGit(
-      ["add", "-A", "--", "data/products.json", "data/site-settings.json", "data/address-book.json", "public/uploads"],
+      [
+        "add",
+        "-A",
+        "--",
+        "data/products.json",
+        "data/site-settings.json",
+        "data/address-book.json",
+        "data/order-exclusions.json",
+        "data/premium-library.json",
+        "public/uploads"
+      ],
       {
         cwd: tempDir
       }
@@ -3937,6 +5151,12 @@ async function processStripeCheckoutCompletedEvent(eventSession) {
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["payment_intent"]
     });
+    const checkoutMode = String(session?.mode || "").trim().toLowerCase();
+    if (checkoutMode === "subscription") {
+      await processPremiumCheckoutCompletedSession(session);
+      return;
+    }
+
     const lineItemsResponse = await stripe.checkout.sessions.listLineItems(session.id, {
       limit: 100
     });
@@ -4083,10 +5303,35 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json" }), (req
     setImmediate(() => {
       void processStripeCheckoutCompletedEvent(eventSession);
     });
+    return;
+  }
+
+  if (
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
+    const subscription = event.data.object;
+    setImmediate(() => {
+      void applyMemberSubscriptionFromStripeSubscription(subscription);
+    });
+    return;
+  }
+
+  if (event.type === "invoice.payment_succeeded" || event.type === "invoice.payment_failed") {
+    const invoice = event.data.object;
+    setImmediate(() => {
+      void processPremiumInvoiceEvent(invoice);
+    });
   }
 });
 
 app.use(express.json());
+app.use("/uploads/premium-ebooks", (req, res) => {
+  return res.status(403).json({
+    error: "Premium ebook files are protected. Access them from your member library."
+  });
+});
 app.use(express.static(publicDir));
 
 if (path.resolve(uploadsDir) !== path.resolve(path.join(publicDir, "uploads"))) {
@@ -4122,6 +5367,804 @@ app.get("/api/stats/sold-copies", async (req, res) => {
   }
 });
 
+app.get("/api/members/me", async (req, res) => {
+  try {
+    const member = await resolveMemberFromAuthHeader(req);
+    if (!member) {
+      return res.json({
+        authenticated: false,
+        member: null
+      });
+    }
+    const monthKey = getCurrentMonthKey();
+    const monthlyRandomPaperback = await getMonthlyRandomPaperbackForMember(member, monthKey);
+    return res.json({
+      authenticated: true,
+      monthKey,
+      member: {
+        ...buildMemberClientPayload(member),
+        monthlyRandomPaperback
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Could not load member profile." });
+  }
+});
+
+app.get("/api/members/plans", async (req, res) => {
+  try {
+    const plans = await getPublicMembershipPlansWithLivePricing();
+    return res.json({
+      plans
+    });
+  } catch (error) {
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not load membership plans: ${details}` : "Could not load membership plans right now."
+    });
+  }
+});
+
+app.post("/api/members/register", async (req, res) => {
+  try {
+    const displayName = cleanMemberDisplayName(req.body?.displayName);
+    const email = normalizeCustomerEmail(req.body?.email);
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+    const password = cleanMemberPassword(req.body?.password);
+    const passwordSalt = createMemberPasswordSaltHex();
+    const passwordHash = hashMemberPassword(password, passwordSalt);
+    const authToken = createMemberAuthToken();
+    const authTokenHash = hashMemberAuthToken(authToken);
+    const issuedAt = new Date().toISOString();
+    const orderLookupPhone = normalizePhoneForLookup(req.body?.phone);
+
+    const created = await createMember({
+      displayName,
+      email,
+      orderLookupEmails: [email],
+      orderLookupPhones: orderLookupPhone ? [orderLookupPhone] : [],
+      passwordHash,
+      passwordSalt,
+      authTokenHash,
+      authTokenIssuedAt: issuedAt
+    });
+
+    const updated = await updateMember(created.id, {
+      lastLoginAt: issuedAt
+    });
+
+    return res.status(201).json({
+      ok: true,
+      token: authToken,
+      member: buildMemberClientPayload(updated || created)
+    });
+  } catch (error) {
+    if (error instanceof MemberValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    if (details) {
+      return res.status(400).json({ error: details });
+    }
+    return res.status(500).json({ error: "Could not create member account right now." });
+  }
+});
+
+app.post("/api/members/login", async (req, res) => {
+  try {
+    const email = normalizeCustomerEmail(req.body?.email);
+    const password = cleanMemberPassword(req.body?.password);
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    const member = await findMemberByEmail(email);
+    if (!member) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    const candidateHash = hashMemberPassword(password, member.passwordSalt);
+    if (!secureEquals(candidateHash, member.passwordHash)) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    const authToken = createMemberAuthToken();
+    const authTokenHash = hashMemberAuthToken(authToken);
+    const issuedAt = new Date().toISOString();
+    const updated = await updateMember(member.id, {
+      authTokenHash,
+      authTokenIssuedAt: issuedAt,
+      lastLoginAt: issuedAt
+    });
+
+    return res.json({
+      ok: true,
+      token: authToken,
+      member: buildMemberClientPayload(updated || member)
+    });
+  } catch (error) {
+    if (error instanceof MemberValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    if (details) {
+      return res.status(400).json({ error: details });
+    }
+    return res.status(500).json({ error: "Could not sign in right now." });
+  }
+});
+
+app.post("/api/members/logout", requireMember, async (req, res) => {
+  try {
+    const memberId = String(req.member?.id || "").trim();
+    if (!memberId) {
+      return res.status(401).json({ error: "Sign in required." });
+    }
+    await updateMember(memberId, {
+      authTokenHash: "",
+      authTokenIssuedAt: ""
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ error: "Could not sign out right now." });
+  }
+});
+
+async function collectMemberOrdersForContacts({ member, memberContactSets, limit = 120 }) {
+  const memberStripeCustomerId = String(member?.stripeCustomerId || "").trim();
+  const maxResults = Number.isFinite(limit) ? Math.min(300, Math.max(1, Number(limit) || 1)) : 120;
+  const orders = [];
+  const discoveredEmailSet = new Set();
+  const discoveredPhoneSet = new Set();
+  const collectDiscoveredContacts = ({ emails = [], phones = [] } = {}) => {
+    for (const email of emails) {
+      const normalizedEmail = safeNormalizeCustomerEmail(email);
+      if (normalizedEmail) {
+        discoveredEmailSet.add(normalizedEmail);
+      }
+    }
+    for (const phone of normalizePhoneList(phones)) {
+      discoveredPhoneSet.add(phone);
+    }
+  };
+
+  const manualOrders = (await listManualOrders())
+    .map((order) => normalizeManualOrderRecord(order))
+    .filter(Boolean)
+    .filter((order) => {
+      const orderContactEmails = [
+        safeNormalizeCustomerEmail(order?.customerEmail),
+        safeNormalizeCustomerEmail(order?.shippingDetails?.email)
+      ].filter(Boolean);
+      const orderContactPhones = normalizePhoneList([
+        order?.customerPhone,
+        order?.shippingDetails?.phone
+      ]);
+      const matches = memberMatchesOrderContacts(memberContactSets, {
+        emails: orderContactEmails,
+        phones: orderContactPhones
+      });
+      if (matches) {
+        collectDiscoveredContacts({
+          emails: orderContactEmails,
+          phones: orderContactPhones
+        });
+      }
+      return matches;
+    })
+    .map((order) => {
+      const receipt = buildManualOrderReceiptPayload(order);
+      return {
+        id: order.id,
+        source: "manual",
+        createdAt: order.createdAt,
+        paymentStatus: order.paymentStatus,
+        fulfillmentStatus: order.fulfillmentStatus,
+        orderSource: order.orderSource,
+        amountSubtotal: receipt.amountSubtotal,
+        amountShipping: receipt.amountShipping,
+        amountTax: receipt.amountTax,
+        amountTotal: receipt.amountTotal,
+        currency: receipt.currency,
+        lineItems: receipt.lineItems,
+        shippingRequired: receipt.shippingRequired,
+        shippingDetails: receipt.shippingDetails,
+        trackingNumber: String(order.shipmentTrackingNumber || "").trim(),
+        trackingUrl: String(order.shipmentTrackingUrl || "").trim(),
+        trackingCarrier: String(order.shipmentCarrier || "").trim(),
+        trackingNote: String(order.shipmentNote || "").trim()
+      };
+    });
+  orders.push(...manualOrders);
+
+  if (stripe) {
+    const seenSessionIds = new Set();
+    const collectStripeOrder = (session) => {
+      const sessionId = String(session?.id || "").trim();
+      if (!sessionId || seenSessionIds.has(sessionId)) {
+        return;
+      }
+      if (String(session?.mode || "").trim().toLowerCase() === "subscription") {
+        return;
+      }
+      const sessionCustomerId =
+        typeof session?.customer === "string"
+          ? String(session.customer || "").trim()
+          : String(session?.customer?.id || "").trim();
+      const customerMatchesByStripeId = Boolean(memberStripeCustomerId && sessionCustomerId === memberStripeCustomerId);
+      const paymentIntentMetadata =
+        session?.payment_intent && typeof session.payment_intent === "object"
+          ? session.payment_intent.metadata || {}
+          : {};
+      const shippingSource = getOrderShippingAddress(session, { paymentIntentMetadata });
+      const orderContactEmails = [
+        safeNormalizeCustomerEmail(session?.customer_details?.email || ""),
+        safeNormalizeCustomerEmail(session?.customer_email || ""),
+        safeNormalizeCustomerEmail(shippingSource?.email || "")
+      ].filter(Boolean);
+      const orderContactPhones = normalizePhoneList([
+        session?.customer_details?.phone,
+        shippingSource?.phone
+      ]);
+      const matchesByContact = memberMatchesOrderContacts(memberContactSets, {
+        emails: orderContactEmails,
+        phones: orderContactPhones
+      });
+      if (!customerMatchesByStripeId && !matchesByContact) {
+        return;
+      }
+      collectDiscoveredContacts({
+        emails: orderContactEmails,
+        phones: orderContactPhones
+      });
+      seenSessionIds.add(sessionId);
+      const parsedLineItems = parseLineItemsFromMetadata(session?.metadata || {});
+      const totals = computeOrderTotals(session, parsedLineItems);
+      const shippingRequired = isSessionShippingRequired(session, { paymentIntentMetadata });
+      const shippingDetails = buildStripeStyleShippingDetails(shippingSource);
+      const fulfillmentStatus = normalizeFulfillmentStatus(paymentIntentMetadata.fulfillment_status);
+      orders.push({
+        id: sessionId,
+        source: "stripe",
+        createdAt: Number(session?.created) > 0 ? new Date(Number(session.created) * 1000).toISOString() : "",
+        paymentStatus: String(session?.payment_status || "unknown").trim().toLowerCase(),
+        fulfillmentStatus,
+        orderSource: getSessionOrderSource(session, { paymentIntentMetadata }),
+        amountSubtotal: totals.amountSubtotal,
+        amountShipping: totals.amountShipping,
+        amountTax: totals.amountTax,
+        amountTotal: totals.amountTotal,
+        currency: totals.currency,
+        lineItems: parsedLineItems,
+        shippingRequired,
+        shippingDetails,
+        trackingNumber: String(paymentIntentMetadata.fulfillment_tracking_number || "").trim(),
+        trackingUrl: String(paymentIntentMetadata.fulfillment_tracking_url || "").trim(),
+        trackingCarrier: String(paymentIntentMetadata.fulfillment_carrier || "").trim(),
+        trackingNote: String(paymentIntentMetadata.fulfillment_note || "").trim()
+      });
+    };
+
+    const fetchStripeSessionPages = async (paramsBuilder) => {
+      let hasMore = true;
+      let startingAfter = "";
+      let pagesFetched = 0;
+      while (hasMore && pagesFetched < 8) {
+        const listParams = {
+          limit: 100,
+          payment_status: "paid",
+          expand: ["data.payment_intent"],
+          ...paramsBuilder(),
+          ...(startingAfter ? { starting_after: startingAfter } : {})
+        };
+        const response = await stripe.checkout.sessions.list(listParams);
+        const sessions = Array.isArray(response?.data) ? response.data : [];
+        sessions.forEach((session) => collectStripeOrder(session));
+        hasMore = Boolean(response?.has_more);
+        startingAfter = sessions.length > 0 ? String(sessions[sessions.length - 1]?.id || "").trim() : "";
+        pagesFetched += 1;
+        if (!startingAfter) {
+          hasMore = false;
+        }
+        if (orders.length >= maxResults * 2) {
+          break;
+        }
+      }
+    };
+
+    if (memberStripeCustomerId) {
+      await fetchStripeSessionPages(() => ({ customer: memberStripeCustomerId }));
+    } else {
+      await fetchStripeSessionPages(() => ({}));
+    }
+  }
+
+  orders.sort((left, right) => {
+    const leftMs = Date.parse(String(left?.createdAt || ""));
+    const rightMs = Date.parse(String(right?.createdAt || ""));
+    return (Number.isFinite(rightMs) ? rightMs : 0) - (Number.isFinite(leftMs) ? leftMs : 0);
+  });
+
+  return {
+    orders: orders.slice(0, maxResults),
+    discoveredContacts: {
+      emails: Array.from(discoveredEmailSet),
+      phones: Array.from(discoveredPhoneSet)
+    }
+  };
+}
+
+app.put("/api/members/order-access", requireMember, async (req, res) => {
+  try {
+    const member = req.member;
+    const emailInputsRaw = req.body?.emails;
+    const phoneInputsRaw = req.body?.phones;
+
+    const emailInputs = Array.isArray(emailInputsRaw)
+      ? emailInputsRaw
+      : typeof emailInputsRaw === "string"
+        ? emailInputsRaw.split(/[\n,]/g)
+        : [];
+    const phoneInputs = Array.isArray(phoneInputsRaw)
+      ? phoneInputsRaw
+      : typeof phoneInputsRaw === "string"
+        ? phoneInputsRaw.split(/[\n,]/g)
+        : [];
+
+    const normalizedEmails = [];
+    const seenEmails = new Set();
+    const pushEmail = (value) => {
+      const email = safeNormalizeCustomerEmail(value);
+      if (!email || seenEmails.has(email)) {
+        return;
+      }
+      seenEmails.add(email);
+      normalizedEmails.push(email);
+    };
+    pushEmail(member.email);
+    for (const entry of emailInputs) {
+      pushEmail(entry);
+    }
+
+    const normalizedPhones = normalizePhoneList(phoneInputs);
+
+    const currentLookupEmails = getMemberOrderLookupEmails(member);
+    const currentLookupPhones = getMemberOrderLookupPhones(member);
+    const currentContactSets = {
+      emails: new Set(currentLookupEmails),
+      phones: new Set(currentLookupPhones)
+    };
+    const { discoveredContacts } = await collectMemberOrdersForContacts({
+      member,
+      memberContactSets: currentContactSets,
+      limit: 300
+    });
+    const allowedEmailSet = new Set([
+      ...currentLookupEmails,
+      ...(Array.isArray(discoveredContacts?.emails) ? discoveredContacts.emails : []),
+      safeNormalizeCustomerEmail(member.email)
+    ]);
+    const allowedPhoneSet = new Set([
+      ...currentLookupPhones,
+      ...(Array.isArray(discoveredContacts?.phones) ? discoveredContacts.phones : [])
+    ]);
+    const blockedEmails = normalizedEmails.filter((email) => !allowedEmailSet.has(email));
+    const blockedPhones = normalizedPhones.filter((phone) => !allowedPhoneSet.has(phone));
+    if (blockedEmails.length > 0 || blockedPhones.length > 0) {
+      return res.status(403).json({
+        error:
+          "You can only add contacts already linked to your current order history. Place an order with that contact first, then refresh."
+      });
+    }
+
+    const updated = await updateMember(member.id, {
+      orderLookupEmails: normalizedEmails,
+      orderLookupPhones: normalizedPhones
+    });
+
+    return res.json({
+      ok: true,
+      member: buildMemberClientPayload(updated || member)
+    });
+  } catch (error) {
+    if (error instanceof MemberValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not update order access contacts: ${details}` : "Could not update order access contacts."
+    });
+  }
+});
+
+app.post("/api/members/create-subscription-checkout", requireMember, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const requestedTierKey = normalizeMembershipTierKey(req.body?.tier || "standard");
+  const tierConfig = requirePremiumPriceConfigForTier(requestedTierKey, res);
+  if (!tierConfig) {
+    return;
+  }
+
+  try {
+    const member = req.member;
+    if (hasMemberBlockingPremiumSubscription(member)) {
+      return res.status(409).json({
+        error: "You already have an active premium subscription. Use Manage Billing to update or cancel your plan.",
+        subscriptionStatus: String(member.subscriptionStatus || "active").trim().toLowerCase()
+      });
+    }
+
+    const appUrl = getAppUrl(req);
+    const customerId = await ensureStripeCustomerForMember(member);
+    const blockingSubscription = await findBlockingStripeSubscriptionForCustomer(customerId);
+    if (blockingSubscription) {
+      try {
+        await applyMemberSubscriptionFromStripeSubscription(blockingSubscription, {
+          memberIdHint: member.id
+        });
+      } catch (syncError) {
+        console.warn("Failed syncing blocking subscription before checkout:", syncError);
+      }
+      return res.status(409).json({
+        error: "A premium subscription already exists for this account. Use Manage Billing instead of starting a second subscription."
+      });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customerId,
+      line_items: [{ price: tierConfig.priceId, quantity: 1 }],
+      allow_promotion_codes: true,
+      success_url: `${appUrl}/membership.html?join=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appUrl}/membership.html?join=cancel`,
+      client_reference_id: member.id,
+      metadata: {
+        member_id: member.id,
+        membership_plan: "premium_books_club",
+        membership_tier: tierConfig.key
+      },
+      subscription_data: {
+        metadata: {
+          member_id: member.id,
+          membership_plan: "premium_books_club",
+          membership_tier: tierConfig.key
+        }
+      }
+    });
+    return res.json({ url: session.url });
+  } catch (error) {
+    console.error("Failed creating premium subscription checkout:", error);
+    if (isStripeMissingPriceError(error, tierConfig.priceId)) {
+      const missingPriceId = extractMissingStripePriceIdFromErrorMessage(error?.message || "") || tierConfig.priceId;
+      const envVarName = getMembershipTierPriceEnvVarName(tierConfig.key);
+      return res.status(503).json({
+        error: `Could not start premium checkout: ${tierConfig.label} tier price ID is invalid (${missingPriceId}). Update ${envVarName} in .env with a valid recurring Stripe price ID from the same account and mode as STRIPE_SECRET_KEY, then restart the server.`
+      });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not start premium checkout: ${details}` : "Could not start premium checkout right now."
+    });
+  }
+});
+
+app.post("/api/members/confirm-subscription-checkout", requireMember, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  const sessionId = String(req.body?.sessionId || req.body?.session_id || req.query?.session_id || "").trim();
+  if (!sessionId) {
+    return res.status(400).json({ error: "Checkout session ID is required." });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ["subscription"]
+    });
+    const checkoutMode = String(session?.mode || "").trim().toLowerCase();
+    if (checkoutMode !== "subscription") {
+      return res.status(400).json({ error: "Checkout session is not a membership subscription." });
+    }
+    if (!checkoutSessionBelongsToMember(session, req.member)) {
+      return res.status(403).json({ error: "This checkout session does not belong to your member account." });
+    }
+
+    await processPremiumCheckoutCompletedSession(session);
+    const refreshedMember = (await findMemberById(req.member.id)) || req.member;
+    return res.json({
+      ok: true,
+      member: buildMemberClientPayload(refreshedMember)
+    });
+  } catch (error) {
+    const details = String(error?.message || "").trim();
+    if (details.toLowerCase().includes("no such checkout.session")) {
+      return res.status(404).json({ error: "Checkout session was not found in this Stripe account." });
+    }
+    return res.status(500).json({
+      error: details
+        ? `Could not confirm premium checkout: ${details}`
+        : "Could not confirm premium checkout right now."
+    });
+  }
+});
+
+app.post("/api/members/create-billing-portal", requireMember, async (req, res) => {
+  if (!requireStripe(res)) {
+    return;
+  }
+
+  try {
+    const member = req.member;
+    const customerId = await ensureStripeCustomerForMember(member);
+    const appUrl = getAppUrl(req);
+    const normalizedReturnPath = memberPortalReturnPath.startsWith("/") ? memberPortalReturnPath : "/membership.html";
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: `${appUrl}${normalizedReturnPath}`
+    });
+    return res.json({ url: portalSession.url });
+  } catch (error) {
+    console.error("Failed creating Stripe billing portal session:", error);
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not open billing portal: ${details}` : "Could not open billing portal right now."
+    });
+  }
+});
+
+app.get("/api/members/premium/ebooks", requireActivePremiumMember, async (req, res) => {
+  try {
+    const member = req.member;
+    const { tierConfig, monthKey, items, selectedIds, selectedIdSet, maxSelections } = await getMemberPremiumEbookAccessSnapshot(
+      member
+    );
+    if (!tierConfig) {
+      return res.status(403).json({ error: "Membership tier is missing for this account." });
+    }
+    const monthlyRandomPaperback = await getMonthlyRandomPaperbackForMember(member, monthKey);
+
+    const availableEbooks = items.map((item) => {
+      const hasAccess = tierConfig.allEbooksAccess || selectedIdSet.has(item.id);
+      const isProtectedFile = isProtectedPremiumEbookFileUrl(item.fileUrl);
+      const token = hasAccess
+        ? createPremiumEbookDownloadToken({
+            memberId: member.id,
+            ebookId: item.id,
+            monthKey
+          })
+        : "";
+      const secureFileUrl =
+        hasAccess && isProtectedFile
+          ? `/api/members/premium/ebooks/${encodeURIComponent(item.id)}/download?token=${encodeURIComponent(token)}`
+          : "";
+      return {
+        ...item,
+        hasAccess,
+        fileUrl: secureFileUrl,
+        fileProtected: isProtectedFile,
+        isBorrowed: selectedIdSet.has(item.id)
+      };
+    });
+
+    return res.json({
+      monthKey,
+      tier: getMemberTierSummary(member),
+      selectionLimit: tierConfig.allEbooksAccess ? null : maxSelections,
+      allEbooksAccess: Boolean(tierConfig.allEbooksAccess),
+      selectedEbookIds: selectedIds,
+      monthlyRandomPaperback,
+      includesStickers: true,
+      availableEbooks
+    });
+  } catch (error) {
+    if (error instanceof MemberEbookLoanValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not load premium library: ${details}` : "Could not load premium library right now."
+    });
+  }
+});
+
+app.get("/api/members/premium/ebooks/:ebookId/download", requireActivePremiumMember, async (req, res) => {
+  try {
+    const member = req.member;
+    const ebookId = String(req.params?.ebookId || "").trim();
+    if (!ebookId) {
+      return res.status(400).json({ error: "Ebook ID is required." });
+    }
+
+    const { tierConfig, monthKey, items, selectedIdSet } = await getMemberPremiumEbookAccessSnapshot(member);
+    if (!tierConfig) {
+      return res.status(403).json({ error: "Membership tier is missing for this account." });
+    }
+
+    const token = String(req.query?.token || "").trim();
+    const tokenValid = verifyPremiumEbookDownloadToken({
+      token,
+      memberId: member.id,
+      ebookId,
+      monthKey
+    });
+    if (!tokenValid) {
+      return res.status(403).json({ error: "This ebook link is invalid or expired. Refresh your library and try again." });
+    }
+
+    const item = items.find((entry) => String(entry?.id || "").trim() === ebookId);
+    if (!item) {
+      return res.status(404).json({ error: "Ebook not found." });
+    }
+
+    const hasAccess = tierConfig.allEbooksAccess || selectedIdSet.has(ebookId);
+    if (!hasAccess) {
+      return res.status(403).json({ error: "This ebook is not in your current monthly access set." });
+    }
+
+    const filePath = resolvePremiumEbookFilePath(item.fileUrl);
+    if (!filePath) {
+      return res.status(404).json({
+        error: "This ebook file is not available for protected download yet. Upload it under /uploads/premium-ebooks/."
+      });
+    }
+
+    await fs.access(filePath);
+    const fileName = path.basename(filePath);
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    res.setHeader("Content-Disposition", `inline; filename=\"${fileName.replace(/"/g, "")}\"`);
+    return res.sendFile(filePath);
+  } catch (error) {
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not download premium ebook: ${details}` : "Could not download premium ebook right now."
+    });
+  }
+});
+
+app.post("/api/members/premium/ebooks/borrow", requireActivePremiumMember, async (req, res) => {
+  try {
+    const member = req.member;
+    const tierConfig = getMemberTierConfig(member);
+    if (!tierConfig) {
+      return res.status(403).json({ error: "Membership tier is missing for this account." });
+    }
+    if (tierConfig.allEbooksAccess) {
+      return res.status(409).json({
+        error: "This tier already includes access to all ebooks. No monthly borrowing selection is required."
+      });
+    }
+
+    const selectionLimit = Math.max(0, Number(tierConfig.ebookMonthlyLimit) || 0);
+    if (selectionLimit <= 0) {
+      return res.status(403).json({ error: "This membership tier has no ebook borrowing allowance." });
+    }
+
+    const requestedIdsRaw = Array.isArray(req.body?.ebookIds) ? req.body.ebookIds : [];
+    const requestedIds = Array.from(
+      new Set(
+        requestedIdsRaw
+          .map((entry) => String(entry || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (requestedIds.length === 0) {
+      return res.status(400).json({ error: "Choose at least one ebook." });
+    }
+    if (requestedIds.length > selectionLimit) {
+      return res.status(400).json({
+        error: `This tier allows up to ${selectionLimit} ebook selections per month.`
+      });
+    }
+
+    const libraryItems = await listPremiumLibraryItems();
+    const validIds = new Set(libraryItems.map((item) => item.id));
+    for (const ebookId of requestedIds) {
+      if (!validIds.has(ebookId)) {
+        return res.status(400).json({ error: `Ebook not found: ${ebookId}` });
+      }
+    }
+
+    const monthKey = getCurrentMonthKey();
+    const savedLoan = await upsertMemberEbookLoan({
+      memberId: member.id,
+      monthKey,
+      ebookIds: requestedIds
+    });
+
+    return res.json({
+      ok: true,
+      monthKey,
+      selectionLimit,
+      selectedEbookIds: savedLoan.ebookIds
+    });
+  } catch (error) {
+    if (error instanceof MemberEbookLoanValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not save ebook picks: ${details}` : "Could not save ebook picks right now."
+    });
+  }
+});
+
+app.get("/api/members/orders", requireMember, async (req, res) => {
+  try {
+    const member = req.member;
+    const memberLookupEmails = getMemberOrderLookupEmails(member);
+    const memberLookupPhones = getMemberOrderLookupPhones(member);
+    const memberContactSets = {
+      emails: new Set(memberLookupEmails),
+      phones: new Set(memberLookupPhones)
+    };
+    const parsedLimit = Number.parseInt(String(req.query?.limit ?? ""), 10);
+    const limit = Number.isFinite(parsedLimit) ? Math.min(300, Math.max(1, parsedLimit)) : 120;
+    const { orders } = await collectMemberOrdersForContacts({
+      member,
+      memberContactSets,
+      limit
+    });
+
+    return res.json({
+      orders,
+      orderLookupEmails: memberLookupEmails,
+      orderLookupPhones: memberLookupPhones
+    });
+  } catch (error) {
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not load order history: ${details}` : "Could not load order history right now."
+    });
+  }
+});
+
+app.get("/api/members/premium/community/posts", requireActivePremiumMember, async (req, res) => {
+  try {
+    const parsedLimit = Number.parseInt(String(req.query?.limit ?? ""), 10);
+    const limit = Number.isFinite(parsedLimit) ? Math.min(300, Math.max(1, parsedLimit)) : 100;
+    const posts = await listMemberCommunityPosts({ limit });
+    return res.json(posts);
+  } catch (error) {
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not load community posts: ${details}` : "Could not load community posts right now."
+    });
+  }
+});
+
+app.post("/api/members/premium/community/posts", requireActivePremiumMember, async (req, res) => {
+  try {
+    const body = String(req.body?.body || "").trim();
+    const imageUrl = String(req.body?.imageUrl || "").trim();
+    if (!body) {
+      return res.status(400).json({ error: "Post text is required." });
+    }
+    const member = req.member;
+    const created = await createMemberCommunityPost({
+      memberId: member.id,
+      authorName: member.displayName,
+      body,
+      imageUrl
+    });
+    return res.status(201).json(created);
+  } catch (error) {
+    if (error instanceof MemberCommunityValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not publish post: ${details}` : "Could not publish post right now."
+    });
+  }
+});
+
 app.post("/api/admin/login", (req, res) => {
   if (!adminPassword) {
     return res.status(503).json({
@@ -4137,9 +6180,291 @@ app.post("/api/admin/login", (req, res) => {
   return res.json({ ok: true });
 });
 
+app.get("/api/admin/members", requireAdmin, async (req, res) => {
+  try {
+    const members = await listMembers();
+    const payload = members.map((member) => buildMemberAdminPayload(member)).filter(Boolean);
+    return res.json(payload);
+  } catch (error) {
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not load members: ${details}` : "Could not load members right now."
+    });
+  }
+});
+
+app.get("/api/admin/members/fulfillment", requireAdmin, async (req, res) => {
+  try {
+    const monthKey = cleanMonthKeyOrCurrent(req.query?.month);
+    const [members, fulfillmentRecords] = await Promise.all([
+      listMembers(),
+      listMemberPerkFulfillmentRecords({ monthKey })
+    ]);
+
+    const fulfillmentByMemberId = new Map(
+      fulfillmentRecords.map((record) => [String(record?.memberId || "").trim(), record])
+    );
+
+    const membershipOrder = new Map([
+      ["premium", 1],
+      ["plus", 2],
+      ["standard", 3],
+      ["none", 4]
+    ]);
+
+    const payloadMembers = members
+      .map((member) =>
+        buildAdminMemberFulfillmentPayload(
+          member,
+          monthKey,
+          fulfillmentByMemberId.get(String(member?.id || "").trim())
+        )
+      )
+      .filter(Boolean)
+      .sort((left, right) => {
+        const leftActive = left.premiumAccess === true ? 1 : 0;
+        const rightActive = right.premiumAccess === true ? 1 : 0;
+        if (leftActive !== rightActive) {
+          return rightActive - leftActive;
+        }
+        const leftTier = membershipOrder.get(String(left.membershipTier || "none")) || 99;
+        const rightTier = membershipOrder.get(String(right.membershipTier || "none")) || 99;
+        if (leftTier !== rightTier) {
+          return leftTier - rightTier;
+        }
+        return String(left.email || "")
+          .trim()
+          .toLowerCase()
+          .localeCompare(String(right.email || "").trim().toLowerCase());
+      });
+
+    const summary = payloadMembers.reduce(
+      (acc, member) => {
+        if (member.premiumAccess) {
+          acc.activeSubscribers += 1;
+        }
+        if (member.terminated) {
+          acc.terminatedSubscribers += 1;
+        }
+        if (member.cancellationPending) {
+          acc.cancelAtPeriodEnd += 1;
+        }
+        if (member.perks?.stickers?.owed) {
+          acc.stickersOwed += 1;
+        }
+        if (member.perks?.stickers?.fulfilled) {
+          acc.stickersSent += 1;
+        }
+        if (member.perks?.paperback?.owed) {
+          acc.paperbackOwed += 1;
+        }
+        if (member.perks?.paperback?.fulfilled) {
+          acc.paperbackSent += 1;
+        }
+        return acc;
+      },
+      {
+        totalMembers: payloadMembers.length,
+        activeSubscribers: 0,
+        terminatedSubscribers: 0,
+        cancelAtPeriodEnd: 0,
+        stickersOwed: 0,
+        stickersSent: 0,
+        paperbackOwed: 0,
+        paperbackSent: 0
+      }
+    );
+
+    return res.json({
+      monthKey,
+      generatedAt: new Date().toISOString(),
+      summary,
+      members: payloadMembers
+    });
+  } catch (error) {
+    if (error instanceof MemberPerkFulfillmentValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details
+        ? `Could not load member fulfillment data: ${details}`
+        : "Could not load member fulfillment data right now."
+    });
+  }
+});
+
+app.put("/api/admin/members/fulfillment", requireAdmin, async (req, res) => {
+  try {
+    const memberId = String(req.body?.memberId || "").trim();
+    const perk = normalizeAdminFulfillmentPerk(req.body?.perk);
+    const monthKey = cleanMonthKeyOrCurrent(req.body?.monthKey || req.body?.month);
+    const fulfilled = parseAdminBoolean(req.body?.fulfilled, false);
+    const trackingNumber = String(req.body?.trackingNumber || "")
+      .trim()
+      .slice(0, 140);
+    const note = String(req.body?.note || "")
+      .trim()
+      .slice(0, 500);
+
+    if (!memberId) {
+      return res.status(400).json({ error: "Member ID is required." });
+    }
+    if (!perk) {
+      return res.status(400).json({ error: "Perk must be stickers or paperback." });
+    }
+
+    const member = await findMemberById(memberId);
+    if (!member) {
+      return res.status(404).json({ error: "Member not found." });
+    }
+
+    const eligibility = getMemberMonthlyPerkEligibility(member);
+    if (fulfilled && perk === "stickers" && !eligibility.stickersEligible) {
+      return res.status(400).json({ error: "This member is not currently eligible for monthly stickers." });
+    }
+    if (fulfilled && perk === "paperback" && !eligibility.paperbackEligible) {
+      return res.status(400).json({ error: "This member is not currently eligible for monthly paperback." });
+    }
+
+    const currentRecord = await findMemberPerkFulfillmentRecord(member.id, monthKey);
+    const nowIso = new Date().toISOString();
+    let nextPatch = {};
+
+    if (perk === "stickers") {
+      nextPatch = fulfilled
+        ? {
+            stickersFulfilledAt: String(currentRecord?.stickersFulfilledAt || "").trim() || nowIso,
+            stickersTrackingNumber:
+              trackingNumber || String(currentRecord?.stickersTrackingNumber || "").trim(),
+            stickersNote: note || String(currentRecord?.stickersNote || "").trim()
+          }
+        : {
+            stickersFulfilledAt: "",
+            stickersTrackingNumber: "",
+            stickersNote: ""
+          };
+    } else if (perk === "paperback") {
+      nextPatch = fulfilled
+        ? {
+            paperbackFulfilledAt: String(currentRecord?.paperbackFulfilledAt || "").trim() || nowIso,
+            paperbackTrackingNumber:
+              trackingNumber || String(currentRecord?.paperbackTrackingNumber || "").trim(),
+            paperbackNote: note || String(currentRecord?.paperbackNote || "").trim()
+          }
+        : {
+            paperbackFulfilledAt: "",
+            paperbackTrackingNumber: "",
+            paperbackNote: ""
+          };
+    }
+
+    const updatedRecord = await upsertMemberPerkFulfillmentRecord({
+      memberId: member.id,
+      monthKey,
+      ...nextPatch
+    });
+
+    return res.json({
+      ok: true,
+      monthKey,
+      member: buildAdminMemberFulfillmentPayload(member, monthKey, updatedRecord),
+      record: updatedRecord
+    });
+  } catch (error) {
+    if (error instanceof MemberPerkFulfillmentValidationError || error instanceof MemberValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details
+        ? `Could not update member fulfillment: ${details}`
+        : "Could not update member fulfillment right now."
+    });
+  }
+});
+
+app.post("/api/admin/members/promote", requireAdmin, async (req, res) => {
+  try {
+    const targetMemberId = String(req.body?.memberId || "").trim();
+    const targetEmailRaw = String(req.body?.email || "").trim();
+    const targetEmail = targetEmailRaw ? normalizeCustomerEmail(targetEmailRaw) : "";
+
+    let member = null;
+    if (targetMemberId) {
+      member = await findMemberById(targetMemberId);
+    } else if (targetEmail) {
+      member = await findMemberByEmail(targetEmail);
+    }
+
+    if (!member) {
+      return res.status(404).json({ error: "Member not found." });
+    }
+
+    const updated = await updateMember(member.id, { role: "admin" });
+    return res.json({
+      ok: true,
+      member: buildMemberAdminPayload(updated || member)
+    });
+  } catch (error) {
+    if (error instanceof MemberValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(details === "Enter a valid email address." ? 400 : 500).json({
+      error: details ? `Could not promote member: ${details}` : "Could not promote member right now."
+    });
+  }
+});
+
+app.post("/api/admin/members/demote", requireAdmin, async (req, res) => {
+  try {
+    const targetMemberId = String(req.body?.memberId || "").trim();
+    const targetEmailRaw = String(req.body?.email || "").trim();
+    const targetEmail = targetEmailRaw ? normalizeCustomerEmail(targetEmailRaw) : "";
+
+    let member = null;
+    if (targetMemberId) {
+      member = await findMemberById(targetMemberId);
+    } else if (targetEmail) {
+      member = await findMemberByEmail(targetEmail);
+    }
+
+    if (!member) {
+      return res.status(404).json({ error: "Member not found." });
+    }
+
+    const updated = await updateMember(member.id, { role: "member" });
+    return res.json({
+      ok: true,
+      member: buildMemberAdminPayload(updated || member)
+    });
+  } catch (error) {
+    if (error instanceof MemberValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(details === "Enter a valid email address." ? 400 : 500).json({
+      error: details ? `Could not demote member: ${details}` : "Could not demote member right now."
+    });
+  }
+});
+
 app.get("/api/admin/products", requireAdmin, async (req, res) => {
   const products = await listProducts();
   res.json(products);
+});
+
+app.get("/api/admin/premium-library", requireAdmin, async (req, res) => {
+  try {
+    const items = await listPremiumLibraryItems();
+    return res.json(items);
+  } catch (error) {
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not load premium library: ${details}` : "Could not load premium library right now."
+    });
+  }
 });
 
 app.get("/api/admin/site-settings", requireAdmin, async (req, res) => {
@@ -5789,6 +8114,11 @@ const productUpload = upload.fields([
   { name: "includedImages", maxCount: 16 }
 ]);
 
+const premiumLibraryAdminUpload = premiumLibraryUpload.fields([
+  { name: "ebookFile", maxCount: 1 },
+  { name: "coverImage", maxCount: 1 }
+]);
+
 app.put("/api/admin/site-settings", requireAdmin, siteSettingsUpload, async (req, res) => {
   try {
     const updated = await updateSiteSettings(extractSiteSettingsChanges(req));
@@ -5921,6 +8251,133 @@ app.delete("/api/admin/products/:id", requireAdmin, async (req, res) => {
     return res.status(404).json({ error: "Product not found." });
   }
   return res.json({ ok: true });
+});
+
+app.post("/api/admin/premium-library", requireAdmin, premiumLibraryAdminUpload, async (req, res) => {
+  const typedFileUrl = String(req.body?.fileUrl || "").trim();
+  const typedCoverImageUrl = String(req.body?.coverImageUrl || "").trim();
+  const fileUrl = uploadedPremiumEbookUrl(req.files, "ebookFile") || typedFileUrl;
+  const coverImageUrl = uploadedImageUrl(req.files, "coverImage") || typedCoverImageUrl;
+
+  try {
+    const created = await createPremiumLibraryItem({
+      id: req.body?.id,
+      title: req.body?.title,
+      monthLabel: req.body?.monthLabel,
+      description: req.body?.description,
+      fileUrl,
+      coverImageUrl
+    });
+    return res.status(201).json(created);
+  } catch (error) {
+    await removeUploadedFiles(req.files, ["ebookFile", "coverImage"]);
+    if (error instanceof PremiumLibraryValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error?.message) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(500).json({ error: "Could not create premium library item." });
+  }
+});
+
+app.put("/api/admin/premium-library/:id", requireAdmin, premiumLibraryAdminUpload, async (req, res) => {
+  const itemId = String(req.params.id || "").trim();
+  if (!itemId) {
+    await removeUploadedFiles(req.files, ["ebookFile", "coverImage"]);
+    return res.status(400).json({ error: "Ebook ID is required." });
+  }
+
+  const existing = await findPremiumLibraryItemById(itemId);
+  if (!existing) {
+    await removeUploadedFiles(req.files, ["ebookFile", "coverImage"]);
+    return res.status(404).json({ error: "Premium library item not found." });
+  }
+
+  const uploadedFileUrl = uploadedPremiumEbookUrl(req.files, "ebookFile");
+  const uploadedCoverImageUrl = uploadedImageUrl(req.files, "coverImage");
+  const removeFile = parseBooleanFlag(req.body?.removeFile, false) === true;
+  const removeCoverImage = parseBooleanFlag(req.body?.removeCoverImage, false) === true;
+  const patch = {};
+
+  if (req.body?.title !== undefined) {
+    patch.title = req.body.title;
+  }
+  if (req.body?.monthLabel !== undefined) {
+    patch.monthLabel = req.body.monthLabel;
+  }
+  if (req.body?.description !== undefined) {
+    patch.description = req.body.description;
+  }
+
+  if (removeFile) {
+    patch.fileUrl = "";
+  } else if (uploadedFileUrl) {
+    patch.fileUrl = uploadedFileUrl;
+  } else if (req.body?.fileUrl !== undefined) {
+    patch.fileUrl = String(req.body?.fileUrl || "").trim();
+  }
+
+  if (removeCoverImage) {
+    patch.coverImageUrl = "";
+  } else if (uploadedCoverImageUrl) {
+    patch.coverImageUrl = uploadedCoverImageUrl;
+  } else if (req.body?.coverImageUrl !== undefined) {
+    patch.coverImageUrl = String(req.body?.coverImageUrl || "").trim();
+  }
+
+  try {
+    const updated = await updatePremiumLibraryItem(itemId, patch);
+    if (!updated) {
+      await removeUploadedFiles(req.files, ["ebookFile", "coverImage"]);
+      return res.status(404).json({ error: "Premium library item not found." });
+    }
+
+    const replacedFileWithUpload = Boolean(uploadedFileUrl && existing.fileUrl && existing.fileUrl !== uploadedFileUrl);
+    if (replacedFileWithUpload || removeFile) {
+      await removeUploadsFileByPublicUrl(existing.fileUrl);
+    }
+
+    const replacedCoverWithUpload = Boolean(
+      uploadedCoverImageUrl && existing.coverImageUrl && existing.coverImageUrl !== uploadedCoverImageUrl
+    );
+    if (replacedCoverWithUpload || removeCoverImage) {
+      await removeUploadsFileByPublicUrl(existing.coverImageUrl);
+    }
+
+    return res.json(updated);
+  } catch (error) {
+    await removeUploadedFiles(req.files, ["ebookFile", "coverImage"]);
+    if (error instanceof PremiumLibraryValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error?.message) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(500).json({ error: "Could not update premium library item." });
+  }
+});
+
+app.delete("/api/admin/premium-library/:id", requireAdmin, async (req, res) => {
+  try {
+    const deleted = await deletePremiumLibraryItem(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: "Premium library item not found." });
+    }
+    await Promise.all([
+      removeUploadsFileByPublicUrl(deleted.fileUrl),
+      removeUploadsFileByPublicUrl(deleted.coverImageUrl)
+    ]);
+    return res.json({ ok: true });
+  } catch (error) {
+    if (error instanceof PremiumLibraryValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not delete premium library item: ${details}` : "Could not delete premium library item."
+    });
+  }
 });
 
 app.post("/api/admin/publish", requireAdmin, async (req, res) => {
@@ -6465,6 +8922,12 @@ app.use((error, req, res, next) => {
         if (String(error.field || "").trim() === "labelsPdf") {
           return res.status(400).json({ error: "Labels PDF must be 20MB or smaller." });
         }
+        if (String(error.field || "").trim() === "ebookFile") {
+          return res.status(400).json({ error: "Ebook PDF must be 30MB or smaller." });
+        }
+        if (String(error.field || "").trim() === "coverImage") {
+          return res.status(400).json({ error: "Ebook cover image must be 30MB or smaller." });
+        }
         return res.status(400).json({ error: "Image must be 6MB or smaller." });
       }
       return res.status(400).json({ error: error.message });
@@ -6485,11 +8948,17 @@ app.get("*", (req, res) => {
 async function start() {
   await ensureProductStore();
   await ensureSiteSettingsStore();
+  await ensureMemberStore();
+  await ensurePremiumLibraryStore();
+  await ensureMemberEbookLoanStore();
+  await ensureMemberCommunityStore();
+  await ensureMemberPerkFulfillmentStore();
   await ensureAddressBookStore();
   await ensureOrderExclusionStore();
   await ensureManualOrderStore();
   await ensureTerminalIntentStore();
   await fs.mkdir(uploadsDir, { recursive: true });
+  await fs.mkdir(premiumEbookUploadsDir, { recursive: true });
 
   app.listen(port, () => {
     if (!stripe) {
@@ -6497,6 +8966,14 @@ async function start() {
     }
     if (!adminPassword) {
       console.warn("ADMIN_PASSWORD is missing. Admin product editor is disabled.");
+    }
+    if (stripe) {
+      const configuredTierCount = getPublicMembershipPlans().filter((plan) => plan.configured).length;
+      if (configuredTierCount === 0) {
+        console.warn(
+          "No membership tier Stripe prices are configured. Set STRIPE_TIER_STANDARD_PRICE_ID / STRIPE_TIER_PLUS_PRICE_ID / STRIPE_TIER_PREMIUM_PRICE_ID."
+        );
+      }
     }
     console.log(`PublisHearts store running on http://localhost:${port}`);
   });

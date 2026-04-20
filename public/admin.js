@@ -43,6 +43,34 @@ const ordersSearchInput = document.getElementById("orders-search");
 const orderCustomersEl = document.getElementById("admin-order-customers");
 const ordersEl = document.getElementById("admin-orders");
 const ordersMessageEl = document.getElementById("orders-message");
+const memberAdminForm = document.getElementById("member-admin-form");
+const memberAdminEmailInput = document.getElementById("member-admin-email");
+const refreshMembersBtn = document.getElementById("refresh-members-btn");
+const memberAdminListEl = document.getElementById("admin-member-list");
+const memberAdminMessageEl = document.getElementById("member-admin-message");
+const memberFulfillmentControlsForm = document.getElementById("member-fulfillment-controls");
+const memberFulfillmentMonthInput = document.getElementById("member-fulfillment-month");
+const refreshMemberFulfillmentBtn = document.getElementById("refresh-member-fulfillment-btn");
+const memberFulfillmentSummaryEl = document.getElementById("member-fulfillment-summary");
+const memberFulfillmentMessageEl = document.getElementById("member-fulfillment-message");
+const memberFulfillmentListEl = document.getElementById("admin-member-fulfillment-list");
+const premiumLibraryForm = document.getElementById("premium-library-form");
+const premiumLibraryIdInput = document.getElementById("premium-library-id");
+const premiumLibraryTitleInput = document.getElementById("premium-library-title");
+const premiumLibraryMonthLabelInput = document.getElementById("premium-library-month-label");
+const premiumLibraryDescriptionInput = document.getElementById("premium-library-description");
+const premiumLibraryFileInput = document.getElementById("premium-library-file");
+const premiumLibraryFileUrlInput = document.getElementById("premium-library-file-url");
+const premiumLibraryRemoveFileInput = document.getElementById("premium-library-remove-file");
+const premiumLibraryCoverFileInput = document.getElementById("premium-library-cover-file");
+const premiumLibraryCoverUrlInput = document.getElementById("premium-library-cover-url");
+const premiumLibraryRemoveCoverInput = document.getElementById("premium-library-remove-cover");
+const savePremiumLibraryBtn = document.getElementById("save-premium-library-btn");
+const cancelPremiumLibraryEditBtn = document.getElementById("cancel-premium-library-edit-btn");
+const newPremiumLibraryItemBtn = document.getElementById("new-premium-library-item-btn");
+const refreshPremiumLibraryBtn = document.getElementById("refresh-premium-library-btn");
+const premiumLibraryMessageEl = document.getElementById("premium-library-message");
+const premiumLibraryListEl = document.getElementById("admin-premium-library-list");
 const soldCounterEl = document.getElementById("admin-sold-counter");
 const soldCounterValueEl = document.getElementById("admin-sold-counter-value");
 const soldCounterKickerEl = document.getElementById("admin-sold-kicker");
@@ -100,7 +128,7 @@ const SHIPPO_MANUAL_LABEL_URL = "https://apps.goshippo.com/orders";
 const SHIPPO_ORDER_EXPORT_VERSION = "SHIPPO_ORDER_EXPORT_V1";
 
 const state = {
-  adminPassword: window.localStorage.getItem(ADMIN_KEY) || "",
+  adminPassword: window.sessionStorage.getItem(ADMIN_KEY) || window.localStorage.getItem(ADMIN_KEY) || "",
   products: [],
   siteSettings: null,
   productBusy: false,
@@ -108,8 +136,14 @@ const state = {
   publishBusy: false,
   healthBusy: false,
   ordersBusy: false,
+  membersBusy: false,
+  memberFulfillmentBusy: false,
+  premiumLibraryBusy: false,
   posBusy: false,
   ordersPayload: null,
+  members: [],
+  memberFulfillmentPayload: null,
+  premiumLibrary: [],
   posCart: new Map(),
   soldCounterValue: 0,
   soldCounterAnimationFrame: 0,
@@ -119,9 +153,16 @@ const state = {
   dropAfter: false
 };
 
+if (!window.sessionStorage.getItem(ADMIN_KEY) && window.localStorage.getItem(ADMIN_KEY)) {
+  window.sessionStorage.setItem(ADMIN_KEY, state.adminPassword);
+}
+window.localStorage.removeItem(ADMIN_KEY);
+
 const DEFAULT_SHIPPING_FEE = 5;
 const COPIES_PER_EDITION = 50;
 const DEFAULT_POS_STATE = "NY";
+const MEMBERSHIP_REFRESH_INTERVAL_MS = 20000;
+let membershipRealtimeTimer = 0;
 const US_STATE_OPTIONS = [
   "AL",
   "AK",
@@ -204,6 +245,18 @@ function setOrdersMessage(message, isError = false) {
   setMessage(ordersMessageEl, message, isError);
 }
 
+function setMembersMessage(message, isError = false) {
+  setMessage(memberAdminMessageEl, message, isError);
+}
+
+function setMemberFulfillmentMessage(message, isError = false) {
+  setMessage(memberFulfillmentMessageEl, message, isError);
+}
+
+function setPremiumLibraryMessage(message, isError = false) {
+  setMessage(premiumLibraryMessageEl, message, isError);
+}
+
 function setPosMessage(message, isError = false) {
   setMessage(posMessageEl, message, isError);
 }
@@ -244,6 +297,55 @@ function setOrdersBusy(isBusy) {
   }
   if (exportOrdersCsvBtn) {
     exportOrdersCsvBtn.disabled = isBusy;
+  }
+}
+
+function setMembersBusy(isBusy) {
+  state.membersBusy = isBusy;
+  if (refreshMembersBtn) {
+    refreshMembersBtn.disabled = isBusy;
+  }
+  if (memberAdminForm) {
+    const submitButton = memberAdminForm.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.disabled = isBusy;
+    }
+    const inputs = memberAdminForm.querySelectorAll("input, button, select, textarea");
+    inputs.forEach((input) => {
+      if (input === submitButton) {
+        return;
+      }
+      input.disabled = isBusy;
+    });
+  }
+}
+
+function setMemberFulfillmentBusy(isBusy) {
+  state.memberFulfillmentBusy = isBusy;
+  if (refreshMemberFulfillmentBtn) {
+    refreshMemberFulfillmentBtn.disabled = isBusy;
+  }
+  if (memberFulfillmentControlsForm) {
+    const inputs = memberFulfillmentControlsForm.querySelectorAll("input, button, select, textarea");
+    inputs.forEach((input) => {
+      input.disabled = isBusy;
+    });
+  }
+}
+
+function setPremiumLibraryBusy(isBusy) {
+  state.premiumLibraryBusy = isBusy;
+  if (refreshPremiumLibraryBtn) {
+    refreshPremiumLibraryBtn.disabled = isBusy;
+  }
+  if (newPremiumLibraryItemBtn) {
+    newPremiumLibraryItemBtn.disabled = isBusy;
+  }
+  if (premiumLibraryForm) {
+    const inputs = premiumLibraryForm.querySelectorAll("input, button, select, textarea");
+    inputs.forEach((input) => {
+      input.disabled = isBusy;
+    });
   }
 }
 
@@ -1865,6 +1967,450 @@ async function loadOrders() {
   renderOrders(payload);
 }
 
+function getCurrentMonthKey() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function cleanFulfillmentMonthKey(value) {
+  const monthKey = String(value || "").trim();
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
+    return monthKey;
+  }
+  return getCurrentMonthKey();
+}
+
+function formatDateLabel(value) {
+  if (!value) {
+    return "Never";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  }).format(date);
+}
+
+function formatDateTimeLabel(value) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function normalizeMemberRole(value) {
+  return String(value || "member")
+    .trim()
+    .toLowerCase() === "admin"
+    ? "admin"
+    : "member";
+}
+
+function renderMemberAdminList() {
+  if (!memberAdminListEl) {
+    return;
+  }
+
+  if (!Array.isArray(state.members) || state.members.length === 0) {
+    memberAdminListEl.innerHTML = '<p class="cart-item-sub">No member accounts yet.</p>';
+    return;
+  }
+
+  memberAdminListEl.innerHTML = state.members
+    .map((member) => {
+      const role = normalizeMemberRole(member.role);
+      const premiumActive = member.premiumAccess === true;
+      const roleBadgeClass = role === "admin" ? "in-stock" : "sold-out";
+      const premiumBadgeClass = premiumActive ? "in-stock" : "sold-out";
+      return `<article class="admin-product-card">
+        <div class="admin-product-body">
+          <h3>${escapeHtml(member.displayName || "Member")}</h3>
+          <p><strong>Email:</strong> ${escapeHtml(member.email || "")}</p>
+          <p><strong>Member ID:</strong> ${escapeHtml(member.id || "")}</p>
+          <p><strong>Last Login:</strong> ${escapeHtml(formatDateLabel(member.lastLoginAt))}</p>
+          <div class="admin-badges">
+            <span class="admin-stock-badge ${roleBadgeClass}">${role === "admin" ? "Member Admin" : "Member"}</span>
+            <span class="admin-stock-badge ${premiumBadgeClass}">${
+              premiumActive
+                ? `Premium ${escapeHtml(String(member.subscriptionStatus || "active"))}`
+                : `No Premium (${escapeHtml(String(member.subscriptionStatus || "inactive"))})`
+            }</span>
+          </div>
+          <div class="admin-card-actions">
+            ${
+              role === "admin"
+                ? `<button class="ghost-btn" type="button" data-member-action="demote" data-member-id="${escapeHtml(
+                    member.id
+                  )}">Remove Admin</button>`
+                : `<button class="primary-btn" type="button" data-member-action="promote" data-member-id="${escapeHtml(
+                    member.id
+                  )}">Make Admin</button>`
+            }
+          </div>
+        </div>
+      </article>`;
+    })
+    .join("");
+}
+
+async function loadMembers() {
+  if (!memberAdminListEl) {
+    return;
+  }
+  const members = await adminRequest("/api/admin/members");
+  state.members = Array.isArray(members) ? members : [];
+  renderMemberAdminList();
+}
+
+function renderMemberFulfillmentSummary(payload) {
+  if (!memberFulfillmentSummaryEl) {
+    return;
+  }
+  if (!payload || typeof payload !== "object") {
+    memberFulfillmentSummaryEl.textContent = "";
+    return;
+  }
+  const summary = payload?.summary || {};
+  const monthKey = cleanFulfillmentMonthKey(payload?.monthKey);
+  memberFulfillmentSummaryEl.textContent = [
+    `${monthKey}`,
+    `Active: ${Number(summary.activeSubscribers) || 0}`,
+    `Cancel Pending: ${Number(summary.cancelAtPeriodEnd) || 0}`,
+    `Terminated: ${Number(summary.terminatedSubscribers) || 0}`,
+    `Stickers Owed: ${Number(summary.stickersOwed) || 0}`,
+    `Stickers Sent: ${Number(summary.stickersSent) || 0}`,
+    `Paperback Owed: ${Number(summary.paperbackOwed) || 0}`,
+    `Paperback Sent: ${Number(summary.paperbackSent) || 0}`
+  ].join(" | ");
+}
+
+function renderMemberFulfillmentList() {
+  if (!memberFulfillmentListEl) {
+    return;
+  }
+
+  const payload = state.memberFulfillmentPayload;
+  renderMemberFulfillmentSummary(payload);
+  const monthKey = cleanFulfillmentMonthKey(payload?.monthKey);
+  const members = Array.isArray(payload?.members) ? payload.members : [];
+
+  if (members.length === 0) {
+    memberFulfillmentListEl.innerHTML = '<p class="cart-item-sub">No member accounts found for this month.</p>';
+    return;
+  }
+
+  memberFulfillmentListEl.innerHTML = members
+    .map((member) => {
+      const stickers = member?.perks?.stickers || {};
+      const paperback = member?.perks?.paperback || {};
+      const premiumStatusBadgeClass = member.premiumAccess ? "in-stock" : "sold-out";
+      const stickersBadgeClass = stickers.owed ? "sold-out" : stickers.fulfilled ? "in-stock" : "sold-out";
+      const paperbackBadgeClass = paperback.owed ? "sold-out" : paperback.fulfilled ? "in-stock" : "sold-out";
+
+      const stickerMetaBits = [];
+      if (stickers.fulfilledAt) {
+        stickerMetaBits.push(`Sent ${formatDateTimeLabel(stickers.fulfilledAt)}`);
+      }
+      if (stickers.trackingNumber) {
+        stickerMetaBits.push(`Tracking ${stickers.trackingNumber}`);
+      }
+      if (stickers.note) {
+        stickerMetaBits.push(stickers.note);
+      }
+
+      const paperbackMetaBits = [];
+      if (paperback.fulfilledAt) {
+        paperbackMetaBits.push(`Sent ${formatDateTimeLabel(paperback.fulfilledAt)}`);
+      }
+      if (paperback.trackingNumber) {
+        paperbackMetaBits.push(`Tracking ${paperback.trackingNumber}`);
+      }
+      if (paperback.note) {
+        paperbackMetaBits.push(paperback.note);
+      }
+
+      const stickerButton =
+        stickers.eligible === true
+          ? `<button
+              class="${stickers.fulfilled ? "ghost-btn" : "primary-btn"}"
+              type="button"
+              data-member-fulfillment-action="toggle-perk"
+              data-member-id="${escapeHtml(member.id)}"
+              data-member-month="${escapeHtml(monthKey)}"
+              data-member-perk="stickers"
+              data-member-fulfilled="${stickers.fulfilled ? "true" : "false"}"
+            >${stickers.fulfilled ? "Mark Stickers Unsent" : "Mark Stickers Sent"}</button>`
+          : '<span class="cart-item-sub">Stickers not owed on current status</span>';
+
+      const paperbackButton =
+        paperback.eligible === true
+          ? `<button
+              class="${paperback.fulfilled ? "ghost-btn" : "primary-btn"}"
+              type="button"
+              data-member-fulfillment-action="toggle-perk"
+              data-member-id="${escapeHtml(member.id)}"
+              data-member-month="${escapeHtml(monthKey)}"
+              data-member-perk="paperback"
+              data-member-fulfilled="${paperback.fulfilled ? "true" : "false"}"
+            >${paperback.fulfilled ? "Mark Book Unsent" : "Mark Book Sent"}</button>`
+          : '<span class="cart-item-sub">Paperback not included on this tier</span>';
+
+      return `<article class="admin-product-card">
+        <div class="admin-product-body">
+          <h3>${escapeHtml(member.displayName || "Member")}</h3>
+          <p><strong>Email:</strong> ${escapeHtml(member.email || "")}</p>
+          <p><strong>Tier:</strong> ${escapeHtml(member.membershipTierLabel || "Free")} | <strong>Status:</strong> ${escapeHtml(
+            String(member.subscriptionStatus || "inactive")
+          )}</p>
+          <div class="admin-badges">
+            <span class="admin-stock-badge ${premiumStatusBadgeClass}">${
+              member.premiumAccess ? "Active Subscriber" : "Not Active"
+            }</span>
+            ${
+              member.cancellationPending
+                ? '<span class="admin-stock-badge sold-out">Cancels At Period End</span>'
+                : ""
+            }
+            ${member.terminated ? '<span class="admin-stock-badge sold-out">Terminated</span>' : ""}
+            <span class="admin-stock-badge ${stickersBadgeClass}">
+              ${
+                stickers.eligible
+                  ? stickers.owed
+                    ? "Stickers Owed"
+                    : stickers.fulfilled
+                      ? "Stickers Sent"
+                      : "Stickers Not Owed"
+                  : "No Sticker Entitlement"
+              }
+            </span>
+            <span class="admin-stock-badge ${paperbackBadgeClass}">
+              ${
+                paperback.eligible
+                  ? paperback.owed
+                    ? "Book Owed"
+                    : paperback.fulfilled
+                      ? "Book Sent"
+                      : "Book Not Owed"
+                  : "No Book Entitlement"
+              }
+            </span>
+          </div>
+          ${stickerMetaBits.length > 0 ? `<p class="cart-item-sub"><strong>Stickers:</strong> ${escapeHtml(stickerMetaBits.join(" | "))}</p>` : ""}
+          ${paperbackMetaBits.length > 0 ? `<p class="cart-item-sub"><strong>Book:</strong> ${escapeHtml(paperbackMetaBits.join(" | "))}</p>` : ""}
+          <div class="admin-card-actions">
+            ${stickerButton}
+            ${paperbackButton}
+          </div>
+        </div>
+      </article>`;
+    })
+    .join("");
+}
+
+async function loadMemberFulfillment(monthKeyValue = "") {
+  if (!memberFulfillmentListEl) {
+    return;
+  }
+  const monthKey = cleanFulfillmentMonthKey(monthKeyValue || memberFulfillmentMonthInput?.value || "");
+  const payload = await adminRequest(`/api/admin/members/fulfillment?month=${encodeURIComponent(monthKey)}`);
+  state.memberFulfillmentPayload = payload && typeof payload === "object" ? payload : null;
+  if (memberFulfillmentMonthInput) {
+    memberFulfillmentMonthInput.value = cleanFulfillmentMonthKey(payload?.monthKey || monthKey);
+  }
+  renderMemberFulfillmentList();
+}
+
+function resetPremiumLibraryForm() {
+  if (premiumLibraryForm) {
+    premiumLibraryForm.reset();
+  }
+  if (premiumLibraryIdInput) {
+    premiumLibraryIdInput.value = "";
+  }
+  if (premiumLibraryTitleInput) {
+    premiumLibraryTitleInput.value = "";
+  }
+  if (premiumLibraryMonthLabelInput) {
+    premiumLibraryMonthLabelInput.value = "";
+  }
+  if (premiumLibraryDescriptionInput) {
+    premiumLibraryDescriptionInput.value = "";
+  }
+  if (premiumLibraryFileInput) {
+    premiumLibraryFileInput.value = "";
+  }
+  if (premiumLibraryFileUrlInput) {
+    premiumLibraryFileUrlInput.value = "";
+  }
+  if (premiumLibraryRemoveFileInput) {
+    premiumLibraryRemoveFileInput.checked = false;
+  }
+  if (premiumLibraryCoverFileInput) {
+    premiumLibraryCoverFileInput.value = "";
+  }
+  if (premiumLibraryCoverUrlInput) {
+    premiumLibraryCoverUrlInput.value = "";
+  }
+  if (premiumLibraryRemoveCoverInput) {
+    premiumLibraryRemoveCoverInput.checked = false;
+  }
+  if (savePremiumLibraryBtn) {
+    savePremiumLibraryBtn.textContent = "Save Ebook";
+  }
+}
+
+function beginEditPremiumLibraryItem(itemId) {
+  const targetId = String(itemId || "").trim();
+  if (!targetId) {
+    return;
+  }
+  const item = state.premiumLibrary.find((entry) => String(entry?.id || "").trim() === targetId);
+  if (!item) {
+    setPremiumLibraryMessage("Ebook not found. Refresh the library and try again.", true);
+    return;
+  }
+  if (premiumLibraryIdInput) {
+    premiumLibraryIdInput.value = item.id;
+  }
+  if (premiumLibraryTitleInput) {
+    premiumLibraryTitleInput.value = String(item.title || "");
+  }
+  if (premiumLibraryMonthLabelInput) {
+    premiumLibraryMonthLabelInput.value = String(item.monthLabel || "");
+  }
+  if (premiumLibraryDescriptionInput) {
+    premiumLibraryDescriptionInput.value = String(item.description || "");
+  }
+  if (premiumLibraryFileInput) {
+    premiumLibraryFileInput.value = "";
+  }
+  if (premiumLibraryFileUrlInput) {
+    premiumLibraryFileUrlInput.value = String(item.fileUrl || "");
+  }
+  if (premiumLibraryRemoveFileInput) {
+    premiumLibraryRemoveFileInput.checked = false;
+  }
+  if (premiumLibraryCoverFileInput) {
+    premiumLibraryCoverFileInput.value = "";
+  }
+  if (premiumLibraryCoverUrlInput) {
+    premiumLibraryCoverUrlInput.value = String(item.coverImageUrl || "");
+  }
+  if (premiumLibraryRemoveCoverInput) {
+    premiumLibraryRemoveCoverInput.checked = false;
+  }
+  if (savePremiumLibraryBtn) {
+    savePremiumLibraryBtn.textContent = "Update Ebook";
+  }
+  if (premiumLibraryForm) {
+    premiumLibraryForm.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function renderPremiumLibraryList() {
+  if (!premiumLibraryListEl) {
+    return;
+  }
+  if (!Array.isArray(state.premiumLibrary) || state.premiumLibrary.length === 0) {
+    premiumLibraryListEl.innerHTML = '<p class="cart-item-sub">No premium ebooks added yet.</p>';
+    return;
+  }
+
+  premiumLibraryListEl.innerHTML = state.premiumLibrary
+    .map((item) => {
+      const id = String(item?.id || "").trim();
+      const title = String(item?.title || "").trim() || "Untitled Ebook";
+      const monthLabel = String(item?.monthLabel || "").trim() || "Upcoming";
+      const description = String(item?.description || "").trim() || "No description yet.";
+      const fileUrl = String(item?.fileUrl || "").trim();
+      const coverImageUrl = String(item?.coverImageUrl || "").trim();
+      const protectedFile = fileUrl.startsWith("/uploads/premium-ebooks/");
+      const fileBadgeClass = fileUrl && protectedFile ? "in-stock" : "sold-out";
+      const fileBadgeLabel = fileUrl ? (protectedFile ? "Protected PDF Linked" : "File Path Needs Fix") : "No PDF Linked";
+      return `<article class="admin-product-card">
+        ${
+          coverImageUrl
+            ? `<img class="admin-product-image" src="${escapeHtml(coverImageUrl)}" alt="${escapeHtml(title)} cover" />`
+            : ""
+        }
+        <div class="admin-product-body">
+          <div class="row-between">
+            <h3>${escapeHtml(title)}</h3>
+            <strong>${escapeHtml(monthLabel)}</strong>
+          </div>
+          <p>${escapeHtml(description)}</p>
+          <div class="admin-badges">
+            <span class="admin-stock-badge ${fileBadgeClass}">${escapeHtml(fileBadgeLabel)}</span>
+            <span class="admin-stock-badge ${coverImageUrl ? "in-stock" : "sold-out"}">${
+              coverImageUrl ? "Cover Ready" : "No Cover"
+            }</span>
+          </div>
+          <p class="admin-id">ID: ${escapeHtml(id)}</p>
+          <p class="admin-id">File: ${escapeHtml(fileUrl || "(none)")}</p>
+          <div class="admin-card-actions">
+            <button class="ghost-btn" type="button" data-premium-library-action="edit" data-premium-library-id="${escapeHtml(
+              id
+            )}">Edit</button>
+            <button class="danger-btn" type="button" data-premium-library-action="delete" data-premium-library-id="${escapeHtml(
+              id
+            )}">Delete</button>
+          </div>
+        </div>
+      </article>`;
+    })
+    .join("");
+}
+
+async function loadPremiumLibrary() {
+  if (!premiumLibraryListEl) {
+    return;
+  }
+  const items = await adminRequest("/api/admin/premium-library");
+  state.premiumLibrary = Array.isArray(items) ? items : [];
+  renderPremiumLibraryList();
+}
+
+function startMembershipRealtimeRefresh() {
+  if (membershipRealtimeTimer) {
+    window.clearInterval(membershipRealtimeTimer);
+    membershipRealtimeTimer = 0;
+  }
+  membershipRealtimeTimer = window.setInterval(async () => {
+    if (!state.adminPassword || state.membersBusy || state.memberFulfillmentBusy) {
+      return;
+    }
+    try {
+      await Promise.all([loadMembers(), loadMemberFulfillment()]);
+    } catch {
+      // Keep interval running even if one refresh fails.
+    }
+  }, MEMBERSHIP_REFRESH_INTERVAL_MS);
+}
+
+function stopMembershipRealtimeRefresh() {
+  if (!membershipRealtimeTimer) {
+    return;
+  }
+  window.clearInterval(membershipRealtimeTimer);
+  membershipRealtimeTimer = 0;
+}
+
 function promptShipmentDetails(options = {}) {
   const defaults = options?.defaults || {};
   const carrier = window.prompt("Carrier name (optional):", String(defaults.carrier || ""));
@@ -2025,6 +2571,7 @@ async function login(password) {
 
 async function ensureAuthenticated() {
   if (!state.adminPassword) {
+    stopMembershipRealtimeRefresh();
     showLogin();
     return;
   }
@@ -2032,10 +2579,13 @@ async function ensureAuthenticated() {
   try {
     await login(state.adminPassword);
     showPanel();
-    await Promise.all([loadProducts(), loadSiteSettings(), loadHealth()]);
+    await Promise.all([loadProducts(), loadSiteSettings(), loadHealth(), loadMembers(), loadMemberFulfillment(), loadPremiumLibrary()]);
+    startMembershipRealtimeRefresh();
     applyPosRedirectState();
   } catch {
+    stopMembershipRealtimeRefresh();
     state.adminPassword = "";
+    window.sessionStorage.removeItem(ADMIN_KEY);
     window.localStorage.removeItem(ADMIN_KEY);
     showLogin();
   }
@@ -2052,17 +2602,22 @@ loginForm.addEventListener("submit", async (event) => {
     setLoginMessage("Signing in...");
     await login(password);
     state.adminPassword = password;
-    window.localStorage.setItem(ADMIN_KEY, password);
+    window.sessionStorage.setItem(ADMIN_KEY, password);
+    window.localStorage.removeItem(ADMIN_KEY);
     passwordInput.value = "";
     showPanel();
     setPosMessage("");
-    await Promise.all([loadProducts(), loadSiteSettings(), loadHealth()]);
+    await Promise.all([loadProducts(), loadSiteSettings(), loadHealth(), loadMembers(), loadMemberFulfillment(), loadPremiumLibrary()]);
+    startMembershipRealtimeRefresh();
     applyPosRedirectState();
     setProductMessage("Signed in.");
     setDesignMessage("");
     setPublishMessage("");
     setHealthMessage("");
     setOrdersMessage("");
+    setMembersMessage("");
+    setMemberFulfillmentMessage("");
+    setPremiumLibraryMessage("");
     setLoginMessage("");
   } catch (error) {
     setLoginMessage(error.message || "Could not sign in.", true);
@@ -2070,18 +2625,30 @@ loginForm.addEventListener("submit", async (event) => {
 });
 
 logoutBtn.addEventListener("click", () => {
+  stopMembershipRealtimeRefresh();
   state.adminPassword = "";
+  window.sessionStorage.removeItem(ADMIN_KEY);
   window.localStorage.removeItem(ADMIN_KEY);
   state.ordersPayload = null;
+  state.members = [];
+  state.memberFulfillmentPayload = null;
+  state.premiumLibrary = [];
   resetForm();
   resetSiteSettingsDraftFields();
   resetPosDraft();
+  resetPremiumLibraryForm();
   showLogin();
+  renderMemberAdminList();
+  renderMemberFulfillmentList();
+  renderPremiumLibraryList();
   setProductMessage("");
   setDesignMessage("");
   setPublishMessage("");
   setHealthMessage("");
   setOrdersMessage("");
+  setMembersMessage("");
+  setMemberFulfillmentMessage("");
+  setPremiumLibraryMessage("");
   setPosMessage("");
   setLoginMessage("");
 });
@@ -2123,6 +2690,402 @@ refreshOrdersBtn?.addEventListener("click", async () => {
     setOrdersMessage(error.message || "Could not load orders.", true);
   } finally {
     setOrdersBusy(false);
+  }
+});
+
+refreshMembersBtn?.addEventListener("click", async () => {
+  if (state.membersBusy) {
+    return;
+  }
+  setMembersBusy(true);
+  setMembersMessage("Refreshing members...");
+  try {
+    await loadMembers();
+    setMembersMessage("Member list refreshed.");
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setMembersMessage(error.message || "Could not load members.", true);
+  } finally {
+    setMembersBusy(false);
+  }
+});
+
+refreshMemberFulfillmentBtn?.addEventListener("click", async () => {
+  if (state.memberFulfillmentBusy) {
+    return;
+  }
+  setMemberFulfillmentBusy(true);
+  setMemberFulfillmentMessage("Refreshing membership fulfillment...");
+  try {
+    await loadMemberFulfillment();
+    setMemberFulfillmentMessage("Membership fulfillment refreshed.");
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setMemberFulfillmentMessage(error.message || "Could not load membership fulfillment.", true);
+  } finally {
+    setMemberFulfillmentBusy(false);
+  }
+});
+
+memberFulfillmentControlsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.memberFulfillmentBusy) {
+    return;
+  }
+  setMemberFulfillmentBusy(true);
+  setMemberFulfillmentMessage("Loading month...");
+  try {
+    await loadMemberFulfillment(memberFulfillmentMonthInput?.value || "");
+    setMemberFulfillmentMessage("Month loaded.");
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setMemberFulfillmentMessage(error.message || "Could not load requested month.", true);
+  } finally {
+    setMemberFulfillmentBusy(false);
+  }
+});
+
+refreshPremiumLibraryBtn?.addEventListener("click", async () => {
+  if (state.premiumLibraryBusy) {
+    return;
+  }
+  setPremiumLibraryBusy(true);
+  setPremiumLibraryMessage("Refreshing premium library...");
+  try {
+    await loadPremiumLibrary();
+    setPremiumLibraryMessage("Premium library refreshed.");
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setPremiumLibraryMessage(error.message || "Could not load premium library.", true);
+  } finally {
+    setPremiumLibraryBusy(false);
+  }
+});
+
+newPremiumLibraryItemBtn?.addEventListener("click", () => {
+  if (state.premiumLibraryBusy) {
+    return;
+  }
+  resetPremiumLibraryForm();
+  setPremiumLibraryMessage("Ready to add a new premium ebook.");
+  premiumLibraryForm?.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+cancelPremiumLibraryEditBtn?.addEventListener("click", () => {
+  if (state.premiumLibraryBusy) {
+    return;
+  }
+  resetPremiumLibraryForm();
+  setPremiumLibraryMessage("Edit canceled.");
+});
+
+premiumLibraryForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.premiumLibraryBusy) {
+    return;
+  }
+
+  const editingId = String(premiumLibraryIdInput?.value || "").trim();
+  const title = String(premiumLibraryTitleInput?.value || "").trim();
+  const monthLabel = String(premiumLibraryMonthLabelInput?.value || "").trim();
+  const description = String(premiumLibraryDescriptionInput?.value || "").trim();
+  if (!title || !monthLabel || !description) {
+    setPremiumLibraryMessage("Title, month label, and description are required.", true);
+    return;
+  }
+
+  setPremiumLibraryBusy(true);
+  setPremiumLibraryMessage(editingId ? "Updating premium ebook..." : "Creating premium ebook...");
+  try {
+    const formData = new FormData();
+    formData.append("title", title);
+    formData.append("monthLabel", monthLabel);
+    formData.append("description", description);
+
+    const ebookFile = premiumLibraryFileInput?.files?.[0];
+    if (ebookFile) {
+      formData.append("ebookFile", ebookFile);
+    }
+    const fileUrl = String(premiumLibraryFileUrlInput?.value || "").trim();
+    if (fileUrl) {
+      formData.append("fileUrl", fileUrl);
+    }
+    if (premiumLibraryRemoveFileInput?.checked) {
+      formData.append("removeFile", "true");
+    }
+
+    const coverImage = premiumLibraryCoverFileInput?.files?.[0];
+    if (coverImage) {
+      formData.append("coverImage", coverImage);
+    }
+    const coverImageUrl = String(premiumLibraryCoverUrlInput?.value || "").trim();
+    if (coverImageUrl) {
+      formData.append("coverImageUrl", coverImageUrl);
+    }
+    if (premiumLibraryRemoveCoverInput?.checked) {
+      formData.append("removeCoverImage", "true");
+    }
+
+    const endpoint = editingId
+      ? `/api/admin/premium-library/${encodeURIComponent(editingId)}`
+      : "/api/admin/premium-library";
+    await adminRequest(endpoint, {
+      method: editingId ? "PUT" : "POST",
+      body: formData
+    });
+    resetPremiumLibraryForm();
+    await loadPremiumLibrary();
+    setPremiumLibraryMessage(editingId ? "Premium ebook updated." : "Premium ebook created.");
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setPremiumLibraryMessage(error.message || "Could not save premium ebook.", true);
+  } finally {
+    setPremiumLibraryBusy(false);
+  }
+});
+
+premiumLibraryListEl?.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-premium-library-action]");
+  if (!button || state.premiumLibraryBusy) {
+    return;
+  }
+
+  const action = String(button.dataset.premiumLibraryAction || "")
+    .trim()
+    .toLowerCase();
+  const itemId = String(button.dataset.premiumLibraryId || "").trim();
+  if (!itemId) {
+    return;
+  }
+
+  const selectedItem = state.premiumLibrary.find((item) => String(item?.id || "").trim() === itemId);
+  const itemLabel = selectedItem?.title || "this ebook";
+
+  if (action === "edit") {
+    beginEditPremiumLibraryItem(itemId);
+    setPremiumLibraryMessage(`Editing ${itemLabel}.`);
+    return;
+  }
+
+  if (action !== "delete") {
+    return;
+  }
+
+  const confirmed = window.confirm(`Delete "${itemLabel}" from the premium library?`);
+  if (!confirmed) {
+    return;
+  }
+
+  setPremiumLibraryBusy(true);
+  setPremiumLibraryMessage("Deleting premium ebook...");
+  try {
+    await adminRequest(`/api/admin/premium-library/${encodeURIComponent(itemId)}`, {
+      method: "DELETE"
+    });
+    if (String(premiumLibraryIdInput?.value || "").trim() === itemId) {
+      resetPremiumLibraryForm();
+    }
+    await loadPremiumLibrary();
+    setPremiumLibraryMessage(`Deleted ${itemLabel}.`);
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setPremiumLibraryMessage(error.message || "Could not delete premium ebook.", true);
+  } finally {
+    setPremiumLibraryBusy(false);
+  }
+});
+
+memberAdminForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.membersBusy) {
+    return;
+  }
+
+  const email = String(memberAdminEmailInput?.value || "").trim();
+  if (!email) {
+    setMembersMessage("Enter a member email to promote.", true);
+    return;
+  }
+
+  setMembersBusy(true);
+  setMembersMessage(`Promoting ${email}...`);
+  try {
+    await adminRequest("/api/admin/members/promote", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ email })
+    });
+    if (memberAdminEmailInput) {
+      memberAdminEmailInput.value = "";
+    }
+    await loadMembers();
+    setMembersMessage(`Member admin enabled for ${email}.`);
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setMembersMessage(error.message || "Could not promote member.", true);
+  } finally {
+    setMembersBusy(false);
+  }
+});
+
+memberAdminListEl?.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-member-action]");
+  if (!button || state.membersBusy) {
+    return;
+  }
+
+  const action = String(button.dataset.memberAction || "").trim().toLowerCase();
+  const memberId = String(button.dataset.memberId || "").trim();
+  if (!memberId) {
+    return;
+  }
+
+  const selectedMember = state.members.find((member) => String(member.id || "").trim() === memberId);
+  const emailLabel = selectedMember?.email || "selected member";
+
+  if (action !== "promote" && action !== "demote") {
+    return;
+  }
+
+  if (action === "demote") {
+    const confirmed = window.confirm(`Remove member-admin role from ${emailLabel}?`);
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  setMembersBusy(true);
+  setMembersMessage(action === "promote" ? "Applying member admin role..." : "Removing member admin role...");
+  try {
+    await adminRequest(`/api/admin/members/${action}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ memberId })
+    });
+    await loadMembers();
+    setMembersMessage(
+      action === "promote"
+        ? `Member admin enabled for ${emailLabel}.`
+        : `Member admin removed for ${emailLabel}.`
+    );
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setMembersMessage(error.message || "Could not update member role.", true);
+  } finally {
+    setMembersBusy(false);
+  }
+});
+
+memberFulfillmentListEl?.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-member-fulfillment-action]");
+  if (!button || state.memberFulfillmentBusy) {
+    return;
+  }
+
+  const action = String(button.dataset.memberFulfillmentAction || "").trim().toLowerCase();
+  const memberId = String(button.dataset.memberId || "").trim();
+  const monthKey = cleanFulfillmentMonthKey(button.dataset.memberMonth || memberFulfillmentMonthInput?.value || "");
+  const perk = String(button.dataset.memberPerk || "")
+    .trim()
+    .toLowerCase();
+  const currentlyFulfilled = String(button.dataset.memberFulfilled || "").trim().toLowerCase() === "true";
+
+  if (action !== "toggle-perk" || !memberId || !["stickers", "paperback"].includes(perk)) {
+    return;
+  }
+
+  const targetMember = (Array.isArray(state.memberFulfillmentPayload?.members) ? state.memberFulfillmentPayload.members : []).find(
+    (member) => String(member?.id || "").trim() === memberId
+  );
+  const memberLabel = targetMember?.email || "this member";
+  const perkLabel = perk === "stickers" ? "stickers" : "paperback";
+  const nextFulfilled = !currentlyFulfilled;
+
+  let trackingNumber = "";
+  let note = "";
+  if (nextFulfilled) {
+    const trackingPrompt = window.prompt(
+      `Tracking number for ${perkLabel} shipment to ${memberLabel} (optional):`,
+      String(targetMember?.perks?.[perk]?.trackingNumber || "")
+    );
+    if (trackingPrompt === null) {
+      return;
+    }
+    const notePrompt = window.prompt(
+      `Internal note for ${perkLabel} shipment to ${memberLabel} (optional):`,
+      String(targetMember?.perks?.[perk]?.note || "")
+    );
+    if (notePrompt === null) {
+      return;
+    }
+    trackingNumber = String(trackingPrompt || "").trim();
+    note = String(notePrompt || "").trim();
+  } else {
+    const confirmed = window.confirm(`Mark ${perkLabel} as not sent for ${memberLabel}?`);
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  setMemberFulfillmentBusy(true);
+  setMemberFulfillmentMessage(nextFulfilled ? `Marking ${perkLabel} sent...` : `Marking ${perkLabel} unsent...`);
+  try {
+    await adminRequest("/api/admin/members/fulfillment", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        memberId,
+        monthKey,
+        perk,
+        fulfilled: nextFulfilled,
+        trackingNumber,
+        note
+      })
+    });
+    await loadMemberFulfillment(monthKey);
+    setMemberFulfillmentMessage(
+      nextFulfilled
+        ? `${perkLabel === "stickers" ? "Stickers" : "Paperback"} marked sent for ${memberLabel}.`
+        : `${perkLabel === "stickers" ? "Stickers" : "Paperback"} marked unsent for ${memberLabel}.`
+    );
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setMemberFulfillmentMessage(error.message || "Could not update member fulfillment.", true);
+  } finally {
+    setMemberFulfillmentBusy(false);
   }
 });
 
@@ -3191,6 +4154,12 @@ syncShippingInputs();
 populatePosStateOptions();
 resetPosDraft();
 renderAdminQuickLinks();
+if (memberFulfillmentMonthInput && !memberFulfillmentMonthInput.value) {
+  memberFulfillmentMonthInput.value = getCurrentMonthKey();
+}
+renderMemberFulfillmentList();
+renderPremiumLibraryList();
+resetPremiumLibraryForm();
 
 ensureAuthenticated().catch(() => {
   showLogin();

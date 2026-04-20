@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PublisHearts Premium Membership</title>
+    <meta
+      name="description"
+      content="Join the PublisHearts premium membership for member-only ebook access, monthly sticker sheet, and private community forum."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="membership-page">
+    <div class="page-glow page-glow-a"></div>
+    <div class="page-glow page-glow-b"></div>
+    <header class="site-header">
+      <div class="container row-between">
+        <a class="brand" href="/">
+          <span class="brand-mark">P</span>
+          <span>PublisHearts</span>
+        </a>
+        <div class="header-actions">
+          <a class="ghost-btn ghost-link" href="/">Home</a>
+          <a class="ghost-btn ghost-link" href="/shop.html">Shop</a>
+          <a class="ghost-btn ghost-link" href="/membership.html">Premium</a>
+          <a class="ghost-btn ghost-link" href="/admin.html">Admin</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="membership-shell container">
+      <section class="membership-hero">
+        <p class="eyebrow">Premium Membership</p>
+        <h1>Choose Your Tier</h1>
+        <p>
+          Every tier includes stickers, premium account access, and profile-based order tracking. Your ebook picks reset
+          each month like a library checkout window.
+        </p>
+        <ul class="membership-included-list">
+          <li>Standard: 2 ebooks per month</li>
+          <li>Plus: 4 ebooks per month</li>
+          <li>Premium: all ebooks + random monthly PublisHearts paperback</li>
+          <li>Monthly sticker sheet</li>
+          <li>Private member community feed</li>
+        </ul>
+        <p id="membership-page-message" class="checkout-message"></p>
+      </section>
+
+      <section class="membership-card">
+        <div class="row-between">
+          <h2>Membership Plans</h2>
+          <span class="cart-item-sub">Pick your monthly tier</span>
+        </div>
+        <div id="membership-plan-grid" class="membership-plan-grid"></div>
+      </section>
+
+      <section class="membership-grid">
+        <article id="membership-auth-card" class="membership-card">
+          <h2>Create or Sign In</h2>
+          <p class="cart-item-sub">Use the same email each time so your subscription and content stay linked.</p>
+
+          <div class="membership-auth-layout">
+            <form id="membership-register-form" class="membership-form">
+              <h3>Create Account</h3>
+              <label>
+                Display Name
+                <input id="register-display-name" type="text" maxlength="80" required />
+              </label>
+              <label>
+                Email
+                <input id="register-email" type="email" maxlength="180" required />
+              </label>
+              <label>
+                Password
+                <input id="register-password" type="password" minlength="8" maxlength="200" required />
+              </label>
+              <label>
+                Phone (optional, for order tracking)
+                <input id="register-phone" type="tel" maxlength="24" placeholder="(555) 555-5555" />
+              </label>
+              <button class="primary-btn block" type="submit">Create Account</button>
+            </form>
+
+            <form id="membership-login-form" class="membership-form">
+              <h3>Sign In</h3>
+              <label>
+                Email
+                <input id="login-email" type="email" maxlength="180" required />
+              </label>
+              <label>
+                Password
+                <input id="login-password" type="password" minlength="8" maxlength="200" required />
+              </label>
+              <button class="ghost-btn block" type="submit">Sign In</button>
+            </form>
+          </div>
+          <p id="membership-auth-message" class="checkout-message"></p>
+        </article>
+
+        <article id="membership-account-card" class="membership-card hidden">
+          <div class="row-between membership-account-head">
+            <h2>Your Account</h2>
+            <button id="membership-logout-btn" class="ghost-btn" type="button">Log Out</button>
+          </div>
+          <p id="membership-account-name" class="membership-account-name"></p>
+          <p id="membership-account-email" class="cart-item-sub"></p>
+          <p id="membership-account-role" class="cart-item-sub"></p>
+          <p id="membership-tier-summary" class="cart-item-sub"></p>
+          <p id="membership-tier-perks" class="cart-item-sub"></p>
+          <form id="membership-order-access-form" class="membership-form">
+            <h3>Order Tracking Contacts</h3>
+            <p class="cart-item-sub">
+              Free accounts can track orders tied to these contacts. New contacts must already appear on your current order history.
+            </p>
+            <label>
+              Emails (comma or new line)
+              <textarea id="membership-order-access-emails" rows="3" maxlength="1200" placeholder="you@example.com"></textarea>
+            </label>
+            <label>
+              Phones (comma or new line)
+              <textarea id="membership-order-access-phones" rows="3" maxlength="1200" placeholder="5555555555"></textarea>
+            </label>
+            <button id="membership-save-order-access-btn" class="ghost-btn" type="submit">Save Order Contacts</button>
+            <p id="membership-order-access-message" class="checkout-message"></p>
+          </form>
+          <div class="membership-status-row">
+            <span class="membership-status-label">Subscription Status</span>
+            <strong id="membership-status-pill" class="membership-status-pill">Inactive</strong>
+          </div>
+          <p id="membership-period-end" class="cart-item-sub"></p>
+          <div class="membership-account-actions">
+            <button id="membership-subscribe-btn" class="primary-btn" type="button">Start Selected Tier</button>
+            <button id="membership-billing-btn" class="ghost-btn" type="button">Manage Billing</button>
+          </div>
+          <p id="membership-account-message" class="checkout-message"></p>
+        </article>
+      </section>
+
+      <section class="membership-content-grid">
+        <article class="membership-card">
+          <div class="row-between">
+            <h2>Premium Ebook Library</h2>
+            <span id="membership-library-lock" class="membership-lock">Locked</span>
+          </div>
+          <p class="cart-item-sub">
+            Library access is only available while your subscription is active. If billing ends, access is restricted.
+          </p>
+          <p id="membership-library-meta" class="cart-item-sub"></p>
+          <div class="membership-account-actions">
+            <button id="membership-save-picks-btn" class="primary-btn hidden" type="button">Save This Month's Ebook Picks</button>
+          </div>
+          <p id="membership-library-message" class="checkout-message"></p>
+          <div id="membership-library-list" class="membership-library-list"></div>
+        </article>
+
+        <article class="membership-card">
+          <div class="row-between">
+            <h2>Private Community</h2>
+            <span id="membership-community-lock" class="membership-lock">Locked</span>
+          </div>
+          <p class="cart-item-sub">Share reviews, ideas, photos, and updates with other premium members.</p>
+          <form id="membership-post-form" class="membership-form hidden">
+            <label>
+              Post
+              <textarea
+                id="membership-post-body"
+                rows="4"
+                maxlength="1800"
+                placeholder="Share your thoughts, review, or update..."
+                required
+              ></textarea>
+            </label>
+            <label>
+              Image URL (optional)
+              <input
+                id="membership-post-image-url"
+                type="url"
+                maxlength="800"
+                placeholder="https://example.com/photo.jpg"
+              />
+            </label>
+            <button class="primary-btn" type="submit">Post to Community</button>
+          </form>
+          <p id="membership-community-message" class="checkout-message"></p>
+          <div id="membership-community-list" class="membership-community-list"></div>
+        </article>
+      </section>
+
+      <section class="membership-card">
+        <div class="row-between">
+          <h2>Your Orders</h2>
+          <button id="membership-refresh-orders-btn" class="ghost-btn" type="button">Refresh Orders</button>
+        </div>
+        <p class="cart-item-sub">
+          View current and previous orders with shipping/tracking details for saved account email and phone contacts.
+        </p>
+        <p id="membership-orders-message" class="checkout-message"></p>
+        <div id="membership-orders-list" class="membership-orders-list"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container row-between">
+        <span>PublisHearts Premium</span>
+        <span>Members-only ebooks + community</span>
+      </div>
+    </footer>
+
+    <script type="module" src="/membership.js"></script>
+  </body>
+</html>

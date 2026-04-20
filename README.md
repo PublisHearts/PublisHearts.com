@@ -20,12 +20,23 @@ Bookstore web app with:
 - drag-and-drop product ordering
 - homepage hero banner uploader
 - per-product shipping toggle + USPS Ground Advantage weight-based shipping estimate
+- premium membership accounts (email/password login)
+- 3-tier Stripe subscriptions (`$10.99`, `$11.99`, `$20.99`)
+- monthly ebook borrowing limits by tier (2, 4, or all-access) with monthly reset
+- premium ebook library access restricted to active subscribers
+- private premium member community posting feed
+- member profile order history + tracking details
+- member-admin role controls for promoting member accounts
+- admin membership fulfillment tracker (monthly stickers/paperback owed vs sent)
 
 ## Run local
 
 ```bash
 npm install
-cp .env.example .env
+# Windows (PowerShell)
+Copy-Item .env.example .env
+# macOS/Linux
+# cp .env.example .env
 npm run dev
 ```
 
@@ -46,9 +57,21 @@ Required:
 
 Optional:
 
+- `STRIPE_TIER_STANDARD_PRICE_ID` (`$10.99` tier, 2 ebooks/month)
+- `STRIPE_TIER_PLUS_PRICE_ID` (`$11.99` tier, 4 ebooks/month)
+- `STRIPE_TIER_PREMIUM_PRICE_ID` (`$20.99` tier, all ebooks + random paperback)
+- `MEMBER_PORTAL_RETURN_PATH` (defaults to `/membership.html`)
+- `PREMIUM_EBOOK_TOKEN_SECRET` (recommended; signs member-only ebook download links)
+- `PREMIUM_EBOOK_TOKEN_TTL_SECONDS` (defaults to `900`)
+- `MEMBER_ADMIN_EMAILS` (comma-separated emails that always stay `admin` role in member accounts)
 - `PRODUCTS_FILE` (defaults to `data/products.json`)
 - `SITE_SETTINGS_FILE` (defaults to `data/site-settings.json`)
 - `ADDRESS_BOOK_FILE` (defaults to `data/address-book.json`)
+- `MEMBER_ACCOUNTS_FILE` (defaults to `data/member-accounts.json`)
+- `PREMIUM_LIBRARY_FILE` (defaults to `data/premium-library.json`)
+- `MEMBER_EBOOK_LOANS_FILE` (defaults to `data/member-ebook-loans.json`)
+- `MEMBER_COMMUNITY_POSTS_FILE` (defaults to `data/member-community-posts.json`)
+- `MEMBER_PERK_FULFILLMENT_FILE` (defaults to `data/member-perk-fulfillment.json`)
 - `UPLOADS_DIR` (defaults to `public/uploads`)
 - `DEFAULT_SHIPPING_FEE` (defaults to `5.00`, in USD)
 - `STRIPE_AUTOMATIC_TAX` (defaults to `true`)
@@ -111,6 +134,11 @@ From the dashboard you can:
 - Storefront settings are saved to `data/site-settings.json` by default.
 - Address book entries are saved to `data/address-book.json` by default.
 - Refunded/hidden order exclusions are saved to `data/order-exclusions.json` by default.
+- Member account records are saved to `data/member-accounts.json` by default.
+- Premium ebook library records are saved to `data/premium-library.json` by default.
+- Member monthly ebook selections are saved to `data/member-ebook-loans.json` by default.
+- Premium community posts are saved to `data/member-community-posts.json` by default.
+- Member monthly perk fulfillment records are saved to `data/member-perk-fulfillment.json` by default.
 - Uploaded files are saved to `public/uploads` by default.
 
 For production, use persistent storage paths if your host supports disks:
@@ -119,7 +147,36 @@ For production, use persistent storage paths if your host supports disks:
 - `SITE_SETTINGS_FILE=/var/data/site-settings.json`
 - `ADDRESS_BOOK_FILE=/var/data/address-book.json`
 - `ORDER_EXCLUSIONS_FILE=/var/data/order-exclusions.json`
+- `MEMBER_ACCOUNTS_FILE=/var/data/member-accounts.json`
+- `PREMIUM_LIBRARY_FILE=/var/data/premium-library.json`
+- `MEMBER_EBOOK_LOANS_FILE=/var/data/member-ebook-loans.json`
+- `MEMBER_COMMUNITY_POSTS_FILE=/var/data/member-community-posts.json`
+- `MEMBER_PERK_FULFILLMENT_FILE=/var/data/member-perk-fulfillment.json`
 - `UPLOADS_DIR=/var/data/uploads`
+
+## Premium membership setup
+
+1. Create recurring Stripe prices in your Stripe dashboard:
+   - Standard `$10.99/month`
+   - Plus `$11.99/month`
+   - Premium `$20.99/month`
+2. Set the corresponding IDs in `.env`:
+   - `STRIPE_TIER_STANDARD_PRICE_ID`
+   - `STRIPE_TIER_PLUS_PRICE_ID`
+   - `STRIPE_TIER_PREMIUM_PRICE_ID`
+3. Keep `STRIPE_WEBHOOK_SECRET` configured so subscription lifecycle events can update member access.
+4. Open `/membership.html`:
+   - users create an account or sign in
+   - free accounts can track their orders by saved email/phone contacts already linked to their order history
+   - users pick a tier and start Stripe subscription checkout
+   - active subscribers can access premium ebooks and private community posts
+   - limited tiers choose monthly ebook picks, and picks reset next month
+   - members can view current + previous orders with tracking on profile
+5. Open `/admin.html` -> Member Admin:
+   - promote a member account by email to `Member Admin`
+   - view member account role + premium status
+   - open "Membership Fulfillment" to track monthly sticker/book owed/sent status
+6. Update `data/premium-library.json` monthly with new ebook entries and protected file URLs under `/uploads/premium-ebooks/`.
 
 ## Stripe webhook
 
@@ -127,9 +184,14 @@ Set endpoint to:
 
 - `https://your-domain.com/api/webhooks/stripe`
 
-Subscribe to event:
+Subscribe to events:
 
 - `checkout.session.completed`
+- `customer.subscription.created`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+- `invoice.payment_succeeded`
+- `invoice.payment_failed`
 
 Then set returned signing secret as `STRIPE_WEBHOOK_SECRET`.
 

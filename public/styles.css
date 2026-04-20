@@ -2064,6 +2064,361 @@ h1 {
   gap: 1rem;
 }
 
+.membership-page {
+  background: radial-gradient(circle at 12% 8%, rgba(228, 175, 129, 0.2) 0%, transparent 34%),
+    radial-gradient(circle at 88% 18%, rgba(145, 189, 207, 0.2) 0%, transparent 34%),
+    linear-gradient(180deg, #faf4eb 0%, #f4ecdf 100%);
+}
+
+.membership-shell {
+  padding: 1.8rem 0 3.8rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.membership-hero,
+.membership-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: #fffefb;
+  box-shadow: var(--shadow);
+}
+
+.membership-hero {
+  padding: 1.35rem;
+}
+
+.membership-hero h1 {
+  margin-top: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.membership-hero p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.membership-included-list {
+  margin: 0.85rem 0 0;
+  padding-left: 1.1rem;
+  color: #4e4337;
+}
+
+.membership-included-list li + li {
+  margin-top: 0.35rem;
+}
+
+.membership-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.membership-plan-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 0.8rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.membership-plan-card.is-selected {
+  border-color: rgba(141, 57, 28, 0.5);
+  box-shadow: 0 0 0 2px rgba(141, 57, 28, 0.12);
+}
+
+.membership-plan-card h3 {
+  margin: 0;
+}
+
+.membership-plan-card ul {
+  margin: 0;
+  padding-left: 1rem;
+  color: var(--ink-soft);
+}
+
+.membership-plan-price {
+  font-weight: 700;
+  color: #5e2410;
+}
+
+.membership-grid,
+.membership-content-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.membership-grid {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.membership-content-grid {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.membership-card {
+  padding: 1.15rem;
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+}
+
+.membership-auth-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.membership-form {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.membership-form h3 {
+  margin: 0;
+}
+
+.membership-form label {
+  display: grid;
+  gap: 0.32rem;
+  font-weight: 600;
+  color: #4e4337;
+}
+
+.membership-form input,
+.membership-form textarea {
+  width: 100%;
+  border: 1px solid #d8cab8;
+  border-radius: 10px;
+  padding: 0.58rem 0.7rem;
+  font: inherit;
+  color: var(--ink);
+  background: #fffdfa;
+}
+
+.membership-account-head {
+  align-items: center;
+}
+
+.membership-account-name {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.membership-status-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.7rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.62rem 0.75rem;
+  background: #fff;
+}
+
+.membership-status-label {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+.membership-status-pill {
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  background: #f8e3df;
+  color: #912b21;
+}
+
+.membership-status-pill.is-active {
+  background: #e7f4ea;
+  color: #17693b;
+}
+
+.membership-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.membership-lock {
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: #f8e3df;
+  color: #912b21;
+}
+
+.membership-lock.is-open {
+  background: #e7f4ea;
+  color: #17693b;
+}
+
+.membership-library-list,
+.membership-community-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.membership-ebook-card,
+.membership-post-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.membership-ebook-card {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.7rem;
+}
+
+.membership-ebook-cover {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #f3ece3;
+}
+
+.membership-ebook-body {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.membership-ebook-body h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.membership-ebook-body p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.membership-ebook-month {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8d391c !important;
+}
+
+.membership-post-card {
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.membership-post-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: baseline;
+  color: #5f554a;
+}
+
+.membership-post-head span {
+  color: #8b7a6a;
+  font-size: 0.82rem;
+}
+
+.membership-post-card p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.membership-post-image {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+
+.membership-pick-label {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  color: #5e2410;
+  font-weight: 600;
+  font-size: 0.86rem;
+}
+
+.membership-ebook-card.is-access {
+  border-color: rgba(23, 105, 59, 0.22);
+  background: linear-gradient(180deg, #ffffff 0%, #f9fffb 100%);
+}
+
+.membership-paperback-card {
+  border: 1px solid #e3c8ac;
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: linear-gradient(180deg, #fff8ef 0%, #fff 100%);
+}
+
+.membership-paperback-card h3 {
+  margin: 0 0 0.35rem;
+}
+
+.membership-paperback-card p {
+  margin: 0;
+}
+
+.membership-orders-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.membership-orders-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.85rem;
+}
+
+.membership-orders-columns section {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.65rem;
+  align-content: start;
+}
+
+.membership-orders-columns section h3 {
+  margin: 0;
+}
+
+.membership-order-card {
+  border: 1px solid #e7dac9;
+  border-radius: 10px;
+  padding: 0.65rem;
+  background: #fffefb;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.membership-order-card h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-family: monospace;
+}
+
+.membership-order-card ul {
+  margin: 0;
+  padding-left: 1rem;
+  color: var(--ink-soft);
+}
+
 @media print {
   @page {
     margin: 0.5in;
@@ -2138,6 +2493,10 @@ h1 {
   }
 
   .admin-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .membership-ebook-card {
     grid-template-columns: 1fr;
   }
 
