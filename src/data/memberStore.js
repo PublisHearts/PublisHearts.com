@@ -2,11 +2,17 @@ import { randomUUID } from "crypto";
 import dotenv from "dotenv";
 import fs from "fs/promises";
 import path from "path";
+import {
+  isPostgresJsonStoreEnabled,
+  readPostgresJsonStore,
+  writePostgresJsonStore
+} from "./postgresJsonStore.js";
 
 dotenv.config();
 
 const memberAccountsFilePath =
   (process.env.MEMBER_ACCOUNTS_FILE || "").trim() || path.join(process.cwd(), "data", "member-accounts.json");
+const memberAccountsStoreKey = "member-accounts";
 
 const validSubscriptionStatuses = new Set([
   "inactive",
@@ -277,6 +283,10 @@ function normalizeStoredMember(raw = {}) {
 
 async function persistMembers() {
   writeQueue = writeQueue.then(async () => {
+    if (isPostgresJsonStoreEnabled()) {
+      await writePostgresJsonStore(memberAccountsStoreKey, members);
+      return;
+    }
     const directory = path.dirname(memberAccountsFilePath);
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(memberAccountsFilePath, `${JSON.stringify(members, null, 2)}\n`, "utf8");
@@ -284,35 +294,65 @@ async function persistMembers() {
   return writeQueue;
 }
 
+function normalizeMembersArray(parsed) {
+  if (!Array.isArray(parsed)) {
+    throw new MemberValidationError("Member accounts file must contain an array.");
+  }
+  const seenEmails = new Set();
+  return parsed.map((entry) => {
+    const normalized = normalizeStoredMember(entry);
+    if (seenEmails.has(normalized.email)) {
+      throw new MemberValidationError(`Duplicate member email found: ${normalized.email}`);
+    }
+    seenEmails.add(normalized.email);
+    return normalized;
+  });
+}
+
+async function readMembersFromDiskArray() {
+  try {
+    const raw = await fs.readFile(memberAccountsFilePath, "utf8");
+    return normalizeMembersArray(JSON.parse(raw));
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    return [];
+  }
+}
+
 async function loadMembersFromDisk() {
   try {
     const raw = await fs.readFile(memberAccountsFilePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      throw new MemberValidationError("Member accounts file must contain an array.");
-    }
-    const seenEmails = new Set();
-    members = parsed.map((entry) => {
-      const normalized = normalizeStoredMember(entry);
-      if (seenEmails.has(normalized.email)) {
-        throw new MemberValidationError(`Duplicate member email found: ${normalized.email}`);
-      }
-      seenEmails.add(normalized.email);
-      return normalized;
-    });
+    members = normalizeMembersArray(JSON.parse(raw));
   } catch (error) {
-    if (error.code !== "ENOENT") {
+    if (error?.code !== "ENOENT") {
       throw error;
     }
     members = [];
     await persistMembers();
   }
+  loaded = true;
+}
 
+async function loadMembersFromPostgres() {
+  const stored = await readPostgresJsonStore(memberAccountsStoreKey);
+  if (stored.found) {
+    members = normalizeMembersArray(stored.value);
+    loaded = true;
+    return;
+  }
+  members = await readMembersFromDiskArray();
+  await persistMembers();
   loaded = true;
 }
 
 async function ensureLoaded() {
   if (!loaded) {
+    if (isPostgresJsonStoreEnabled()) {
+      await loadMembersFromPostgres();
+      return;
+    }
     await loadMembersFromDisk();
   }
 }

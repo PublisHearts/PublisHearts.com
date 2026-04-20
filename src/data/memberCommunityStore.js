@@ -2,12 +2,18 @@ import { randomUUID } from "crypto";
 import dotenv from "dotenv";
 import fs from "fs/promises";
 import path from "path";
+import {
+  isPostgresJsonStoreEnabled,
+  readPostgresJsonStore,
+  writePostgresJsonStore
+} from "./postgresJsonStore.js";
 
 dotenv.config();
 
 const memberCommunityPostsFilePath =
   (process.env.MEMBER_COMMUNITY_POSTS_FILE || "").trim() ||
   path.join(process.cwd(), "data", "member-community-posts.json");
+const memberCommunityPostsStoreKey = "member-community-posts";
 
 let loaded = false;
 let posts = [];
@@ -74,6 +80,10 @@ function clonePost(post) {
 
 async function persistPosts() {
   writeQueue = writeQueue.then(async () => {
+    if (isPostgresJsonStoreEnabled()) {
+      await writePostgresJsonStore(memberCommunityPostsStoreKey, posts);
+      return;
+    }
     const directory = path.dirname(memberCommunityPostsFilePath);
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(memberCommunityPostsFilePath, `${JSON.stringify(posts, null, 2)}\n`, "utf8");
@@ -81,16 +91,44 @@ async function persistPosts() {
   return writeQueue;
 }
 
-async function loadPosts() {
+function normalizePostsArray(parsed) {
+  if (!Array.isArray(parsed)) {
+    throw new MemberCommunityValidationError("Community posts file must contain an array.");
+  }
+  return parsed.map((entry) => normalizeStoredPost(entry));
+}
+
+async function readPostsFromDiskArray() {
   try {
     const raw = await fs.readFile(memberCommunityPostsFilePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      throw new MemberCommunityValidationError("Community posts file must contain an array.");
-    }
-    posts = parsed.map((entry) => normalizeStoredPost(entry));
+    return normalizePostsArray(JSON.parse(raw));
   } catch (error) {
-    if (error.code !== "ENOENT") {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    return [];
+  }
+}
+
+async function loadPosts() {
+  if (isPostgresJsonStoreEnabled()) {
+    const stored = await readPostgresJsonStore(memberCommunityPostsStoreKey);
+    if (stored.found) {
+      posts = normalizePostsArray(stored.value);
+      loaded = true;
+      return;
+    }
+    posts = await readPostsFromDiskArray();
+    await persistPosts();
+    loaded = true;
+    return;
+  }
+
+  try {
+    const raw = await fs.readFile(memberCommunityPostsFilePath, "utf8");
+    posts = normalizePostsArray(JSON.parse(raw));
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
       throw error;
     }
     posts = [];

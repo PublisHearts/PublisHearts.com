@@ -2,11 +2,17 @@ import { randomUUID } from "crypto";
 import dotenv from "dotenv";
 import fs from "fs/promises";
 import path from "path";
+import {
+  isPostgresJsonStoreEnabled,
+  readPostgresJsonStore,
+  writePostgresJsonStore
+} from "./postgresJsonStore.js";
 
 dotenv.config();
 
 const premiumLibraryFilePath =
   (process.env.PREMIUM_LIBRARY_FILE || "").trim() || path.join(process.cwd(), "data", "premium-library.json");
+const premiumLibraryStoreKey = "premium-library";
 
 const defaultItems = [
   {
@@ -89,6 +95,10 @@ function normalizeStoredItem(raw = {}) {
 
 async function persistItems() {
   writeQueue = writeQueue.then(async () => {
+    if (isPostgresJsonStoreEnabled()) {
+      await writePostgresJsonStore(premiumLibraryStoreKey, items);
+      return;
+    }
     const directory = path.dirname(premiumLibraryFilePath);
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(premiumLibraryFilePath, `${JSON.stringify(items, null, 2)}\n`, "utf8");
@@ -96,24 +106,53 @@ async function persistItems() {
   return writeQueue;
 }
 
-async function loadItems() {
+function normalizeItemsArray(parsed) {
+  if (!Array.isArray(parsed)) {
+    throw new PremiumLibraryValidationError("Premium library file must contain an array.");
+  }
+  const seenIds = new Set();
+  return parsed.map((entry) => {
+    const normalized = normalizeStoredItem(entry);
+    if (seenIds.has(normalized.id)) {
+      throw new PremiumLibraryValidationError(`Duplicate premium ebook ID found: ${normalized.id}`);
+    }
+    seenIds.add(normalized.id);
+    return normalized;
+  });
+}
+
+async function readItemsFromDiskArray() {
   try {
     const raw = await fs.readFile(premiumLibraryFilePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      throw new PremiumLibraryValidationError("Premium library file must contain an array.");
-    }
-    const seenIds = new Set();
-    items = parsed.map((entry) => {
-      const normalized = normalizeStoredItem(entry);
-      if (seenIds.has(normalized.id)) {
-        throw new PremiumLibraryValidationError(`Duplicate premium ebook ID found: ${normalized.id}`);
-      }
-      seenIds.add(normalized.id);
-      return normalized;
-    });
+    return normalizeItemsArray(JSON.parse(raw));
   } catch (error) {
-    if (error.code !== "ENOENT") {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    return [];
+  }
+}
+
+async function loadItems() {
+  if (isPostgresJsonStoreEnabled()) {
+    const stored = await readPostgresJsonStore(premiumLibraryStoreKey);
+    if (stored.found) {
+      items = normalizeItemsArray(stored.value);
+      loaded = true;
+      return;
+    }
+    const fromDisk = await readItemsFromDiskArray();
+    items = fromDisk.length > 0 ? fromDisk : defaultItems.map((entry) => normalizeStoredItem(entry));
+    await persistItems();
+    loaded = true;
+    return;
+  }
+
+  try {
+    const raw = await fs.readFile(premiumLibraryFilePath, "utf8");
+    items = normalizeItemsArray(JSON.parse(raw));
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
       throw error;
     }
     items = defaultItems.map((entry) => normalizeStoredItem(entry));

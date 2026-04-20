@@ -1,12 +1,18 @@
 import dotenv from "dotenv";
 import fs from "fs/promises";
 import path from "path";
+import {
+  isPostgresJsonStoreEnabled,
+  readPostgresJsonStore,
+  writePostgresJsonStore
+} from "./postgresJsonStore.js";
 
 dotenv.config();
 
 const siteSettingsFilePath =
   (process.env.SITE_SETTINGS_FILE || "").trim() ||
   path.join(process.cwd(), "data", "site-settings.json");
+const siteSettingsStoreKey = "site-settings";
 
 const defaults = {
   brandName: "PublisHearts",
@@ -160,6 +166,10 @@ function normalize(raw = {}) {
 
 async function persist() {
   writeQueue = writeQueue.then(async () => {
+    if (isPostgresJsonStoreEnabled()) {
+      await writePostgresJsonStore(siteSettingsStoreKey, settings);
+      return;
+    }
     const directory = path.dirname(siteSettingsFilePath);
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(siteSettingsFilePath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
@@ -167,13 +177,38 @@ async function persist() {
   return writeQueue;
 }
 
+async function readSettingsFromDiskObject() {
+  try {
+    const raw = await fs.readFile(siteSettingsFilePath, "utf8");
+    return normalize(JSON.parse(raw));
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    return normalize(defaults);
+  }
+}
+
 async function load() {
+  if (isPostgresJsonStoreEnabled()) {
+    const stored = await readPostgresJsonStore(siteSettingsStoreKey);
+    if (stored.found) {
+      settings = normalize(stored.value || {});
+      loaded = true;
+      return;
+    }
+    settings = await readSettingsFromDiskObject();
+    await persist();
+    loaded = true;
+    return;
+  }
+
   try {
     const raw = await fs.readFile(siteSettingsFilePath, "utf8");
     const parsed = JSON.parse(raw);
     settings = normalize(parsed);
   } catch (error) {
-    if (error.code !== "ENOENT") {
+    if (error?.code !== "ENOENT") {
       throw error;
     }
     settings = normalize(defaults);

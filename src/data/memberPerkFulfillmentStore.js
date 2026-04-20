@@ -1,12 +1,18 @@
 import dotenv from "dotenv";
 import fs from "fs/promises";
 import path from "path";
+import {
+  isPostgresJsonStoreEnabled,
+  readPostgresJsonStore,
+  writePostgresJsonStore
+} from "./postgresJsonStore.js";
 
 dotenv.config();
 
 const memberPerkFulfillmentFilePath =
   (process.env.MEMBER_PERK_FULFILLMENT_FILE || "").trim() ||
   path.join(process.cwd(), "data", "member-perk-fulfillment.json");
+const memberPerkFulfillmentStoreKey = "member-perk-fulfillment";
 
 let loaded = false;
 let records = [];
@@ -78,6 +84,10 @@ function normalizeRecord(raw = {}) {
 
 async function persistRecords() {
   writeQueue = writeQueue.then(async () => {
+    if (isPostgresJsonStoreEnabled()) {
+      await writePostgresJsonStore(memberPerkFulfillmentStoreKey, records);
+      return;
+    }
     const directory = path.dirname(memberPerkFulfillmentFilePath);
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(memberPerkFulfillmentFilePath, `${JSON.stringify(records, null, 2)}\n`, "utf8");
@@ -85,27 +95,42 @@ async function persistRecords() {
   return writeQueue;
 }
 
+function normalizeRecordsArray(parsed) {
+  if (!Array.isArray(parsed)) {
+    throw new MemberPerkFulfillmentValidationError("Member perk fulfillment file must contain an array.");
+  }
+  const seenKeys = new Set();
+  return parsed.map((entry) => {
+    const normalized = normalizeRecord(entry);
+    const key = `${normalized.memberId}:${normalized.monthKey}`;
+    if (seenKeys.has(key)) {
+      throw new MemberPerkFulfillmentValidationError(
+        `Duplicate member perk fulfillment record found for ${normalized.memberId} ${normalized.monthKey}.`
+      );
+    }
+    seenKeys.add(key);
+    return normalized;
+  });
+}
+
+async function readRecordsFromDiskArray() {
+  try {
+    const raw = await fs.readFile(memberPerkFulfillmentFilePath, "utf8");
+    return normalizeRecordsArray(JSON.parse(raw));
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    return [];
+  }
+}
+
 async function loadRecordsFromDisk() {
   try {
     const raw = await fs.readFile(memberPerkFulfillmentFilePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      throw new MemberPerkFulfillmentValidationError("Member perk fulfillment file must contain an array.");
-    }
-    const seenKeys = new Set();
-    records = parsed.map((entry) => {
-      const normalized = normalizeRecord(entry);
-      const key = `${normalized.memberId}:${normalized.monthKey}`;
-      if (seenKeys.has(key)) {
-        throw new MemberPerkFulfillmentValidationError(
-          `Duplicate member perk fulfillment record found for ${normalized.memberId} ${normalized.monthKey}.`
-        );
-      }
-      seenKeys.add(key);
-      return normalized;
-    });
+    records = normalizeRecordsArray(JSON.parse(raw));
   } catch (error) {
-    if (error.code !== "ENOENT") {
+    if (error?.code !== "ENOENT") {
       throw error;
     }
     records = [];
@@ -117,6 +142,18 @@ async function loadRecordsFromDisk() {
 
 async function ensureLoaded() {
   if (!loaded) {
+    if (isPostgresJsonStoreEnabled()) {
+      const stored = await readPostgresJsonStore(memberPerkFulfillmentStoreKey);
+      if (stored.found) {
+        records = normalizeRecordsArray(stored.value);
+        loaded = true;
+        return;
+      }
+      records = await readRecordsFromDiskArray();
+      await persistRecords();
+      loaded = true;
+      return;
+    }
     await loadRecordsFromDisk();
   }
 }

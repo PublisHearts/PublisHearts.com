@@ -64,6 +64,8 @@ Optional:
 - `PREMIUM_EBOOK_TOKEN_SECRET` (recommended; signs member-only ebook download links)
 - `PREMIUM_EBOOK_TOKEN_TTL_SECONDS` (defaults to `900`)
 - `MEMBER_ADMIN_EMAILS` (comma-separated emails that always stay `admin` role in member accounts)
+- `DATABASE_URL` (optional Postgres connection string; when set, member + membership data stores persist in Postgres)
+- `DATABASE_DISABLE_SSL` (optional; set `true` only if your database endpoint does not support TLS)
 - `PRODUCTS_FILE` (defaults to `data/products.json`)
 - `SITE_SETTINGS_FILE` (defaults to `data/site-settings.json`)
 - `ADDRESS_BOOK_FILE` (defaults to `data/address-book.json`)
@@ -140,6 +142,15 @@ From the dashboard you can:
 - Premium community posts are saved to `data/member-community-posts.json` by default.
 - Member monthly perk fulfillment records are saved to `data/member-perk-fulfillment.json` by default.
 - Uploaded files are saved to `public/uploads` by default.
+
+If `DATABASE_URL` is set, these stores use Postgres (Neon compatible) instead of local files:
+
+- site settings
+- member accounts
+- premium ebook library
+- member monthly ebook selections (credits/picks)
+- member community posts
+- member monthly perk fulfillment records
 
 For production, use persistent storage paths if your host supports disks:
 

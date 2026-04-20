@@ -132,12 +132,11 @@ const siteInputs = {
   themeInk: document.getElementById("site-theme-ink")
 };
 
-const ADMIN_KEY = "publishearts_admin_password_v1";
 const SHIPPO_MANUAL_LABEL_URL = "https://apps.goshippo.com/orders";
 const SHIPPO_ORDER_EXPORT_VERSION = "SHIPPO_ORDER_EXPORT_V1";
 
 const state = {
-  adminPassword: window.sessionStorage.getItem(ADMIN_KEY) || window.localStorage.getItem(ADMIN_KEY) || "",
+  adminPassword: "",
   products: [],
   siteSettings: null,
   productBusy: false,
@@ -161,11 +160,6 @@ const state = {
   dropTargetId: null,
   dropAfter: false
 };
-
-if (!window.sessionStorage.getItem(ADMIN_KEY) && window.localStorage.getItem(ADMIN_KEY)) {
-  window.sessionStorage.setItem(ADMIN_KEY, state.adminPassword);
-}
-window.localStorage.removeItem(ADMIN_KEY);
 
 const DEFAULT_SHIPPING_FEE = 5;
 const COPIES_PER_EDITION = 50;
@@ -2651,8 +2645,6 @@ async function ensureAuthenticated() {
   } catch {
     stopMembershipRealtimeRefresh();
     state.adminPassword = "";
-    window.sessionStorage.removeItem(ADMIN_KEY);
-    window.localStorage.removeItem(ADMIN_KEY);
     showLogin();
   }
 }
@@ -2668,8 +2660,6 @@ loginForm.addEventListener("submit", async (event) => {
     setLoginMessage("Signing in...");
     await login(password);
     state.adminPassword = password;
-    window.sessionStorage.setItem(ADMIN_KEY, password);
-    window.localStorage.removeItem(ADMIN_KEY);
     passwordInput.value = "";
     showPanel();
     setPosMessage("");
@@ -2693,8 +2683,6 @@ loginForm.addEventListener("submit", async (event) => {
 logoutBtn.addEventListener("click", () => {
   stopMembershipRealtimeRefresh();
   state.adminPassword = "";
-  window.sessionStorage.removeItem(ADMIN_KEY);
-  window.localStorage.removeItem(ADMIN_KEY);
   state.ordersPayload = null;
   state.members = [];
   state.memberFulfillmentPayload = null;

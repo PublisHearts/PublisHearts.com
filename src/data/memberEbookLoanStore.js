@@ -2,12 +2,18 @@ import { randomUUID } from "crypto";
 import dotenv from "dotenv";
 import fs from "fs/promises";
 import path from "path";
+import {
+  isPostgresJsonStoreEnabled,
+  readPostgresJsonStore,
+  writePostgresJsonStore
+} from "./postgresJsonStore.js";
 
 dotenv.config();
 
 const memberEbookLoansFilePath =
   (process.env.MEMBER_EBOOK_LOANS_FILE || "").trim() ||
   path.join(process.cwd(), "data", "member-ebook-loans.json");
+const memberEbookLoansStoreKey = "member-ebook-loans";
 
 let loaded = false;
 let loans = [];
@@ -89,6 +95,10 @@ function cloneLoan(loan) {
 
 async function persistLoans() {
   writeQueue = writeQueue.then(async () => {
+    if (isPostgresJsonStoreEnabled()) {
+      await writePostgresJsonStore(memberEbookLoansStoreKey, loans);
+      return;
+    }
     const directory = path.dirname(memberEbookLoansFilePath);
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(memberEbookLoansFilePath, `${JSON.stringify(loans, null, 2)}\n`, "utf8");
@@ -96,16 +106,44 @@ async function persistLoans() {
   return writeQueue;
 }
 
-async function loadLoans() {
+function normalizeLoansArray(parsed) {
+  if (!Array.isArray(parsed)) {
+    throw new MemberEbookLoanValidationError("Member ebook loans file must contain an array.");
+  }
+  return parsed.map((entry) => normalizeStoredLoan(entry));
+}
+
+async function readLoansFromDiskArray() {
   try {
     const raw = await fs.readFile(memberEbookLoansFilePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      throw new MemberEbookLoanValidationError("Member ebook loans file must contain an array.");
-    }
-    loans = parsed.map((entry) => normalizeStoredLoan(entry));
+    return normalizeLoansArray(JSON.parse(raw));
   } catch (error) {
-    if (error.code !== "ENOENT") {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    return [];
+  }
+}
+
+async function loadLoans() {
+  if (isPostgresJsonStoreEnabled()) {
+    const stored = await readPostgresJsonStore(memberEbookLoansStoreKey);
+    if (stored.found) {
+      loans = normalizeLoansArray(stored.value);
+      loaded = true;
+      return;
+    }
+    loans = await readLoansFromDiskArray();
+    await persistLoans();
+    loaded = true;
+    return;
+  }
+
+  try {
+    const raw = await fs.readFile(memberEbookLoansFilePath, "utf8");
+    loans = normalizeLoansArray(JSON.parse(raw));
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
       throw error;
     }
     loans = [];
