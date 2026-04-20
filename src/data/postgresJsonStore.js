@@ -4,7 +4,14 @@ import pg from "pg";
 dotenv.config();
 
 const { Pool } = pg;
-const databaseUrl = String(process.env.DATABASE_URL || "").trim();
+const databaseUrlCandidates = [
+  { key: "DATABASE_URL", value: process.env.DATABASE_URL },
+  { key: "POSTGRES_URL", value: process.env.POSTGRES_URL },
+  { key: "NEON_DATABASE_URL", value: process.env.NEON_DATABASE_URL }
+];
+const selectedDatabaseUrlEntry = databaseUrlCandidates.find((entry) => String(entry.value || "").trim());
+const databaseUrl = String(selectedDatabaseUrlEntry?.value || "").trim();
+const databaseUrlSource = selectedDatabaseUrlEntry?.key || "";
 const disableDbTls = String(process.env.DATABASE_DISABLE_SSL || "")
   .trim()
   .toLowerCase();
@@ -18,6 +25,7 @@ const pool = databaseUrl
   : null;
 
 let schemaReadyPromise = null;
+let lastConnectionError = "";
 
 function parseStoreValue(rawValue) {
   if (rawValue === null || rawValue === undefined) {
@@ -52,6 +60,43 @@ async function ensureSchema() {
 
 export function isPostgresJsonStoreEnabled() {
   return Boolean(pool);
+}
+
+export function getPostgresJsonStoreRuntimeInfo() {
+  return {
+    enabled: Boolean(pool),
+    databaseUrlSource,
+    tlsDisabled: shouldDisableTls,
+    lastConnectionError
+  };
+}
+
+export async function checkPostgresJsonStoreConnection() {
+  if (!pool) {
+    return {
+      enabled: false,
+      ok: false,
+      error: "No Postgres connection string found. Set DATABASE_URL (or POSTGRES_URL / NEON_DATABASE_URL)."
+    };
+  }
+  try {
+    await ensureSchema();
+    await pool.query("SELECT 1");
+    lastConnectionError = "";
+    return {
+      enabled: true,
+      ok: true,
+      error: ""
+    };
+  } catch (error) {
+    const details = String(error?.message || "").trim();
+    lastConnectionError = details || "Unknown Postgres connection error.";
+    return {
+      enabled: true,
+      ok: false,
+      error: lastConnectionError
+    };
+  }
 }
 
 export async function readPostgresJsonStore(storeKey) {

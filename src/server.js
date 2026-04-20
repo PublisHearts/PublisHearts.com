@@ -100,6 +100,10 @@ import {
   listMemberPerkFulfillmentRecords,
   upsertMemberPerkFulfillmentRecord
 } from "./data/memberPerkFulfillmentStore.js";
+import {
+  checkPostgresJsonStoreConnection,
+  getPostgresJsonStoreRuntimeInfo
+} from "./data/postgresJsonStore.js";
 
 dotenv.config();
 const execFileAsync = promisify(execFile);
@@ -6679,7 +6683,7 @@ app.get("/api/admin/site-settings", requireAdmin, async (req, res) => {
   });
 });
 
-app.get("/api/admin/health", requireAdmin, (req, res) => {
+app.get("/api/admin/health", requireAdmin, async (req, res) => {
   const emailHealth = getEmailHealth();
   const uspsMissingConfig = getUspsMissingConfigFields();
   const deployCommitRaw = (
@@ -6689,6 +6693,8 @@ app.get("/api/admin/health", requireAdmin, (req, res) => {
     ""
   ).trim();
   const deployCommit = deployCommitRaw ? deployCommitRaw.slice(0, 12) : "";
+  const postgresRuntime = getPostgresJsonStoreRuntimeInfo();
+  const postgresHealth = await checkPostgresJsonStoreConnection();
 
   res.json({
     status: "ok",
@@ -6715,6 +6721,13 @@ app.get("/api/admin/health", requireAdmin, (req, res) => {
       { id: "amazon-kdp", label: "Amazon KDP", href: adminAmazonKdpUrl },
       { id: "shippo", label: "Shippo", href: adminShippoUrl }
     ],
+    database: {
+      enabled: postgresRuntime.enabled,
+      envVar: postgresRuntime.databaseUrlSource || "",
+      tlsDisabled: postgresRuntime.tlsDisabled,
+      connected: postgresHealth.ok === true,
+      error: postgresHealth.ok ? "" : postgresHealth.error || postgresRuntime.lastConnectionError || ""
+    },
     deployCommit,
     deployCommitRaw
   });
