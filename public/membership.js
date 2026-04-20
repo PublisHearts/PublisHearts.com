@@ -124,11 +124,17 @@ function getSubscriptionStatus(member) {
 }
 
 function isPremiumActive(member) {
+  if (member?.premiumAccess === true) {
+    return true;
+  }
   const status = getSubscriptionStatus(member);
   return status === "active" || status === "trialing";
 }
 
 function prettyStatusLabel(member) {
+  if (member?.complimentaryPremiumAccess === true) {
+    return "Admin Complimentary";
+  }
   const status = getSubscriptionStatus(member);
   if (!status) {
     return "Inactive";
@@ -206,6 +212,7 @@ function renderPlans() {
       const configured = plan?.configured === true;
       const selected = key === state.selectedTierKey;
       const selectedClass = selected ? "is-selected" : "";
+      const planImageUrl = String(plan?.imageUrl || "").trim();
       const perks = [];
       if (plan?.allEbooksAccess) {
         perks.push("All ebooks every month");
@@ -218,6 +225,13 @@ function renderPlans() {
       }
 
       return `<article class="membership-plan-card ${selectedClass}">
+        ${
+          planImageUrl
+            ? `<img class="membership-plan-image" src="${escapeHtml(planImageUrl)}" alt="${escapeHtml(
+                plan?.label || "Plan"
+              )} membership" loading="lazy" />`
+            : ""
+        }
         <div class="row-between">
           <h3>${escapeHtml(plan?.label || "Plan")}</h3>
           <span class="membership-plan-price">${escapeHtml(plan?.monthlyPriceLabel || "")}</span>
@@ -437,6 +451,7 @@ function renderAccount() {
   const member = state.member;
   const authenticated = Boolean(member);
   const premium = isPremiumActive(member);
+  const complimentaryPremium = member?.complimentaryPremiumAccess === true;
   const selectedPlan = getPlanByKey(state.selectedTierKey);
 
   authCardEl.classList.toggle("hidden", authenticated);
@@ -485,7 +500,9 @@ function renderAccount() {
     orderAccessPhonesEl.value = phones.join("\n");
   }
   const activeTierPlan = getPlanByKey(String(member.membershipTier || "").trim().toLowerCase());
-  const activeTierPriceLabel = String(activeTierPlan?.monthlyPriceLabel || member.monthlyPriceLabel || "").trim();
+  const activeTierPriceLabel = complimentaryPremium
+    ? "Free (Admin)"
+    : String(activeTierPlan?.monthlyPriceLabel || member.monthlyPriceLabel || "").trim();
   tierSummaryEl.textContent = `Tier: ${member.membershipTierLabel || "Free"} ${activeTierPriceLabel ? `(${activeTierPriceLabel})` : ""}`;
 
   const perkBits = [];
@@ -504,14 +521,21 @@ function renderAccount() {
 
   statusPillEl.textContent = prettyStatusLabel(member);
   statusPillEl.classList.toggle("is-active", premium);
-  subscribeBtn.textContent = selectedPlan
-    ? `Start ${selectedPlan.label} (${selectedPlan.monthlyPriceLabel})`
-    : "Start Selected Tier";
-  subscribeBtn.disabled = state.busy || !selectedPlan || !selectedPlan.configured;
-  billingBtn.classList.toggle("hidden", !member.stripeCustomerId);
-  periodEndEl.textContent = member.subscriptionCurrentPeriodEnd
-    ? `Current period ends: ${formatDate(member.subscriptionCurrentPeriodEnd)}`
-    : "No active billing period yet.";
+  if (complimentaryPremium) {
+    subscribeBtn.textContent = "Admin Access Included";
+    subscribeBtn.disabled = true;
+    billingBtn.classList.add("hidden");
+    periodEndEl.textContent = "Complimentary premium access is active for Member Admin accounts.";
+  } else {
+    subscribeBtn.textContent = selectedPlan
+      ? `Start ${selectedPlan.label} (${selectedPlan.monthlyPriceLabel})`
+      : "Start Selected Tier";
+    subscribeBtn.disabled = state.busy || !selectedPlan || !selectedPlan.configured;
+    billingBtn.classList.toggle("hidden", !member.stripeCustomerId);
+    periodEndEl.textContent = member.subscriptionCurrentPeriodEnd
+      ? `Current period ends: ${formatDate(member.subscriptionCurrentPeriodEnd)}`
+      : "No active billing period yet.";
+  }
 
   renderLibrary();
   renderCommunity();

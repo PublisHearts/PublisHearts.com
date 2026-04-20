@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Little Big Superhero Goes To The Doctor (1)</title>
+    <link rel="stylesheet" href="viewer.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="title-wrap">
+        <p>Local Reader</p>
+        <h1>The Little Big Superhero Goes To The Doctor (1)</h1>
+      </div>
+    </header>
+    <main class="reader-shell">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <button id="prevBtn" class="tool-btn" type="button">Prev</button>
+          <button id="nextBtn" class="tool-btn" type="button">Next</button>
+          <span id="pageIndicator" class="page-indicator">Page 0 / 0</span>
+        </div>
+        <div class="toolbar-right">
+          <button id="zoomOutBtn" class="tool-btn" type="button">-</button>
+          <button id="zoomResetBtn" class="tool-btn" type="button">100%</button>
+          <button id="zoomInBtn" class="tool-btn" type="button">+</button>
+          <button id="fullscreenBtn" class="tool-btn" type="button">Fullscreen</button>
+        </div>
+      </div>
+      <div class="book-stage-wrap">
+        <div id="loadingOverlay" class="loading-overlay hidden">
+          <div class="loader-card">
+            <p id="loadingMessage">Loading book...</p>
+            <div class="progress-track">
+              <span id="progressBar" class="progress-bar"></span>
+            </div>
+          </div>
+        </div>
+        <div id="bookViewport" class="book-viewport">
+          <button id="closedCoverBtn" class="closed-cover hidden" type="button" aria-label="Open book">
+            <span class="closed-cover-spine"></span>
+            <div id="closedCoverPage" class="closed-cover-page"></div>
+            <span class="closed-cover-label">Click cover to open</span>
+          </button>
+          <div id="flipbookRoot" class="flipbook-root"></div>
+        </div>
+      </div>
+    </main>
+    <template id="bookPageTemplate">
+      <div class="book-page">
+        <div class="book-page-inner">
+          <div class="page-canvas-wrap"></div>
+          <span class="page-no"></span>
+        </div>
+      </div>
+    </template>
+    <script src="vendor/pdf.min.js"></script>
+    <script src="vendor/page-flip.browser.js"></script>
+    <script src="viewer.js"></script>
+  </body>
+</html>

@@ -336,6 +336,7 @@ const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "../public");
 const uploadsDir = (process.env.UPLOADS_DIR || "").trim() || path.join(publicDir, "uploads");
 const premiumEbookUploadsDir = path.join(uploadsDir, "premium-ebooks");
+const pdfEbookDir = path.join(process.cwd(), "pdfEbook");
 const allowedImageMimes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const allowedPdfMimes = new Set(["application/pdf", "application/x-pdf", "application/acrobat"]);
 
@@ -2354,10 +2355,24 @@ function readBearerToken(req) {
 }
 
 function isMemberPremiumActive(member) {
+  if (isMemberAdmin(member)) {
+    return true;
+  }
   const status = String(member?.subscriptionStatus || "inactive")
     .trim()
     .toLowerCase();
   return activePremiumSubscriptionStatuses.has(status);
+}
+
+function isMemberPremiumSubscriptionActive(member) {
+  const status = String(member?.subscriptionStatus || "inactive")
+    .trim()
+    .toLowerCase();
+  return activePremiumSubscriptionStatuses.has(status);
+}
+
+function hasComplimentaryAdminPremiumAccess(member) {
+  return isMemberAdmin(member) && !isMemberPremiumSubscriptionActive(member);
 }
 
 function isMemberAdmin(member) {
@@ -2410,9 +2425,10 @@ function cleanMonthKeyOrCurrent(value) {
 function getMemberMonthlyPerkEligibility(member) {
   const tierSummary = getMemberTierSummary(member);
   const premiumActive = isMemberPremiumActive(member);
+  const complimentaryAdminPremiumAccess = hasComplimentaryAdminPremiumAccess(member);
   return {
-    stickersEligible: premiumActive && Boolean(tierSummary.includesStickers),
-    paperbackEligible: premiumActive && Boolean(tierSummary.includesRandomPaperback),
+    stickersEligible: !complimentaryAdminPremiumAccess && premiumActive && Boolean(tierSummary.includesStickers),
+    paperbackEligible: !complimentaryAdminPremiumAccess && premiumActive && Boolean(tierSummary.includesRandomPaperback),
     premiumActive
   };
 }
@@ -2444,6 +2460,9 @@ function parseAdminBoolean(value, fallback = false) {
 }
 
 function getMemberTierConfig(member) {
+  if (isMemberAdmin(member)) {
+    return membershipTierCatalog.premium;
+  }
   const tierKey = normalizeMembershipTierKey(member?.membershipTier);
   const explicit = getMembershipTierConfigByKey(tierKey);
   if (explicit) {
@@ -2542,7 +2561,15 @@ function getSubscriptionTierConfig(subscription) {
   return getMembershipTierConfigByPriceId(priceId);
 }
 
-function getPublicMembershipPlans() {
+function getMembershipPlanImageUrlsFromSettings(settings = {}) {
+  return {
+    standard: String(settings?.membershipStandardImageUrl || "").trim(),
+    plus: String(settings?.membershipPlusImageUrl || "").trim(),
+    premium: String(settings?.membershipPremiumImageUrl || "").trim()
+  };
+}
+
+function getPublicMembershipPlans(planImageUrls = {}) {
   return membershipTierKeysInDisplayOrder.map((key) => {
     const config = membershipTierCatalog[key];
     return {
@@ -2554,7 +2581,8 @@ function getPublicMembershipPlans() {
       allEbooksAccess: Boolean(config.allEbooksAccess),
       includesRandomPaperback: Boolean(config.includesRandomPaperback),
       includesStickers: Boolean(config.includesStickers),
-      configured: Boolean(String(config.priceId || "").trim())
+      configured: Boolean(String(config.priceId || "").trim()),
+      imageUrl: String(planImageUrls?.[config.key] || "").trim()
     };
   });
 }
@@ -2647,6 +2675,124 @@ function isProtectedPremiumEbookFileUrl(value) {
     return false;
   }
   return !normalized.includes("\\") && !normalized.includes("..");
+}
+
+function isPublicPremiumEbookFileUrl(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return false;
+  }
+  if (/^https?:\/\/\S+$/i.test(normalized)) {
+    return true;
+  }
+  if (
+    (normalized.startsWith("/ebooks/") || normalized.startsWith("/pdfEbook/")) &&
+    !normalized.includes("\\") &&
+    !normalized.includes("..")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function formatFlipbookFolderTitle(folderName) {
+  const text = String(folderName || "").trim();
+  if (!text) {
+    return "Premium Flipbook";
+  }
+  const normalized = text
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) {
+    return "Premium Flipbook";
+  }
+  return normalized
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function buildFlipbookLibraryItemId(folderName) {
+  const normalized = String(folderName || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
+  const base = normalized || "ebook";
+  return `flipbook-${base}`.slice(0, 120);
+}
+
+async function listFlipbookLibraryItemsFromDisk() {
+  let entries = [];
+  try {
+    entries = await fs.readdir(pdfEbookDir, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const items = [];
+  for (const entry of entries) {
+    if (!entry?.isDirectory?.()) {
+      continue;
+    }
+    const folderName = String(entry.name || "").trim();
+    if (!folderName) {
+      continue;
+    }
+    const folderPath = path.join(pdfEbookDir, folderName);
+    const indexPath = path.join(folderPath, "index.html");
+    try {
+      await fs.access(indexPath);
+    } catch {
+      continue;
+    }
+    items.push({
+      id: buildFlipbookLibraryItemId(folderName),
+      title: formatFlipbookFolderTitle(folderName),
+      monthLabel: "Flipbook",
+      description: "Interactive flipbook edition.",
+      fileUrl: `/ebooks/${encodeURIComponent(folderName)}/`,
+      coverImageUrl: "",
+      source: "flipbook"
+    });
+  }
+
+  items.sort((left, right) => String(left.title || "").localeCompare(String(right.title || ""), undefined, { sensitivity: "base" }));
+  return items;
+}
+
+async function listAllPremiumLibraryItems() {
+  const [storedItems, flipbookItems] = await Promise.all([listPremiumLibraryItems(), listFlipbookLibraryItemsFromDisk()]);
+  const merged = [];
+  const seenIds = new Set();
+
+  for (const item of storedItems) {
+    const id = String(item?.id || "").trim();
+    if (!id || seenIds.has(id)) {
+      continue;
+    }
+    seenIds.add(id);
+    merged.push({
+      ...item,
+      source: "stored"
+    });
+  }
+
+  for (const item of flipbookItems) {
+    const id = String(item?.id || "").trim();
+    if (!id || seenIds.has(id)) {
+      continue;
+    }
+    seenIds.add(id);
+    merged.push(item);
+  }
+
+  return merged;
 }
 
 function resolvePremiumEbookFilePath(fileUrl) {
@@ -2772,7 +2918,7 @@ async function getMemberPremiumEbookAccessSnapshot(member) {
   }
 
   const monthKey = getCurrentMonthKey();
-  const items = await listPremiumLibraryItems();
+  const items = await listAllPremiumLibraryItems();
   const validItemIdSet = new Set(items.map((item) => item.id));
   const currentLoan = await findMemberEbookLoan(member.id, monthKey);
   const maxSelections = tierConfig.allEbooksAccess ? items.length : Math.max(0, Number(tierConfig.ebookMonthlyLimit) || 0);
@@ -2803,6 +2949,7 @@ function buildMemberClientPayload(member) {
   if (!member) {
     return null;
   }
+  const complimentaryPremiumAccess = hasComplimentaryAdminPremiumAccess(member);
   const tierSummary = getMemberTierSummary(member);
   const orderLookupEmails = getMemberOrderLookupEmails(member);
   const orderLookupPhones = getMemberOrderLookupPhones(member);
@@ -2817,6 +2964,7 @@ function buildMemberClientPayload(member) {
     subscriptionCurrentPeriodEnd: member.subscriptionCurrentPeriodEnd || "",
     subscriptionCancelAtPeriodEnd: Boolean(member.subscriptionCancelAtPeriodEnd),
     premiumAccess: isMemberPremiumActive(member),
+    complimentaryPremiumAccess,
     membershipTier: tierSummary.membershipTier,
     membershipTierLabel: tierSummary.membershipTierLabel,
     monthlyPriceLabel: tierSummary.monthlyPriceLabel,
@@ -4800,8 +4948,16 @@ async function createUspsLabelForSession(session, options = {}) {
 function extractSiteSettingsChanges(req) {
   const removeLogo = String(req.body?.removeLogo || "").toLowerCase() === "true";
   const removeBanner = String(req.body?.removeBanner || "").toLowerCase() === "true";
+  const removeMembershipStandardImage =
+    String(req.body?.removeMembershipStandardImage || "").toLowerCase() === "true";
+  const removeMembershipPlusImage = String(req.body?.removeMembershipPlusImage || "").toLowerCase() === "true";
+  const removeMembershipPremiumImage =
+    String(req.body?.removeMembershipPremiumImage || "").toLowerCase() === "true";
   let logoImageUrl = uploadedImageUrl(req.files, "logoImage");
   let heroBannerImageUrl = uploadedImageUrl(req.files, "heroBannerImage");
+  let membershipStandardImageUrl = uploadedImageUrl(req.files, "membershipStandardImage");
+  let membershipPlusImageUrl = uploadedImageUrl(req.files, "membershipPlusImage");
+  let membershipPremiumImageUrl = uploadedImageUrl(req.files, "membershipPremiumImage");
   if (removeLogo) {
     logoImageUrl = "";
   } else {
@@ -4816,6 +4972,30 @@ function extractSiteSettingsChanges(req) {
     const typedBannerUrl = String(req.body?.heroBannerImageUrl || "").trim();
     if (typedBannerUrl) {
       heroBannerImageUrl = typedBannerUrl;
+    }
+  }
+  if (removeMembershipStandardImage) {
+    membershipStandardImageUrl = "";
+  } else {
+    const typedStandardUrl = String(req.body?.membershipStandardImageUrl || "").trim();
+    if (typedStandardUrl) {
+      membershipStandardImageUrl = typedStandardUrl;
+    }
+  }
+  if (removeMembershipPlusImage) {
+    membershipPlusImageUrl = "";
+  } else {
+    const typedPlusUrl = String(req.body?.membershipPlusImageUrl || "").trim();
+    if (typedPlusUrl) {
+      membershipPlusImageUrl = typedPlusUrl;
+    }
+  }
+  if (removeMembershipPremiumImage) {
+    membershipPremiumImageUrl = "";
+  } else {
+    const typedPremiumUrl = String(req.body?.membershipPremiumImageUrl || "").trim();
+    if (typedPremiumUrl) {
+      membershipPremiumImageUrl = typedPremiumUrl;
     }
   }
 
@@ -4856,6 +5036,15 @@ function extractSiteSettingsChanges(req) {
   }
   if (heroBannerImageUrl !== undefined) {
     changes.heroBannerImageUrl = heroBannerImageUrl;
+  }
+  if (membershipStandardImageUrl !== undefined) {
+    changes.membershipStandardImageUrl = membershipStandardImageUrl;
+  }
+  if (membershipPlusImageUrl !== undefined) {
+    changes.membershipPlusImageUrl = membershipPlusImageUrl;
+  }
+  if (membershipPremiumImageUrl !== undefined) {
+    changes.membershipPremiumImageUrl = membershipPremiumImageUrl;
   }
 
   return changes;
@@ -5337,6 +5526,10 @@ app.use(express.static(publicDir));
 if (path.resolve(uploadsDir) !== path.resolve(path.join(publicDir, "uploads"))) {
   app.use("/uploads", express.static(uploadsDir));
 }
+if (path.resolve(pdfEbookDir) !== path.resolve(publicDir)) {
+  app.use("/pdfEbook", express.static(pdfEbookDir));
+  app.use("/ebooks", express.static(pdfEbookDir));
+}
 
 app.get("/api/site-settings", async (req, res) => {
   const settings = await getSiteSettings();
@@ -5393,9 +5586,13 @@ app.get("/api/members/me", async (req, res) => {
 
 app.get("/api/members/plans", async (req, res) => {
   try {
-    const plans = await getPublicMembershipPlansWithLivePricing();
+    const [plans, settings] = await Promise.all([getPublicMembershipPlansWithLivePricing(), getSiteSettings()]);
+    const imageUrls = getMembershipPlanImageUrlsFromSettings(settings);
     return res.json({
-      plans
+      plans: plans.map((plan) => ({
+        ...plan,
+        imageUrl: String(imageUrls?.[String(plan?.key || "").trim()] || plan?.imageUrl || "").trim()
+      }))
     });
   } catch (error) {
     const details = String(error?.message || "").trim();
@@ -5792,6 +5989,11 @@ app.post("/api/members/create-subscription-checkout", requireMember, async (req,
 
   try {
     const member = req.member;
+    if (hasComplimentaryAdminPremiumAccess(member)) {
+      return res.status(409).json({
+        error: "Member Admin accounts include complimentary premium access and do not require a paid subscription."
+      });
+    }
     if (hasMemberBlockingPremiumSubscription(member)) {
       return res.status(409).json({
         error: "You already have an active premium subscription. Use Manage Billing to update or cancel your plan.",
@@ -5932,6 +6134,7 @@ app.get("/api/members/premium/ebooks", requireActivePremiumMember, async (req, r
     const availableEbooks = items.map((item) => {
       const hasAccess = tierConfig.allEbooksAccess || selectedIdSet.has(item.id);
       const isProtectedFile = isProtectedPremiumEbookFileUrl(item.fileUrl);
+      const isPublicFile = isPublicPremiumEbookFileUrl(item.fileUrl);
       const token = hasAccess
         ? createPremiumEbookDownloadToken({
             memberId: member.id,
@@ -5943,10 +6146,11 @@ app.get("/api/members/premium/ebooks", requireActivePremiumMember, async (req, r
         hasAccess && isProtectedFile
           ? `/api/members/premium/ebooks/${encodeURIComponent(item.id)}/download?token=${encodeURIComponent(token)}`
           : "";
+      const directFileUrl = hasAccess && isPublicFile ? String(item.fileUrl || "").trim() : "";
       return {
         ...item,
         hasAccess,
-        fileUrl: secureFileUrl,
+        fileUrl: secureFileUrl || directFileUrl,
         fileProtected: isProtectedFile,
         isBorrowed: selectedIdSet.has(item.id)
       };
@@ -6457,7 +6661,7 @@ app.get("/api/admin/products", requireAdmin, async (req, res) => {
 
 app.get("/api/admin/premium-library", requireAdmin, async (req, res) => {
   try {
-    const items = await listPremiumLibraryItems();
+    const items = await listAllPremiumLibraryItems();
     return res.json(items);
   } catch (error) {
     const details = String(error?.message || "").trim();
@@ -8105,7 +8309,10 @@ app.post("/api/admin/orders/:id/mark-pending", requireAdmin, async (req, res) =>
 
 const siteSettingsUpload = upload.fields([
   { name: "logoImage", maxCount: 1 },
-  { name: "heroBannerImage", maxCount: 1 }
+  { name: "heroBannerImage", maxCount: 1 },
+  { name: "membershipStandardImage", maxCount: 1 },
+  { name: "membershipPlusImage", maxCount: 1 },
+  { name: "membershipPremiumImage", maxCount: 1 }
 ]);
 
 const productUpload = upload.fields([
@@ -8288,7 +8495,10 @@ app.put("/api/admin/premium-library/:id", requireAdmin, premiumLibraryAdminUploa
     return res.status(400).json({ error: "Ebook ID is required." });
   }
 
-  const existing = await findPremiumLibraryItemById(itemId);
+  const existingStored = await findPremiumLibraryItemById(itemId);
+  const existing = existingStored
+    ? existingStored
+    : (await listAllPremiumLibraryItems()).find((entry) => String(entry?.id || "").trim() === itemId);
   if (!existing) {
     await removeUploadedFiles(req.files, ["ebookFile", "coverImage"]);
     return res.status(404).json({ error: "Premium library item not found." });
@@ -8327,22 +8537,33 @@ app.put("/api/admin/premium-library/:id", requireAdmin, premiumLibraryAdminUploa
   }
 
   try {
-    const updated = await updatePremiumLibraryItem(itemId, patch);
+    const updated = existingStored
+      ? await updatePremiumLibraryItem(itemId, patch)
+      : await createPremiumLibraryItem({
+          id: itemId,
+          title: patch.title !== undefined ? patch.title : existing.title,
+          monthLabel: patch.monthLabel !== undefined ? patch.monthLabel : existing.monthLabel,
+          description: patch.description !== undefined ? patch.description : existing.description,
+          fileUrl: patch.fileUrl !== undefined ? patch.fileUrl : existing.fileUrl,
+          coverImageUrl: patch.coverImageUrl !== undefined ? patch.coverImageUrl : existing.coverImageUrl
+        });
     if (!updated) {
       await removeUploadedFiles(req.files, ["ebookFile", "coverImage"]);
       return res.status(404).json({ error: "Premium library item not found." });
     }
 
-    const replacedFileWithUpload = Boolean(uploadedFileUrl && existing.fileUrl && existing.fileUrl !== uploadedFileUrl);
+    const previousFileUrl = String(existing.fileUrl || "").trim();
+    const previousCoverImageUrl = String(existing.coverImageUrl || "").trim();
+    const replacedFileWithUpload = Boolean(uploadedFileUrl && previousFileUrl && previousFileUrl !== uploadedFileUrl);
     if (replacedFileWithUpload || removeFile) {
-      await removeUploadsFileByPublicUrl(existing.fileUrl);
+      await removeUploadsFileByPublicUrl(previousFileUrl);
     }
 
     const replacedCoverWithUpload = Boolean(
-      uploadedCoverImageUrl && existing.coverImageUrl && existing.coverImageUrl !== uploadedCoverImageUrl
+      uploadedCoverImageUrl && previousCoverImageUrl && previousCoverImageUrl !== uploadedCoverImageUrl
     );
     if (replacedCoverWithUpload || removeCoverImage) {
-      await removeUploadsFileByPublicUrl(existing.coverImageUrl);
+      await removeUploadsFileByPublicUrl(previousCoverImageUrl);
     }
 
     return res.json(updated);

@@ -1,0 +1,10 @@
+Upload all extracted files to one folder on your website.
+
+Recommended folder:
+/ebooks/the-little-big-superhero-goes-to-the-doctor-1/
+
+After upload, your flipbook URL will be:
+https://yourdomain.com/ebooks/the-little-big-superhero-goes-to-the-doctor-1/
+
+Embed code example:
+<iframe src="https://yourdomain.com/ebooks/the-little-big-superhero-goes-to-the-doctor-1/" width="100%" height="900" style="border:0;" loading="lazy"></iframe>

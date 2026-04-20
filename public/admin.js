@@ -98,6 +98,15 @@ const siteRemoveLogoInput = document.getElementById("site-remove-logo");
 const siteBannerFileInput = document.getElementById("site-banner-file");
 const siteBannerUrlInput = document.getElementById("site-banner-url");
 const siteRemoveBannerInput = document.getElementById("site-remove-banner");
+const siteMembershipStandardFileInput = document.getElementById("site-membership-standard-file");
+const siteMembershipStandardUrlInput = document.getElementById("site-membership-standard-url");
+const siteRemoveMembershipStandardInput = document.getElementById("site-remove-membership-standard");
+const siteMembershipPlusFileInput = document.getElementById("site-membership-plus-file");
+const siteMembershipPlusUrlInput = document.getElementById("site-membership-plus-url");
+const siteRemoveMembershipPlusInput = document.getElementById("site-remove-membership-plus");
+const siteMembershipPremiumFileInput = document.getElementById("site-membership-premium-file");
+const siteMembershipPremiumUrlInput = document.getElementById("site-membership-premium-url");
+const siteRemoveMembershipPremiumInput = document.getElementById("site-remove-membership-premium");
 const siteInputs = {
   brandName: document.getElementById("site-brand-name"),
   brandMark: document.getElementById("site-brand-mark"),
@@ -468,6 +477,33 @@ function resetSiteSettingsDraftFields() {
   if (siteRemoveBannerInput) {
     siteRemoveBannerInput.checked = false;
   }
+  if (siteMembershipStandardFileInput) {
+    siteMembershipStandardFileInput.value = "";
+  }
+  if (siteMembershipStandardUrlInput) {
+    siteMembershipStandardUrlInput.value = "";
+  }
+  if (siteRemoveMembershipStandardInput) {
+    siteRemoveMembershipStandardInput.checked = false;
+  }
+  if (siteMembershipPlusFileInput) {
+    siteMembershipPlusFileInput.value = "";
+  }
+  if (siteMembershipPlusUrlInput) {
+    siteMembershipPlusUrlInput.value = "";
+  }
+  if (siteRemoveMembershipPlusInput) {
+    siteRemoveMembershipPlusInput.checked = false;
+  }
+  if (siteMembershipPremiumFileInput) {
+    siteMembershipPremiumFileInput.value = "";
+  }
+  if (siteMembershipPremiumUrlInput) {
+    siteMembershipPremiumUrlInput.value = "";
+  }
+  if (siteRemoveMembershipPremiumInput) {
+    siteRemoveMembershipPremiumInput.checked = false;
+  }
 }
 
 function fillSiteSettingsForm(settings) {
@@ -487,6 +523,17 @@ function fillSiteSettingsForm(settings) {
   }
   if (siteBannerUrlInput) {
     siteBannerUrlInput.placeholder = settings.heroBannerImageUrl || "https://example.com/banner.jpg";
+  }
+  if (siteMembershipStandardUrlInput) {
+    siteMembershipStandardUrlInput.placeholder =
+      settings.membershipStandardImageUrl || "https://example.com/standard-plan.png";
+  }
+  if (siteMembershipPlusUrlInput) {
+    siteMembershipPlusUrlInput.placeholder = settings.membershipPlusImageUrl || "https://example.com/plus-plan.png";
+  }
+  if (siteMembershipPremiumUrlInput) {
+    siteMembershipPremiumUrlInput.placeholder =
+      settings.membershipPremiumImageUrl || "https://example.com/premium-plan.png";
   }
 
   state.siteSettings = settings;
@@ -2340,9 +2387,23 @@ function renderPremiumLibraryList() {
       const description = String(item?.description || "").trim() || "No description yet.";
       const fileUrl = String(item?.fileUrl || "").trim();
       const coverImageUrl = String(item?.coverImageUrl || "").trim();
+      const source = String(item?.source || "stored")
+        .trim()
+        .toLowerCase();
+      const isFlipbookSource = source === "flipbook";
       const protectedFile = fileUrl.startsWith("/uploads/premium-ebooks/");
-      const fileBadgeClass = fileUrl && protectedFile ? "in-stock" : "sold-out";
-      const fileBadgeLabel = fileUrl ? (protectedFile ? "Protected PDF Linked" : "File Path Needs Fix") : "No PDF Linked";
+      const publicFile =
+        fileUrl.startsWith("/ebooks/") || fileUrl.startsWith("/pdfEbook/") || /^https?:\/\//i.test(fileUrl);
+      const fileValid = protectedFile || publicFile;
+      const fileBadgeClass = fileUrl && fileValid ? "in-stock" : "sold-out";
+      const fileBadgeLabel = !fileUrl
+        ? "No Ebook Linked"
+        : protectedFile
+          ? "Protected PDF Linked"
+          : publicFile
+            ? "Flipbook/URL Linked"
+            : "File Path Needs Fix";
+      const sourceBadgeLabel = isFlipbookSource ? "Auto Flipbook" : "Saved Library Item";
       return `<article class="admin-product-card">
         ${
           coverImageUrl
@@ -2356,6 +2417,7 @@ function renderPremiumLibraryList() {
           </div>
           <p>${escapeHtml(description)}</p>
           <div class="admin-badges">
+            <span class="admin-stock-badge in-stock">${escapeHtml(sourceBadgeLabel)}</span>
             <span class="admin-stock-badge ${fileBadgeClass}">${escapeHtml(fileBadgeLabel)}</span>
             <span class="admin-stock-badge ${coverImageUrl ? "in-stock" : "sold-out"}">${
               coverImageUrl ? "Cover Ready" : "No Cover"
@@ -2367,9 +2429,13 @@ function renderPremiumLibraryList() {
             <button class="ghost-btn" type="button" data-premium-library-action="edit" data-premium-library-id="${escapeHtml(
               id
             )}">Edit</button>
-            <button class="danger-btn" type="button" data-premium-library-action="delete" data-premium-library-id="${escapeHtml(
-              id
-            )}">Delete</button>
+            ${
+              isFlipbookSource
+                ? ""
+                : `<button class="danger-btn" type="button" data-premium-library-action="delete" data-premium-library-id="${escapeHtml(
+                    id
+                  )}">Delete</button>`
+            }
           </div>
         </div>
       </article>`;
@@ -4116,6 +4182,18 @@ siteSettingsForm.addEventListener("submit", async (event) => {
   if (bannerFile) {
     formData.append("heroBannerImage", bannerFile);
   }
+  const membershipStandardFile = siteMembershipStandardFileInput?.files?.[0];
+  if (membershipStandardFile) {
+    formData.append("membershipStandardImage", membershipStandardFile);
+  }
+  const membershipPlusFile = siteMembershipPlusFileInput?.files?.[0];
+  if (membershipPlusFile) {
+    formData.append("membershipPlusImage", membershipPlusFile);
+  }
+  const membershipPremiumFile = siteMembershipPremiumFileInput?.files?.[0];
+  if (membershipPremiumFile) {
+    formData.append("membershipPremiumImage", membershipPremiumFile);
+  }
 
   const logoImageUrl = siteLogoUrlInput.value.trim();
   if (logoImageUrl) {
@@ -4125,11 +4203,32 @@ siteSettingsForm.addEventListener("submit", async (event) => {
   if (heroBannerImageUrl) {
     formData.append("heroBannerImageUrl", heroBannerImageUrl);
   }
+  const membershipStandardImageUrl = String(siteMembershipStandardUrlInput?.value || "").trim();
+  if (membershipStandardImageUrl) {
+    formData.append("membershipStandardImageUrl", membershipStandardImageUrl);
+  }
+  const membershipPlusImageUrl = String(siteMembershipPlusUrlInput?.value || "").trim();
+  if (membershipPlusImageUrl) {
+    formData.append("membershipPlusImageUrl", membershipPlusImageUrl);
+  }
+  const membershipPremiumImageUrl = String(siteMembershipPremiumUrlInput?.value || "").trim();
+  if (membershipPremiumImageUrl) {
+    formData.append("membershipPremiumImageUrl", membershipPremiumImageUrl);
+  }
   if (siteRemoveLogoInput.checked) {
     formData.append("removeLogo", "true");
   }
   if (siteRemoveBannerInput.checked) {
     formData.append("removeBanner", "true");
+  }
+  if (siteRemoveMembershipStandardInput?.checked) {
+    formData.append("removeMembershipStandardImage", "true");
+  }
+  if (siteRemoveMembershipPlusInput?.checked) {
+    formData.append("removeMembershipPlusImage", "true");
+  }
+  if (siteRemoveMembershipPremiumInput?.checked) {
+    formData.append("removeMembershipPremiumImage", "true");
   }
 
   try {

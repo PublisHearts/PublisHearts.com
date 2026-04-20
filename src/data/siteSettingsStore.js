@@ -13,6 +13,9 @@ const defaults = {
   brandMark: "P",
   logoImageUrl: "",
   heroBannerImageUrl: "",
+  membershipStandardImageUrl: "",
+  membershipPlusImageUrl: "",
+  membershipPremiumImageUrl: "",
   pageTitle: "PublisHearts Books",
   pageDescription:
     "PublisHearts bookstore. Shop featured books, pay securely by card, and get your receipt by email.",
@@ -42,6 +45,9 @@ const textLimits = {
   brandMark: 4,
   logoImageUrl: 600,
   heroBannerImageUrl: 600,
+  membershipStandardImageUrl: 600,
+  membershipPlusImageUrl: 600,
+  membershipPremiumImageUrl: 600,
   pageTitle: 100,
   pageDescription: 220,
   heroEyebrow: 80,
@@ -113,6 +119,21 @@ function normalize(raw = {}) {
       merged.heroBannerImageUrl,
       textLimits.heroBannerImageUrl,
       "Hero banner image URL"
+    ),
+    membershipStandardImageUrl: cleanOptionalAssetUrl(
+      merged.membershipStandardImageUrl,
+      textLimits.membershipStandardImageUrl,
+      "Standard membership image URL"
+    ),
+    membershipPlusImageUrl: cleanOptionalAssetUrl(
+      merged.membershipPlusImageUrl,
+      textLimits.membershipPlusImageUrl,
+      "Plus membership image URL"
+    ),
+    membershipPremiumImageUrl: cleanOptionalAssetUrl(
+      merged.membershipPremiumImageUrl,
+      textLimits.membershipPremiumImageUrl,
+      "Premium membership image URL"
     ),
     pageTitle: cleanText(merged.pageTitle, textLimits.pageTitle, "Page title"),
     pageDescription: cleanText(merged.pageDescription, textLimits.pageDescription, "Page description"),

@@ -51,7 +51,7 @@ function cleanOptionalCoverImageUrl(value, label) {
   throw new PremiumLibraryValidationError(`${label} must start with https://, http://, or /uploads/.`);
 }
 
-function cleanOptionalProtectedFileUrl(value, label) {
+function cleanOptionalLibraryFileUrl(value, label) {
   const text = cleanText(value, label, 800, { required: false });
   if (!text) {
     return "";
@@ -59,8 +59,14 @@ function cleanOptionalProtectedFileUrl(value, label) {
   if (text.startsWith("/uploads/premium-ebooks/") && !text.includes("..") && !text.includes("\\")) {
     return text;
   }
+  if ((text.startsWith("/ebooks/") || text.startsWith("/pdfEbook/")) && !text.includes("..") && !text.includes("\\")) {
+    return text;
+  }
+  if (/^https?:\/\//i.test(text)) {
+    return text;
+  }
   throw new PremiumLibraryValidationError(
-    `${label} must be stored under /uploads/premium-ebooks/ to keep member-only access protected.`
+    `${label} must start with /uploads/premium-ebooks/, /ebooks/, /pdfEbook/, https://, or http://.`
   );
 }
 
@@ -76,7 +82,7 @@ function normalizeStoredItem(raw = {}) {
     title: cleanText(raw.title, "Title", 180),
     monthLabel: cleanText(raw.monthLabel || "Upcoming", "Month label", 60),
     description: cleanText(raw.description || "Premium ebook.", "Description", 1000),
-    fileUrl: cleanOptionalProtectedFileUrl(raw.fileUrl, "File URL"),
+    fileUrl: cleanOptionalLibraryFileUrl(raw.fileUrl, "File URL"),
     coverImageUrl: cleanOptionalCoverImageUrl(raw.coverImageUrl, "Cover image URL")
   };
 }

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "flipbook-the-little-big-superhero-goes-to-the-doctor-1-ebook",
+    "title": "The Little Big Superhero Goes To The Doctor  Ebook",
+    "monthLabel": "Flipbook",
+    "description": "Interactive flipbook edition.",
+    "fileUrl": "/ebooks/the-little-big-superhero-goes-to-the-doctor-1-ebook/",
+    "coverImageUrl": "/uploads/1776722717643-1152785b.png"
+  },
+  {
+    "id": "flipbook-the-little-big-superhero-gets-a-valentines-ebook",
+    "title": "The Little Big Superhero Gets A Valentines Ebook",
+    "monthLabel": "Flipbook",
+    "description": "Interactive flipbook edition.",
+    "fileUrl": "/ebooks/the-little-big-superhero-gets-a-valentines--ebook/",
+    "coverImageUrl": "/uploads/1776722657422-92c85770.png"
+  },
+  {
+    "id": "flipbook-the-little-big-superhero-ebook",
+    "title": "The Little Big Superhero Ebook",
+    "monthLabel": "Flipbook",
+    "description": "Interactive flipbook edition.",
+    "fileUrl": "/ebooks/the-little-big-superhero-ebook/",
+    "coverImageUrl": "/uploads/1776722632631-ce6e9a83.png"
+  },
+  {
+    "id": "flipbook-mr-creswell-s-hidden-rock-n-advent-eb-ebook",
+    "title": "Mr Creswell S Hidden Rock N Advent Eb Ebook",
+    "monthLabel": "Flipbook",
+    "description": "Interactive flipbook edition.",
+    "fileUrl": "/ebooks/mr-creswell-s-hidden-rock-n-advent-eb-ebook/",
+    "coverImageUrl": "/uploads/1776722556681-6d056542.jpg"
+  },
+  {
+    "id": "flipbook-little-larry-the-llama-ebook",
+    "title": "Little Larry The Llama Ebook",
+    "monthLabel": "Flipbook",
+    "description": "Interactive flipbook edition.",
+    "fileUrl": "/ebooks/little-larry-the-llama-ebook/",
+    "coverImageUrl": "/uploads/1776722478056-797be255.png"
+  }
+]
