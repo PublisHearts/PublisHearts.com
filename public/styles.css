@@ -1185,6 +1185,185 @@ h1 {
   gap: 0.6rem;
 }
 
+.visual-editor {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.85rem;
+  background: linear-gradient(180deg, #fffefb 0%, #fff9f1 100%);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.visual-presets,
+.visual-editor-actions,
+.visual-device-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.visual-preset-btn,
+.visual-device-btn {
+  padding: 0.5rem 0.85rem;
+}
+
+.visual-preset-btn.is-active,
+.visual-device-btn.is-active {
+  background: linear-gradient(140deg, var(--accent), var(--accent-strong));
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(141, 57, 28, 0.24);
+}
+
+.visual-slider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.visual-slider-grid label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.range-caption {
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.visual-preview-shell {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f4ece0 0%, #f0e6d8 100%);
+  padding: 0.75rem;
+  overflow: auto;
+}
+
+.visual-preview-frame {
+  width: 100%;
+  height: 760px;
+  border: 1px solid #d8cab8;
+  border-radius: 16px;
+  background: #fff;
+  display: block;
+  margin: 0 auto;
+}
+
+.visual-preview-shell[data-preview-device="tablet"] .visual-preview-frame {
+  width: min(900px, 100%);
+}
+
+.visual-preview-shell[data-preview-device="mobile"] .visual-preview-frame {
+  width: min(430px, 100%);
+}
+
+.visual-section-order {
+  border: 1px solid #dfd2c3;
+  border-radius: 12px;
+  background: #fffefb;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.visual-section-order h4 {
+  margin: 0;
+}
+
+.visual-section-order .cart-item-sub {
+  margin: 0;
+}
+
+.visual-section-order-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.visual-section-item {
+  border: 1px solid #e3d6c6;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.5rem 0.55rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.visual-section-item.dragging {
+  opacity: 0.5;
+}
+
+.visual-section-item.drop-target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(173, 79, 45, 0.16);
+}
+
+.visual-section-drag {
+  border: 1px solid #d6c7b5;
+  border-radius: 8px;
+  background: #faf5ec;
+  color: #634c39;
+  cursor: grab;
+  font-size: 0.84rem;
+  padding: 0.24rem 0.4rem;
+}
+
+.visual-section-drag:active {
+  cursor: grabbing;
+}
+
+.visual-section-label {
+  font-weight: 700;
+  color: #3f3328;
+  overflow-wrap: anywhere;
+}
+
+.visual-section-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.visual-section-actions button {
+  border: 1px solid #d6c7b5;
+  border-radius: 8px;
+  background: #fffdf9;
+  color: #4a382a;
+  min-width: 2.4rem;
+  height: 2rem;
+  padding: 0 0.45rem;
+  cursor: pointer;
+}
+
+.visual-section-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.admin-advanced-css {
+  border: 1px dashed #d6c7b5;
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: #fffcf8;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.admin-advanced-css > summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #4e4337;
+}
+
+.admin-advanced-css textarea[readonly],
+.admin-form textarea[readonly] {
+  background: #f8f3eb;
+  color: #51463a;
+}
+
 .admin-products {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -2514,6 +2693,14 @@ h1 {
 
   .admin-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .visual-slider-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .visual-device-btn {
+    flex: 1 1 100%;
   }
 
   .membership-ebook-card {

@@ -27,8 +27,8 @@
       </div>
     </header>
 
-    <main class="container admin-shell">
-      <section id="login-card" class="admin-login-card">
+    <main class="container admin-shell" data-page-sections-root>
+      <section id="login-card" class="admin-login-card" data-page-section-id="login" data-page-section-label="Page Editor Login">
         <h1>Page Editor Login</h1>
         <p>Use your admin password to edit every page layout, copy, and design styling.</p>
         <form id="login-form" class="admin-login-form" autocomplete="off">
@@ -50,11 +50,16 @@
         <p id="login-message" class="checkout-message"></p>
       </section>
 
-      <section id="admin-panel" class="admin-panel admin-panel-single hidden">
+      <section
+        id="admin-panel"
+        class="admin-panel admin-panel-single hidden"
+        data-page-section-id="editor"
+        data-page-section-label="Page Editor Panel"
+      >
         <div class="admin-toolbar">
           <div>
             <h1>Page Editor</h1>
-            <p>Change every storefront content field and visual style in one place.</p>
+            <p>Use the no-code visual editor to redesign every page, then save when it looks right.</p>
           </div>
           <div class="admin-toolbar-actions">
             <button id="publish-btn" class="primary-btn" type="button">Publish Live Changes</button>
@@ -275,17 +280,129 @@
               </label>
             </div>
             <div class="admin-section-head">
-              <h3>All Pages Custom CSS</h3>
-              <p>
-                These styles let you redesign literally every page. Use global CSS for site-wide changes, then page CSS for
-                one page at a time.
-              </p>
+              <h3>No-Code Visual Editor</h3>
+              <p>Pick a page, pick a preset, move sliders, and preview live. No CSS typing required.</p>
             </div>
-            <label>
-              Global CSS (all pages)
-              <textarea id="site-global-custom-css" name="globalCustomCss" rows="8" maxlength="120000"></textarea>
-            </label>
-            <div class="admin-form-grid">
+            <div class="visual-editor">
+              <div class="admin-form-grid">
+                <label>
+                  Page to Edit
+                  <select id="visual-page-key">
+                    <option value="home">Home</option>
+                    <option value="shop">Shop</option>
+                    <option value="login">Login</option>
+                    <option value="signup">Signup</option>
+                    <option value="account">Account</option>
+                    <option value="about">About</option>
+                    <option value="delivery">Delivery</option>
+                    <option value="customStory">Custom Story</option>
+                    <option value="success">Success</option>
+                    <option value="cancel">Cancel</option>
+                    <option value="admin">Admin</option>
+                    <option value="adminPages">Admin Page Editor</option>
+                    <option value="pos">POS</option>
+                    <option value="fulfillment">Fulfillment</option>
+                    <option value="completedOrders">Completed Orders</option>
+                  </select>
+                </label>
+                <label>
+                  Background Style
+                  <select id="visual-background-style">
+                    <option value="soft">Soft Glow</option>
+                    <option value="warm">Warm Gradient</option>
+                    <option value="clean">Clean Minimal</option>
+                    <option value="bold">Bold Contrast</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="visual-presets" role="group" aria-label="Design presets">
+                <button type="button" class="ghost-btn visual-preset-btn is-active" data-visual-preset="professional">Professional</button>
+                <button type="button" class="ghost-btn visual-preset-btn" data-visual-preset="playful">Playful</button>
+                <button type="button" class="ghost-btn visual-preset-btn" data-visual-preset="luxe">Luxe</button>
+                <button type="button" class="ghost-btn visual-preset-btn" data-visual-preset="bold">Bold</button>
+              </div>
+
+              <div class="visual-slider-grid">
+                <label>
+                  Content Width
+                  <input id="visual-container-width" type="range" min="860" max="1360" step="10" value="1120" />
+                  <span class="range-caption"><span id="visual-container-width-value">1120</span> px</span>
+                </label>
+                <label>
+                  Section Spacing
+                  <input id="visual-section-gap" type="range" min="14" max="64" step="1" value="28" />
+                  <span class="range-caption"><span id="visual-section-gap-value">28</span> px</span>
+                </label>
+                <label>
+                  Card Roundness
+                  <input id="visual-card-radius" type="range" min="8" max="36" step="1" value="22" />
+                  <span class="range-caption"><span id="visual-card-radius-value">22</span> px</span>
+                </label>
+                <label>
+                  Button Roundness
+                  <input id="visual-button-radius" type="range" min="6" max="80" step="1" value="80" />
+                  <span class="range-caption"><span id="visual-button-radius-value">80</span> px (near max = pill)</span>
+                </label>
+                <label>
+                  Shadow Strength
+                  <input id="visual-shadow-strength" type="range" min="0" max="100" step="1" value="35" />
+                  <span class="range-caption"><span id="visual-shadow-strength-value">35</span>%</span>
+                </label>
+                <label>
+                  Heading Size
+                  <input id="visual-heading-scale" type="range" min="88" max="130" step="1" value="104" />
+                  <span class="range-caption"><span id="visual-heading-scale-value">104</span>%</span>
+                </label>
+              </div>
+
+              <div class="visual-device-row" role="group" aria-label="Preview device size">
+                <button type="button" class="ghost-btn visual-device-btn is-active" data-preview-device="desktop">Desktop Preview</button>
+                <button type="button" class="ghost-btn visual-device-btn" data-preview-device="tablet">Tablet Preview</button>
+                <button type="button" class="ghost-btn visual-device-btn" data-preview-device="mobile">Mobile Preview</button>
+              </div>
+
+              <div class="visual-editor-actions">
+                <button id="apply-visual-selected-btn" class="primary-btn" type="button">Apply Style To Selected Page</button>
+                <button id="apply-visual-global-btn" class="ghost-btn" type="button">Apply Style Sitewide</button>
+                <button id="clear-visual-selected-btn" class="ghost-btn" type="button">Clear Selected Page Style</button>
+                <button id="visual-refresh-preview-btn" class="ghost-btn" type="button">Refresh Preview</button>
+              </div>
+
+              <section class="visual-section-order">
+                <div class="row-between">
+                  <h4>Section Order</h4>
+                  <p class="cart-item-sub">Drag blocks or use up/down to move them.</p>
+                </div>
+                <p id="visual-section-order-message" class="checkout-message"></p>
+                <ol id="visual-section-order-list" class="visual-section-order-list"></ol>
+              </section>
+
+              <label>
+                Current Saved CSS Snapshot (read only)
+                <textarea id="visual-current-css" rows="10" readonly></textarea>
+              </label>
+
+              <label>
+                Visual Editor Generated CSS (read only)
+                <textarea id="visual-generated-css" rows="10" readonly></textarea>
+              </label>
+
+              <div id="visual-preview-shell" class="visual-preview-shell" data-preview-device="desktop">
+                <iframe id="visual-preview-frame" class="visual-preview-frame" title="Live page preview" loading="lazy"></iframe>
+              </div>
+            </div>
+
+            <details id="advanced-css-wrap" class="admin-advanced-css">
+              <summary>Advanced CSS (optional)</summary>
+              <p class="admin-help">
+                Only use this if you want hand-coded CSS. Most design updates should be done with the visual editor above.
+              </p>
+              <label>
+                Global CSS (all pages)
+                <textarea id="site-global-custom-css" name="globalCustomCss" rows="8" maxlength="120000"></textarea>
+              </label>
+              <div class="admin-form-grid">
               <label>
                 Home CSS
                 <textarea id="site-home-custom-css" name="homeCustomCss" rows="6" maxlength="40000"></textarea>
@@ -294,8 +411,8 @@
                 Shop CSS
                 <textarea id="site-shop-custom-css" name="shopCustomCss" rows="6" maxlength="40000"></textarea>
               </label>
-            </div>
-            <div class="admin-form-grid">
+              </div>
+              <div class="admin-form-grid">
               <label>
                 Login CSS
                 <textarea id="site-login-custom-css" name="loginCustomCss" rows="6" maxlength="40000"></textarea>
@@ -304,8 +421,8 @@
                 Signup CSS
                 <textarea id="site-signup-custom-css" name="signupCustomCss" rows="6" maxlength="40000"></textarea>
               </label>
-            </div>
-            <div class="admin-form-grid">
+              </div>
+              <div class="admin-form-grid">
               <label>
                 Account CSS
                 <textarea id="site-account-custom-css" name="accountCustomCss" rows="6" maxlength="40000"></textarea>
@@ -314,8 +431,8 @@
                 About CSS
                 <textarea id="site-about-custom-css" name="aboutCustomCss" rows="6" maxlength="40000"></textarea>
               </label>
-            </div>
-            <div class="admin-form-grid">
+              </div>
+              <div class="admin-form-grid">
               <label>
                 Delivery CSS
                 <textarea id="site-delivery-custom-css" name="deliveryCustomCss" rows="6" maxlength="40000"></textarea>
@@ -324,8 +441,8 @@
                 Custom Story CSS
                 <textarea id="site-custom-story-custom-css" name="customStoryCustomCss" rows="6" maxlength="40000"></textarea>
               </label>
-            </div>
-            <div class="admin-form-grid">
+              </div>
+              <div class="admin-form-grid">
               <label>
                 Success CSS
                 <textarea id="site-success-custom-css" name="successCustomCss" rows="6" maxlength="40000"></textarea>
@@ -334,8 +451,8 @@
                 Cancel CSS
                 <textarea id="site-cancel-custom-css" name="cancelCustomCss" rows="6" maxlength="40000"></textarea>
               </label>
-            </div>
-            <div class="admin-form-grid">
+              </div>
+              <div class="admin-form-grid">
               <label>
                 Admin CSS
                 <textarea id="site-admin-custom-css" name="adminCustomCss" rows="6" maxlength="40000"></textarea>
@@ -344,8 +461,8 @@
                 Admin Page Editor CSS
                 <textarea id="site-admin-pages-custom-css" name="adminPagesCustomCss" rows="6" maxlength="40000"></textarea>
               </label>
-            </div>
-            <div class="admin-form-grid">
+              </div>
+              <div class="admin-form-grid">
               <label>
                 POS CSS
                 <textarea id="site-pos-custom-css" name="posCustomCss" rows="6" maxlength="40000"></textarea>
@@ -354,11 +471,12 @@
                 Fulfillment CSS
                 <textarea id="site-fulfillment-custom-css" name="fulfillmentCustomCss" rows="6" maxlength="40000"></textarea>
               </label>
-            </div>
-            <label>
-              Completed Orders CSS
-              <textarea id="site-completed-orders-custom-css" name="completedOrdersCustomCss" rows="6" maxlength="40000"></textarea>
-            </label>
+              </div>
+              <label>
+                Completed Orders CSS
+                <textarea id="site-completed-orders-custom-css" name="completedOrdersCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+            </details>
             <div class="admin-form-actions">
               <button id="save-site-settings-btn" class="primary-btn" type="submit">Save All Page Design</button>
               <button id="reset-site-settings-btn" class="ghost-btn" type="button">Reset Unsaved Changes</button>

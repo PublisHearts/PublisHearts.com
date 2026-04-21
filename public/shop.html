@@ -56,8 +56,8 @@
       </section>
     </div>
 
-    <main>
-      <section class="hero container">
+    <main data-page-sections-root>
+      <section class="hero container" data-page-section-id="hero" data-page-section-label="Hero">
         <div id="hero-banner-wrap" class="hero-banner hidden">
           <img id="hero-banner-image" class="hero-banner-image" alt="" loading="eager" />
         </div>
@@ -70,7 +70,7 @@
         <a id="hero-cta" class="primary-btn" href="#books">Browse Books</a>
       </section>
 
-      <section id="books" class="container">
+      <section id="books" class="container" data-page-section-id="catalog" data-page-section-label="Book Catalog">
         <div class="section-head">
           <h2 id="featured-title">Featured Titles</h2>
           <p id="featured-copy">Each order is processed securely and shipped to the address collected at checkout.</p>
@@ -78,7 +78,11 @@
         <div id="products-grid" class="products-grid" aria-live="polite"></div>
       </section>
 
-      <section class="container custom-story-promo">
+      <section
+        class="container custom-story-promo"
+        data-page-section-id="customStoryPromo"
+        data-page-section-label="Custom Story Promo"
+      >
         <div class="custom-story-promo-card">
           <div class="custom-story-copy">
             <p class="eyebrow">Custom Story Quote</p>
@@ -101,7 +105,7 @@
         </div>
       </section>
 
-      <section class="container promise-grid">
+      <section class="container promise-grid" data-page-section-id="promises" data-page-section-label="Promise Cards">
         <article class="promise">
           <h3 id="promise-1-title">Secure Card Checkout</h3>
           <p id="promise-1-copy">Payments run through Stripe, so card data is handled by trusted infrastructure.</p>

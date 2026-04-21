@@ -35,8 +35,13 @@
       </div>
     </header>
 
-    <main class="container pos-shell">
-      <section id="pos-login-card" class="admin-login-card pos-login-card">
+    <main class="container pos-shell" data-page-sections-root>
+      <section
+        id="pos-login-card"
+        class="admin-login-card pos-login-card"
+        data-page-section-id="login"
+        data-page-section-label="POS Login"
+      >
         <h1>POS Login</h1>
         <p>Use your admin password to open the in-person POS for card or cash sales and print receipts.</p>
         <form id="pos-login-form" class="admin-login-form">
@@ -47,7 +52,7 @@
         <p id="pos-login-message" class="checkout-message"></p>
       </section>
 
-      <section id="pos-panel" class="pos-panel hidden">
+      <section id="pos-panel" class="pos-panel hidden" data-page-section-id="workspace" data-page-section-label="POS Workspace">
         <div class="pos-page-head">
           <div>
             <p class="pos-eyebrow">In-Person Transactions</p>

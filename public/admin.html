@@ -24,8 +24,8 @@
       </div>
     </header>
 
-    <main class="container admin-shell">
-      <section id="login-card" class="admin-login-card">
+    <main class="container admin-shell" data-page-sections-root>
+      <section id="login-card" class="admin-login-card" data-page-section-id="login" data-page-section-label="Admin Login">
         <h1>Admin Login</h1>
         <p>Use your admin password to manage books and operations, then open Page Editor for full site design control.</p>
         <form id="login-form" class="admin-login-form" autocomplete="off">
@@ -47,7 +47,12 @@
         <p id="login-message" class="checkout-message"></p>
       </section>
 
-      <section id="admin-panel" class="admin-panel admin-panel-single hidden">
+      <section
+        id="admin-panel"
+        class="admin-panel admin-panel-single hidden"
+        data-page-section-id="manager"
+        data-page-section-label="Store Manager Panel"
+      >
         <div class="admin-toolbar">
           <div>
             <h1>Store Manager</h1>

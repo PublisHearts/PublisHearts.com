@@ -29,8 +29,13 @@
       </div>
     </header>
 
-    <main class="container admin-shell">
-      <section id="fulfillment-login-card" class="admin-login-card">
+    <main class="container admin-shell" data-page-sections-root>
+      <section
+        id="fulfillment-login-card"
+        class="admin-login-card"
+        data-page-section-id="login"
+        data-page-section-label="Completed Orders Login"
+      >
         <h1>Completed Orders Login</h1>
         <p>Use your admin password to look up shipped orders, resend emails, and reopen an order when needed.</p>
         <form id="fulfillment-login-form" class="admin-login-form">
@@ -41,7 +46,12 @@
         <p id="fulfillment-login-message" class="checkout-message"></p>
       </section>
 
-      <section id="fulfillment-panel" class="admin-panel admin-panel-single hidden">
+      <section
+        id="fulfillment-panel"
+        class="admin-panel admin-panel-single hidden"
+        data-page-section-id="workspace"
+        data-page-section-label="Completed Orders Workspace"
+      >
         <div class="admin-toolbar">
           <div>
             <h1>Completed Orders</h1>

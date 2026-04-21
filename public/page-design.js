@@ -80,6 +80,80 @@ function applyBrand(settings) {
   }
 }
 
+function readVisualMetadata(cssText) {
+  const text = String(cssText || "");
+  const match = text.match(/\/\*\s*visual-editor:(\{[\s\S]*?\})\s*\*\//i);
+  if (!match) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSectionOrder(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set();
+  return value
+    .map((entry) => String(entry || "").trim())
+    .filter((entry) => entry && !seen.has(entry) && seen.add(entry));
+}
+
+function applySectionOrder(sectionOrder) {
+  const normalizedOrder = normalizeSectionOrder(sectionOrder);
+  if (normalizedOrder.length === 0) {
+    return;
+  }
+
+  const sectionsRoot = document.querySelector("[data-page-sections-root]");
+  if (!sectionsRoot) {
+    return;
+  }
+
+  const sectionNodes = Array.from(sectionsRoot.children).filter(
+    (node) => node && node.hasAttribute && node.hasAttribute("data-page-section-id")
+  );
+  if (sectionNodes.length < 2) {
+    return;
+  }
+
+  const sectionById = new Map();
+  sectionNodes.forEach((node) => {
+    const id = String(node.getAttribute("data-page-section-id") || "").trim();
+    if (id && !sectionById.has(id)) {
+      sectionById.set(id, node);
+    }
+  });
+
+  const finalOrder = [];
+  normalizedOrder.forEach((id) => {
+    if (sectionById.has(id) && !finalOrder.includes(id)) {
+      finalOrder.push(id);
+    }
+  });
+  sectionNodes.forEach((node) => {
+    const id = String(node.getAttribute("data-page-section-id") || "").trim();
+    if (id && !finalOrder.includes(id)) {
+      finalOrder.push(id);
+    }
+  });
+
+  finalOrder.forEach((id) => {
+    const node = sectionById.get(id);
+    if (node) {
+      sectionsRoot.appendChild(node);
+    }
+  });
+}
+
 function resolvePageKey() {
   const bodyPageKey = String(document.body?.dataset?.pageKey || "")
     .trim();
@@ -112,6 +186,13 @@ async function initializePageDesign() {
   const pageCssFieldKey = pageKey ? `${pageKey}CustomCss` : "";
   const globalCustomCss = String(settings?.globalCustomCss || "");
   const pageCustomCss = pageCssFieldKey ? String(settings?.[pageCssFieldKey] || "") : "";
+  const pageVisualMetadata = readVisualMetadata(pageCustomCss);
+  const globalVisualMetadata = readVisualMetadata(globalCustomCss);
+  const sectionOrder =
+    normalizeSectionOrder(pageVisualMetadata?.sectionOrder).length > 0
+      ? pageVisualMetadata.sectionOrder
+      : globalVisualMetadata?.sectionOrder;
+  applySectionOrder(sectionOrder);
   upsertStyle(GLOBAL_STYLE_ID, globalCustomCss);
   upsertStyle(PAGE_STYLE_ID, pageCustomCss);
 }

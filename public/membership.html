@@ -34,8 +34,8 @@
       </div>
     </header>
 
-    <main class="membership-shell container">
-      <section class="membership-hero">
+    <main class="membership-shell container" data-page-sections-root>
+      <section class="membership-hero" data-page-section-id="hero" data-page-section-label="Hero">
         <p class="eyebrow">Account Hub</p>
         <h1>Your Account, Store Access, and Membership Tiers</h1>
         <p>
@@ -51,7 +51,7 @@
         <p id="membership-page-message" class="checkout-message"></p>
       </section>
 
-      <section class="membership-card">
+      <section class="membership-card" data-page-section-id="upgrade" data-page-section-label="Upgrade Membership">
         <div class="row-between">
           <h2>Upgrade Membership</h2>
           <span class="cart-item-sub">Pick your monthly tier</span>
@@ -59,7 +59,7 @@
         <div id="membership-plan-grid" class="membership-plan-grid"></div>
       </section>
 
-      <section class="membership-grid">
+      <section class="membership-grid" data-page-section-id="account" data-page-section-label="Account Panel">
         <article id="membership-auth-card" class="membership-card">
           <h2>Sign In Required</h2>
           <p class="cart-item-sub">
@@ -171,7 +171,11 @@
         </article>
       </section>
 
-      <section class="membership-content-grid">
+      <section
+        class="membership-content-grid"
+        data-page-section-id="estoreCommunity"
+        data-page-section-label="E-Store + Community"
+      >
         <article id="membership-estore" class="membership-card">
           <div class="row-between">
             <h2>E-Store Ebook Library</h2>
@@ -221,7 +225,7 @@
         </article>
       </section>
 
-      <section class="membership-card">
+      <section class="membership-card" data-page-section-id="orders" data-page-section-label="Order History">
         <div class="row-between">
           <h2>Your Orders</h2>
           <button id="membership-refresh-orders-btn" class="ghost-btn" type="button">Refresh Orders</button>

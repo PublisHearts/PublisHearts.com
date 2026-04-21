@@ -29,8 +29,13 @@
       </div>
     </header>
 
-    <main class="container admin-shell">
-      <section id="fulfillment-login-card" class="admin-login-card">
+    <main class="container admin-shell" data-page-sections-root>
+      <section
+        id="fulfillment-login-card"
+        class="admin-login-card"
+        data-page-section-id="login"
+        data-page-section-label="Fulfillment Login"
+      >
         <h1>Fulfillment Login</h1>
         <p>Use your admin password to export Shippo CSV files, manage package weights, and mark orders shipped.</p>
         <form id="fulfillment-login-form" class="admin-login-form">
@@ -41,7 +46,12 @@
         <p id="fulfillment-login-message" class="checkout-message"></p>
       </section>
 
-      <section id="fulfillment-panel" class="admin-panel hidden">
+      <section
+        id="fulfillment-panel"
+        class="admin-panel hidden"
+        data-page-section-id="workspace"
+        data-page-section-label="Fulfillment Workspace"
+      >
         <aside class="admin-edition-frame" aria-live="polite">
           <h2>Edition Buyers</h2>
           <p>Each panel tracks 50 sold book copies in order. Click a row to mark it packaged, and enter the packed box weight for Shippo when you have it.</p>
