@@ -1643,6 +1643,11 @@ function renderHealth(health) {
   const uspsConfigured = health.uspsConfigured === true;
   const uspsMissing = Array.isArray(health.uspsMissingConfig) ? health.uspsMissingConfig.join(", ") : "";
   const uspsBaseUrl = String(health.uspsApiBaseUrl || "").trim() || "(not set)";
+  const databaseInfo = health.database && typeof health.database === "object" ? health.database : {};
+  const databaseEnabled = databaseInfo.enabled === true;
+  const databaseConnected = databaseInfo.connected === true;
+  const databaseError = String(databaseInfo.error || "").trim();
+  const databaseEnvVar = String(databaseInfo.envVar || "").trim() || "(not set)";
 
   adminHealthEl.innerHTML = `
     <article class="admin-health-card">
@@ -1670,6 +1675,13 @@ function renderHealth(health) {
       <p><strong>USPS labels:</strong> ${uspsConfigured ? "Configured" : "Missing config"}</p>
       <p><strong>USPS base URL:</strong> ${escapeHtml(uspsBaseUrl)}</p>
       <p><strong>Missing fields:</strong> ${escapeHtml(uspsMissing || "(none)")}</p>
+    </article>
+    <article class="admin-health-card">
+      <h3>Database</h3>
+      <p><strong>Enabled:</strong> ${databaseEnabled ? "Yes" : "No"}</p>
+      <p><strong>Connected:</strong> ${databaseConnected ? "Yes" : "No"}</p>
+      <p><strong>Env:</strong> ${escapeHtml(databaseEnvVar)}</p>
+      <p><strong>Error:</strong> ${escapeHtml(databaseError || "(none)")}</p>
     </article>
   `;
   renderAdminQuickLinks(health.quickLinks);
