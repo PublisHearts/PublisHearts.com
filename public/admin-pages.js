@@ -1085,6 +1085,15 @@ function setSectionOrderForPage(pageKey, orderList) {
   state.sectionOrderByPage[key] = normalizeSectionOrder(orderList);
 }
 
+function syncVisualDraftToPageInput(pageKey = getSelectedVisualPageKey()) {
+  const targetInput = getPageCssInput(pageKey);
+  if (!targetInput) {
+    return;
+  }
+  const sectionOrder = ensureSectionOrderForPage(pageKey);
+  targetInput.value = buildVisualCss(pageKey, sectionOrder);
+}
+
 function buildVisualMetadata(controlValues, sectionOrder = [], pageOptions = {}, sectionStyles = {}) {
   const normalizedOrder = normalizeSectionOrder(sectionOrder);
   const metadata = {
@@ -1788,7 +1797,7 @@ function renderVisualPageControls() {
       [key]: normalizePageOptionValue(definition, definition.type === "toggle" ? input.checked : input.value)
     };
     setPageOptionsForPage(pageKey, nextOptions);
-    upsertPageVisualMetadata(pageKey, { pageOptions: nextOptions });
+    syncVisualDraftToPageInput(pageKey);
 
     if (valueEl && definition.type === "range") {
       valueEl.textContent = formatPageOptionRangeValue(definition, nextOptions[key]);
@@ -2022,9 +2031,7 @@ function applyVisualSectionStyleDraft() {
   });
 
   upsertSectionStyleForPageSection(pageKey, sectionId, nextStyle);
-  upsertPageVisualMetadata(pageKey, {
-    sectionStyles: getSectionStylesForPage(pageKey)
-  });
+  syncVisualDraftToPageInput(pageKey);
   setVisualSectionStyleRangeLabels();
   updateVisualGeneratedCssPreview();
   applyVisualCssToPreview();
@@ -2040,9 +2047,7 @@ function resetVisualSectionStyleDraft() {
   const styles = { ...getSectionStylesForPage(pageKey) };
   delete styles[sectionId];
   setSectionStylesForPage(pageKey, styles);
-  upsertPageVisualMetadata(pageKey, {
-    sectionStyles: getSectionStylesForPage(pageKey)
-  });
+  syncVisualDraftToPageInput(pageKey);
   renderVisualSectionDesigner();
   updateVisualGeneratedCssPreview();
   applyVisualCssToPreview();
@@ -2116,7 +2121,7 @@ function reorderSectionBefore(pageKey, draggedId, targetId) {
   const destination = nextOrder.indexOf(targetId);
   nextOrder.splice(destination, 0, draggedId);
   setSectionOrderForPage(pageKey, nextOrder);
-  upsertPageVisualMetadata(pageKey, { sectionOrder: nextOrder });
+  syncVisualDraftToPageInput(pageKey);
   renderVisualSectionOrderList();
   applySectionOrderToPreview(pageKey);
   updateVisualCurrentCssSnapshot();
@@ -2137,7 +2142,7 @@ function moveSectionByOffset(pageKey, sectionId, offset) {
   nextOrder.splice(index, 1);
   nextOrder.splice(nextIndex, 0, sectionId);
   setSectionOrderForPage(pageKey, nextOrder);
-  upsertPageVisualMetadata(pageKey, { sectionOrder: nextOrder });
+  syncVisualDraftToPageInput(pageKey);
   renderVisualSectionOrderList();
   applySectionOrderToPreview(pageKey);
   updateVisualCurrentCssSnapshot();
@@ -2359,12 +2364,14 @@ function applyVisualPreset(presetKey) {
     return;
   }
   setVisualControlValues(preset);
+  syncVisualDraftToPageInput();
   visualPresetButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.visualPreset === presetKey);
   });
   refreshVisualRangeLabels();
   updateVisualGeneratedCssPreview();
   applyVisualCssToPreview();
+  updateVisualCurrentCssSnapshot();
 }
 
 function applyVisualMetadataIfPresent() {
@@ -2417,12 +2424,14 @@ function applyVisualStyleToSelectedPage() {
     setDesignMessage("Pick a page first.", true);
     return;
   }
-  const sectionOrder = ensureSectionOrderForPage(pageKey);
-  targetInput.value = buildVisualCss(pageKey, sectionOrder);
+  syncVisualDraftToPageInput(pageKey);
   updateVisualCurrentCssSnapshot();
   updateVisualGeneratedCssPreview();
   applyVisualCssToPreview();
-  setDesignMessage(`${getVisualPageLabel(pageKey)} style updated in draft. Click Save All Page Design to publish.`);
+  setDesignMessage(`${getVisualPageLabel(pageKey)} style applied. Saving now...`);
+  if (!state.designBusy) {
+    siteSettingsForm?.requestSubmit?.();
+  }
 }
 
 function applyVisualStyleGlobally() {
@@ -2430,8 +2439,12 @@ function applyVisualStyleGlobally() {
     return;
   }
   siteInputs.globalCustomCss.value = buildVisualCss("");
+  syncVisualDraftToPageInput();
   updateVisualCurrentCssSnapshot();
-  setDesignMessage("Global visual style updated in draft. Click Save All Page Design to publish.");
+  setDesignMessage("Global visual style applied. Saving now...");
+  if (!state.designBusy) {
+    siteSettingsForm?.requestSubmit?.();
+  }
 }
 
 function clearSelectedVisualStyle() {
@@ -2469,14 +2482,18 @@ function initializeVisualEditor() {
   setVisualDevice("desktop");
   visualControlInputs.forEach((input) => {
     input?.addEventListener("input", () => {
+      syncVisualDraftToPageInput();
       refreshVisualRangeLabels();
       updateVisualGeneratedCssPreview();
       applyVisualCssToPreview();
+      updateVisualCurrentCssSnapshot();
     });
     input?.addEventListener("change", () => {
+      syncVisualDraftToPageInput();
       refreshVisualRangeLabels();
       updateVisualGeneratedCssPreview();
       applyVisualCssToPreview();
+      updateVisualCurrentCssSnapshot();
     });
   });
 
