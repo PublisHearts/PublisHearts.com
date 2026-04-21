@@ -6,6 +6,7 @@ import multer from "multer";
 import os from "os";
 import path from "path";
 import Stripe from "stripe";
+import { v2 as cloudinary } from "cloudinary";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { fileURLToPath } from "url";
@@ -193,6 +194,13 @@ const adminRenderUrl = (process.env.ADMIN_RENDER_URL || "https://dashboard.rende
 const adminFacebookUrl = (process.env.ADMIN_FACEBOOK_URL || "https://business.facebook.com/latest/home").trim();
 const adminAmazonKdpUrl = (process.env.ADMIN_AMAZON_KDP_URL || "https://kdp.amazon.com/").trim();
 const adminShippoUrl = (process.env.ADMIN_SHIPPO_URL || "https://apps.goshippo.com/orders").trim();
+const cloudinaryCloudName = String(process.env.CLOUDINARY_CLOUD_NAME || "").trim();
+const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY || "").trim();
+const cloudinaryApiSecret = String(process.env.CLOUDINARY_API_SECRET || "").trim();
+const cloudinaryUploadFolder = String(process.env.CLOUDINARY_UPLOAD_FOLDER || "publishearts/uploads")
+  .trim()
+  .replace(/^\/+|\/+$/g, "");
+const cloudinaryUploadsEnabled = Boolean(cloudinaryCloudName && cloudinaryApiKey && cloudinaryApiSecret);
 const premiumEbookTokenSecret = String(
   process.env.PREMIUM_EBOOK_TOKEN_SECRET || stripeSecretKey || adminPassword || "publishearts-premium-ebooks"
 ).trim();
@@ -306,6 +314,14 @@ const uspsDefaultLabelType = String(process.env.USPS_LABEL_TYPE || "4X6LABEL")
   .toUpperCase();
 
 const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : null;
+if (cloudinaryUploadsEnabled) {
+  cloudinary.config({
+    cloud_name: cloudinaryCloudName,
+    api_key: cloudinaryApiKey,
+    api_secret: cloudinaryApiSecret,
+    secure: true
+  });
+}
 const app = express();
 app.set("trust proxy", true);
 const parsedPublicSoldCopiesCacheSeconds = Number.parseInt(
@@ -3348,7 +3364,161 @@ function requireAdmin(req, res, next) {
   return next();
 }
 
+function collectUploadedFiles(files, fieldNames = []) {
+  if (!files || typeof files !== "object") {
+    return [];
+  }
+  const names = fieldNames.length > 0 ? fieldNames : Object.keys(files);
+  return names.flatMap((name) => (Array.isArray(files[name]) ? files[name] : []));
+}
+
+function normalizeCloudFolderPath(...segments) {
+  return segments
+    .map((segment) => String(segment || "").trim())
+    .filter(Boolean)
+    .join("/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/^\/+|\/+$/g, "");
+}
+
+function cleanCloudinaryPublicIdBase(originalName = "") {
+  const ext = path.extname(String(originalName || "")).toLowerCase();
+  const base = String(originalName || "")
+    .trim()
+    .slice(0, 120)
+    .replace(ext, "")
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+  return base || "file";
+}
+
+function uploadBufferToCloudinary({ buffer, originalName = "", folder = "" }) {
+  return new Promise((resolve, reject) => {
+    const publicId = normalizeCloudFolderPath(
+      folder,
+      `${Date.now()}-${randomUUID().slice(0, 8)}-${cleanCloudinaryPublicIdBase(originalName)}`
+    );
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        resource_type: "auto",
+        public_id: publicId,
+        overwrite: false
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve({
+          url: String(result?.secure_url || result?.url || "").trim(),
+          publicId: String(result?.public_id || publicId).trim(),
+          resourceType: String(result?.resource_type || "image").trim().toLowerCase()
+        });
+      }
+    );
+    stream.end(buffer);
+  });
+}
+
+async function uploadMulterFileToCloudinary(file, folder = "") {
+  const content = Buffer.isBuffer(file?.buffer)
+    ? file.buffer
+    : file?.path
+      ? await fs.readFile(file.path)
+      : Buffer.alloc(0);
+  if (!content || content.length === 0) {
+    throw new Error("Uploaded file is empty.");
+  }
+  const uploaded = await uploadBufferToCloudinary({
+    buffer: content,
+    originalName: file?.originalname || "",
+    folder
+  });
+  file.publicUrl = uploaded.url;
+  file.cloudPublicId = uploaded.publicId;
+  file.cloudResourceType = uploaded.resourceType;
+  if (file?.path) {
+    await fs.unlink(file.path).catch(() => {});
+  }
+}
+
+async function maybeUploadRequestFilesToCloudinary(files, folderByFieldName = {}) {
+  if (!cloudinaryUploadsEnabled || !files || typeof files !== "object") {
+    return;
+  }
+  const entries = Object.entries(folderByFieldName || {});
+  for (const [fieldName, folderSuffix] of entries) {
+    const fileList = Array.isArray(files[fieldName]) ? files[fieldName] : [];
+    const folder = normalizeCloudFolderPath(cloudinaryUploadFolder, folderSuffix);
+    for (const file of fileList) {
+      await uploadMulterFileToCloudinary(file, folder);
+    }
+  }
+}
+
+function tryParseCloudinaryPublicAsset(publicUrl) {
+  const text = String(publicUrl || "").trim();
+  if (!text || !cloudinaryUploadsEnabled || !cloudinaryCloudName) {
+    return null;
+  }
+  const cloudNameEscaped = cloudinaryCloudName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = text.match(
+    new RegExp(`^https?:\\/\\/res\\.cloudinary\\.com\\/${cloudNameEscaped}\\/(image|raw|video)\\/upload\\/(?:v\\d+\\/)?(.+)$`, "i")
+  );
+  if (!match) {
+    return null;
+  }
+  const resourceType = String(match[1] || "image").trim().toLowerCase();
+  const pathPart = String(match[2] || "").trim();
+  if (!pathPart) {
+    return null;
+  }
+  const decodedPath = decodeURIComponent(pathPart);
+  const withoutExtension = decodedPath.replace(/\.[a-z0-9]+$/i, "");
+  if (!withoutExtension) {
+    return null;
+  }
+  return {
+    resourceType,
+    publicId: withoutExtension
+  };
+}
+
+async function destroyCloudinaryAsset(publicId, resourceType = "") {
+  const id = String(publicId || "").trim();
+  if (!cloudinaryUploadsEnabled || !id) {
+    return;
+  }
+  const preferredType = String(resourceType || "").trim().toLowerCase();
+  const typeOrder = preferredType ? [preferredType, "image", "raw", "video"] : ["image", "raw", "video"];
+  const attempted = new Set();
+  for (const type of typeOrder) {
+    const normalizedType = String(type || "").trim().toLowerCase();
+    if (!normalizedType || attempted.has(normalizedType)) {
+      continue;
+    }
+    attempted.add(normalizedType);
+    try {
+      const response = await cloudinary.uploader.destroy(id, {
+        resource_type: normalizedType,
+        invalidate: true
+      });
+      const result = String(response?.result || "").trim().toLowerCase();
+      if (result === "ok" || result === "not found") {
+        return;
+      }
+    } catch {
+      // Try next resource type.
+    }
+  }
+}
+
 async function removeUploadedFile(file) {
+  if (file?.cloudPublicId) {
+    await destroyCloudinaryAsset(file.cloudPublicId, file.cloudResourceType);
+  }
   if (!file?.path) {
     return;
   }
@@ -3360,8 +3530,7 @@ async function removeUploadedFiles(files, fieldNames = []) {
     return;
   }
 
-  const namesToDelete = fieldNames.length > 0 ? fieldNames : Object.keys(files);
-  const fileList = namesToDelete.flatMap((name) => (Array.isArray(files[name]) ? files[name] : []));
+  const fileList = collectUploadedFiles(files, fieldNames);
   await Promise.all(fileList.map((file) => removeUploadedFile(file)));
 }
 
@@ -3405,8 +3574,9 @@ function imageUrlFromRequest(req, { allowUnset = false } = {}) {
   if (uploadedPrimary) {
     return uploadedPrimary;
   }
-  if (req.file?.filename) {
-    return `/uploads/${req.file.filename}`;
+  const singleUploadUrl = uploadedFilePublicUrl(req.file);
+  if (singleUploadUrl) {
+    return singleUploadUrl;
   }
   if (typedUrl) {
     return typedUrl;
@@ -3416,10 +3586,11 @@ function imageUrlFromRequest(req, { allowUnset = false } = {}) {
 
 function uploadedImageUrl(files, fieldName) {
   const file = Array.isArray(files?.[fieldName]) ? files[fieldName][0] : null;
-  if (!file?.filename) {
+  const url = uploadedFilePublicUrl(file);
+  if (!url) {
     return undefined;
   }
-  return `/uploads/${file.filename}`;
+  return url;
 }
 
 function uploadedPremiumEbookUrl(files, fieldName = "ebookFile") {
@@ -3448,6 +3619,11 @@ function resolveUploadsAbsolutePathFromPublicUrl(publicUrl) {
 }
 
 async function removeUploadsFileByPublicUrl(publicUrl) {
+  const cloudAsset = tryParseCloudinaryPublicAsset(publicUrl);
+  if (cloudAsset?.publicId) {
+    await destroyCloudinaryAsset(cloudAsset.publicId, cloudAsset.resourceType);
+    return;
+  }
   const absolutePath = resolveUploadsAbsolutePathFromPublicUrl(publicUrl);
   if (!absolutePath) {
     return;
@@ -3455,15 +3631,21 @@ async function removeUploadsFileByPublicUrl(publicUrl) {
   await fs.unlink(absolutePath).catch(() => {});
 }
 
+function uploadedFilePublicUrl(file) {
+  const explicit = String(file?.publicUrl || "").trim();
+  if (explicit) {
+    return explicit;
+  }
+  if (!file?.filename) {
+    return "";
+  }
+  return `/uploads/${file.filename}`;
+}
+
 function uploadedImageUrls(files, fieldName) {
   const list = Array.isArray(files?.[fieldName]) ? files[fieldName] : [];
   return list
-    .map((file) => {
-      if (!file?.filename) {
-        return "";
-      }
-      return `/uploads/${file.filename}`;
-    })
+    .map((file) => uploadedFilePublicUrl(file))
     .filter(Boolean);
 }
 
@@ -4830,6 +5012,22 @@ async function saveUspsLabelToUploads(orderId, labelBuffer, contentType = "") {
     : lowerContentType.includes("png")
       ? ".png"
       : ".pdf";
+  const originalName = `${safeOrderId || "order"}-label${extension}`;
+  if (cloudinaryUploadsEnabled) {
+    try {
+      const uploaded = await uploadBufferToCloudinary({
+        buffer: labelBuffer,
+        originalName,
+        folder: normalizeCloudFolderPath(cloudinaryUploadFolder, "usps-labels")
+      });
+      if (uploaded.url) {
+        return uploaded.url;
+      }
+    } catch (error) {
+      const details = String(error?.message || "").trim();
+      console.warn(`Could not upload USPS label to cloud storage: ${details || "Unknown Cloudinary error."}`);
+    }
+  }
   const filename = `${Date.now()}-${safeOrderId}-${randomUUID().slice(0, 8)}${extension}`;
   const filePath = path.join(uploadsDir, filename);
   await fs.mkdir(uploadsDir, { recursive: true });
@@ -6728,6 +6926,11 @@ app.get("/api/admin/health", requireAdmin, async (req, res) => {
       connected: postgresHealth.ok === true,
       error: postgresHealth.ok ? "" : postgresHealth.error || postgresRuntime.lastConnectionError || ""
     },
+    uploads: {
+      mode: cloudinaryUploadsEnabled ? "cloudinary" : "local",
+      cloudinaryConfigured: cloudinaryUploadsEnabled,
+      cloudName: cloudinaryCloudName || ""
+    },
     deployCommit,
     deployCommitRaw
   });
@@ -8341,6 +8544,13 @@ const premiumLibraryAdminUpload = premiumLibraryUpload.fields([
 
 app.put("/api/admin/site-settings", requireAdmin, siteSettingsUpload, async (req, res) => {
   try {
+    await maybeUploadRequestFilesToCloudinary(req.files, {
+      logoImage: "site-settings",
+      heroBannerImage: "site-settings",
+      membershipStandardImage: "site-settings/memberships",
+      membershipPlusImage: "site-settings/memberships",
+      membershipPremiumImage: "site-settings/memberships"
+    });
     const updated = await updateSiteSettings(extractSiteSettingsChanges(req));
     return res.json(updated);
   } catch (error) {
@@ -8356,16 +8566,20 @@ app.put("/api/admin/site-settings", requireAdmin, siteSettingsUpload, async (req
 });
 
 app.post("/api/admin/products", requireAdmin, productUpload, async (req, res) => {
-  const productImageUrls = [
-    ...parseImageUrlList(req.body?.productImageUrls, { defaultEmpty: true }),
-    ...uploadedImageUrls(req.files, "productImages")
-  ];
-  const includedImageUrls = [
-    ...parseImageUrlList(req.body?.includedImageUrls, { defaultEmpty: true }),
-    ...uploadedImageUrls(req.files, "includedImages")
-  ];
-
   try {
+    await maybeUploadRequestFilesToCloudinary(req.files, {
+      image: "products",
+      productImages: "products/gallery",
+      includedImages: "products/included"
+    });
+    const productImageUrls = [
+      ...parseImageUrlList(req.body?.productImageUrls, { defaultEmpty: true }),
+      ...uploadedImageUrls(req.files, "productImages")
+    ];
+    const includedImageUrls = [
+      ...parseImageUrlList(req.body?.includedImageUrls, { defaultEmpty: true }),
+      ...uploadedImageUrls(req.files, "includedImages")
+    ];
     const created = await createProduct({
       title: req.body?.title,
       productCategory: req.body?.productCategory,
@@ -8396,24 +8610,29 @@ app.post("/api/admin/products", requireAdmin, productUpload, async (req, res) =>
 });
 
 app.put("/api/admin/products/:id", requireAdmin, productUpload, async (req, res) => {
-  const removeImage = String(req.body?.removeImage || "").toLowerCase() === "true";
-  const imageUrl = removeImage ? "" : imageUrlFromRequest(req, { allowUnset: true });
-  const nextPriceRaw = String(req.body?.price || "").trim();
-  const nextPrice = nextPriceRaw ? priceToCents(nextPriceRaw) : undefined;
-  const shippingFeeRaw = String(req.body?.shippingFee || "").trim();
-  const nextShippingFee = shippingFeeRaw ? priceToCents(shippingFeeRaw) : undefined;
-  const uploadedProductImages = uploadedImageUrls(req.files, "productImages");
-  const uploadedIncludedImages = uploadedImageUrls(req.files, "includedImages");
-  const productImageListProvided = req.body?.productImageUrls !== undefined || uploadedProductImages.length > 0;
-  const includedImageListProvided = req.body?.includedImageUrls !== undefined || uploadedIncludedImages.length > 0;
-  const nextProductImageUrls = productImageListProvided
-    ? [...parseImageUrlList(req.body?.productImageUrls, { defaultEmpty: true }), ...uploadedProductImages]
-    : undefined;
-  const nextIncludedImageUrls = includedImageListProvided
-    ? [...parseImageUrlList(req.body?.includedImageUrls, { defaultEmpty: true }), ...uploadedIncludedImages]
-    : undefined;
-
   try {
+    await maybeUploadRequestFilesToCloudinary(req.files, {
+      image: "products",
+      productImages: "products/gallery",
+      includedImages: "products/included"
+    });
+    const removeImage = String(req.body?.removeImage || "").toLowerCase() === "true";
+    const imageUrl = removeImage ? "" : imageUrlFromRequest(req, { allowUnset: true });
+    const nextPriceRaw = String(req.body?.price || "").trim();
+    const nextPrice = nextPriceRaw ? priceToCents(nextPriceRaw) : undefined;
+    const shippingFeeRaw = String(req.body?.shippingFee || "").trim();
+    const nextShippingFee = shippingFeeRaw ? priceToCents(shippingFeeRaw) : undefined;
+    const uploadedProductImages = uploadedImageUrls(req.files, "productImages");
+    const uploadedIncludedImages = uploadedImageUrls(req.files, "includedImages");
+    const productImageListProvided = req.body?.productImageUrls !== undefined || uploadedProductImages.length > 0;
+    const includedImageListProvided = req.body?.includedImageUrls !== undefined || uploadedIncludedImages.length > 0;
+    const nextProductImageUrls = productImageListProvided
+      ? [...parseImageUrlList(req.body?.productImageUrls, { defaultEmpty: true }), ...uploadedProductImages]
+      : undefined;
+    const nextIncludedImageUrls = includedImageListProvided
+      ? [...parseImageUrlList(req.body?.includedImageUrls, { defaultEmpty: true }), ...uploadedIncludedImages]
+      : undefined;
+
     const updated = await updateProduct(req.params.id, {
       title: req.body?.title !== undefined ? req.body.title : undefined,
       productCategory: req.body?.productCategory !== undefined ? req.body.productCategory : undefined,
@@ -8474,12 +8693,14 @@ app.delete("/api/admin/products/:id", requireAdmin, async (req, res) => {
 });
 
 app.post("/api/admin/premium-library", requireAdmin, premiumLibraryAdminUpload, async (req, res) => {
-  const typedFileUrl = String(req.body?.fileUrl || "").trim();
-  const typedCoverImageUrl = String(req.body?.coverImageUrl || "").trim();
-  const fileUrl = uploadedPremiumEbookUrl(req.files, "ebookFile") || typedFileUrl;
-  const coverImageUrl = uploadedImageUrl(req.files, "coverImage") || typedCoverImageUrl;
-
   try {
+    await maybeUploadRequestFilesToCloudinary(req.files, {
+      coverImage: "premium-library/covers"
+    });
+    const typedFileUrl = String(req.body?.fileUrl || "").trim();
+    const typedCoverImageUrl = String(req.body?.coverImageUrl || "").trim();
+    const fileUrl = uploadedPremiumEbookUrl(req.files, "ebookFile") || typedFileUrl;
+    const coverImageUrl = uploadedImageUrl(req.files, "coverImage") || typedCoverImageUrl;
     const created = await createPremiumLibraryItem({
       id: req.body?.id,
       title: req.body?.title,
@@ -8517,39 +8738,42 @@ app.put("/api/admin/premium-library/:id", requireAdmin, premiumLibraryAdminUploa
     return res.status(404).json({ error: "Premium library item not found." });
   }
 
-  const uploadedFileUrl = uploadedPremiumEbookUrl(req.files, "ebookFile");
-  const uploadedCoverImageUrl = uploadedImageUrl(req.files, "coverImage");
-  const removeFile = parseBooleanFlag(req.body?.removeFile, false) === true;
-  const removeCoverImage = parseBooleanFlag(req.body?.removeCoverImage, false) === true;
-  const patch = {};
-
-  if (req.body?.title !== undefined) {
-    patch.title = req.body.title;
-  }
-  if (req.body?.monthLabel !== undefined) {
-    patch.monthLabel = req.body.monthLabel;
-  }
-  if (req.body?.description !== undefined) {
-    patch.description = req.body.description;
-  }
-
-  if (removeFile) {
-    patch.fileUrl = "";
-  } else if (uploadedFileUrl) {
-    patch.fileUrl = uploadedFileUrl;
-  } else if (req.body?.fileUrl !== undefined) {
-    patch.fileUrl = String(req.body?.fileUrl || "").trim();
-  }
-
-  if (removeCoverImage) {
-    patch.coverImageUrl = "";
-  } else if (uploadedCoverImageUrl) {
-    patch.coverImageUrl = uploadedCoverImageUrl;
-  } else if (req.body?.coverImageUrl !== undefined) {
-    patch.coverImageUrl = String(req.body?.coverImageUrl || "").trim();
-  }
-
   try {
+    await maybeUploadRequestFilesToCloudinary(req.files, {
+      coverImage: "premium-library/covers"
+    });
+    const uploadedFileUrl = uploadedPremiumEbookUrl(req.files, "ebookFile");
+    const uploadedCoverImageUrl = uploadedImageUrl(req.files, "coverImage");
+    const removeFile = parseBooleanFlag(req.body?.removeFile, false) === true;
+    const removeCoverImage = parseBooleanFlag(req.body?.removeCoverImage, false) === true;
+    const patch = {};
+
+    if (req.body?.title !== undefined) {
+      patch.title = req.body.title;
+    }
+    if (req.body?.monthLabel !== undefined) {
+      patch.monthLabel = req.body.monthLabel;
+    }
+    if (req.body?.description !== undefined) {
+      patch.description = req.body.description;
+    }
+
+    if (removeFile) {
+      patch.fileUrl = "";
+    } else if (uploadedFileUrl) {
+      patch.fileUrl = uploadedFileUrl;
+    } else if (req.body?.fileUrl !== undefined) {
+      patch.fileUrl = String(req.body?.fileUrl || "").trim();
+    }
+
+    if (removeCoverImage) {
+      patch.coverImageUrl = "";
+    } else if (uploadedCoverImageUrl) {
+      patch.coverImageUrl = uploadedCoverImageUrl;
+    } else if (req.body?.coverImageUrl !== undefined) {
+      patch.coverImageUrl = String(req.body?.coverImageUrl || "").trim();
+    }
+
     const updated = existingStored
       ? await updatePremiumLibraryItem(itemId, patch)
       : await createPremiumLibraryItem({

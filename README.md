@@ -66,6 +66,10 @@ Optional:
 - `MEMBER_ADMIN_EMAILS` (comma-separated emails that always stay `admin` role in member accounts)
 - `DATABASE_URL` (optional Postgres connection string; when set, member + membership data stores persist in Postgres)
 - `DATABASE_DISABLE_SSL` (optional; set `true` only if your database endpoint does not support TLS)
+- `CLOUDINARY_CLOUD_NAME` (optional; when set with key/secret, image uploads are stored in Cloudinary)
+- `CLOUDINARY_API_KEY` (optional Cloudinary API key)
+- `CLOUDINARY_API_SECRET` (optional Cloudinary API secret)
+- `CLOUDINARY_UPLOAD_FOLDER` (optional Cloudinary folder prefix, defaults to `publishearts/uploads`)
 - `PRODUCTS_FILE` (defaults to `data/products.json`)
 - `SITE_SETTINGS_FILE` (defaults to `data/site-settings.json`)
 - `ADDRESS_BOOK_FILE` (defaults to `data/address-book.json`)
@@ -142,6 +146,8 @@ From the dashboard you can:
 - Premium community posts are saved to `data/member-community-posts.json` by default.
 - Member monthly perk fulfillment records are saved to `data/member-perk-fulfillment.json` by default.
 - Uploaded files are saved to `public/uploads` by default.
+- If Cloudinary env vars are configured, admin-uploaded images (site settings, product images, premium cover images, USPS label files) are stored in Cloudinary instead.
+- Premium ebook PDF uploads remain protected local files under `/uploads/premium-ebooks/` for signed member-only downloads.
 
 If `DATABASE_URL` is set, these stores use Postgres (Neon compatible) instead of local files:
 

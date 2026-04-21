@@ -1648,6 +1648,13 @@ function renderHealth(health) {
   const databaseConnected = databaseInfo.connected === true;
   const databaseError = String(databaseInfo.error || "").trim();
   const databaseEnvVar = String(databaseInfo.envVar || "").trim() || "(not set)";
+  const uploadsInfo = health.uploads && typeof health.uploads === "object" ? health.uploads : {};
+  const uploadsMode = String(uploadsInfo.mode || "local")
+    .trim()
+    .toLowerCase();
+  const uploadsModeLabel = uploadsMode === "cloudinary" ? "Cloudinary" : "Local disk";
+  const cloudinaryConfigured = uploadsInfo.cloudinaryConfigured === true;
+  const cloudinaryCloudName = String(uploadsInfo.cloudName || "").trim() || "(not set)";
 
   adminHealthEl.innerHTML = `
     <article class="admin-health-card">
@@ -1682,6 +1689,12 @@ function renderHealth(health) {
       <p><strong>Connected:</strong> ${databaseConnected ? "Yes" : "No"}</p>
       <p><strong>Env:</strong> ${escapeHtml(databaseEnvVar)}</p>
       <p><strong>Error:</strong> ${escapeHtml(databaseError || "(none)")}</p>
+    </article>
+    <article class="admin-health-card">
+      <h3>Uploads</h3>
+      <p><strong>Mode:</strong> ${escapeHtml(uploadsModeLabel)}</p>
+      <p><strong>Cloudinary ready:</strong> ${cloudinaryConfigured ? "Yes" : "No"}</p>
+      <p><strong>Cloud name:</strong> ${escapeHtml(cloudinaryCloudName)}</p>
     </article>
   `;
   renderAdminQuickLinks(health.quickLinks);
