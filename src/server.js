@@ -201,6 +201,11 @@ const cloudinaryUploadFolder = String(process.env.CLOUDINARY_UPLOAD_FOLDER || "p
   .trim()
   .replace(/^\/+|\/+$/g, "");
 const cloudinaryUploadsEnabled = Boolean(cloudinaryCloudName && cloudinaryApiKey && cloudinaryApiSecret);
+const premiumEbookCloudinaryFolder = [cloudinaryUploadFolder, "premium-library/ebooks"]
+  .filter(Boolean)
+  .join("/")
+  .replace(/\/{2,}/g, "/")
+  .replace(/^\/+|\/+$/g, "");
 const premiumEbookTokenSecret = String(
   process.env.PREMIUM_EBOOK_TOKEN_SECRET || stripeSecretKey || adminPassword || "publishearts-premium-ebooks"
 ).trim();
@@ -2689,7 +2694,7 @@ function hasMemberBlockingPremiumSubscription(member) {
   return isBlockingPremiumSubscriptionStatus(member?.subscriptionStatus);
 }
 
-function isProtectedPremiumEbookFileUrl(value) {
+function isProtectedLocalPremiumEbookFileUrl(value) {
   const normalized = String(value || "").trim();
   if (!normalized.startsWith(premiumEbookProtectedUploadsPrefix)) {
     return false;
@@ -2697,9 +2702,36 @@ function isProtectedPremiumEbookFileUrl(value) {
   return !normalized.includes("\\") && !normalized.includes("..");
 }
 
+function isProtectedCloudinaryPremiumEbookFileUrl(value) {
+  const cloudAsset = tryParseCloudinaryPublicAsset(value);
+  const publicId = String(cloudAsset?.publicId || "")
+    .trim()
+    .toLowerCase();
+  if (!publicId) {
+    return false;
+  }
+  if (/(^|\/)premium-library\/ebooks(\/|$)/i.test(publicId)) {
+    return true;
+  }
+  const protectedFolder = String(premiumEbookCloudinaryFolder || "")
+    .trim()
+    .toLowerCase();
+  if (!protectedFolder) {
+    return false;
+  }
+  return publicId === protectedFolder || publicId.startsWith(`${protectedFolder}/`);
+}
+
+function isProtectedPremiumEbookFileUrl(value) {
+  return isProtectedLocalPremiumEbookFileUrl(value) || isProtectedCloudinaryPremiumEbookFileUrl(value);
+}
+
 function isPublicPremiumEbookFileUrl(value) {
   const normalized = String(value || "").trim();
   if (!normalized) {
+    return false;
+  }
+  if (isProtectedPremiumEbookFileUrl(normalized)) {
     return false;
   }
   if (/^https?:\/\/\S+$/i.test(normalized)) {
@@ -2816,7 +2848,7 @@ async function listAllPremiumLibraryItems() {
 }
 
 function resolvePremiumEbookFilePath(fileUrl) {
-  if (!isProtectedPremiumEbookFileUrl(fileUrl)) {
+  if (!isProtectedLocalPremiumEbookFileUrl(fileUrl)) {
     return "";
   }
   const relativePath = String(fileUrl || "")
@@ -3460,7 +3492,7 @@ async function maybeUploadRequestFilesToCloudinary(files, folderByFieldName = {}
 
 function tryParseCloudinaryPublicAsset(publicUrl) {
   const text = String(publicUrl || "").trim();
-  if (!text || !cloudinaryUploadsEnabled || !cloudinaryCloudName) {
+  if (!text || !cloudinaryCloudName) {
     return null;
   }
   const cloudNameEscaped = cloudinaryCloudName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -3595,6 +3627,10 @@ function uploadedImageUrl(files, fieldName) {
 
 function uploadedPremiumEbookUrl(files, fieldName = "ebookFile") {
   const file = Array.isArray(files?.[fieldName]) ? files[fieldName][0] : null;
+  const explicitPublicUrl = String(file?.publicUrl || "").trim();
+  if (explicitPublicUrl) {
+    return explicitPublicUrl;
+  }
   if (!file?.filename) {
     return undefined;
   }
@@ -6413,18 +6449,54 @@ app.get("/api/members/premium/ebooks/:ebookId/download", requireActivePremiumMem
       return res.status(403).json({ error: "This ebook is not in your current monthly access set." });
     }
 
-    const filePath = resolvePremiumEbookFilePath(item.fileUrl);
-    if (!filePath) {
+    const fileUrl = String(item.fileUrl || "").trim();
+    const filePath = resolvePremiumEbookFilePath(fileUrl);
+    if (filePath) {
+      await fs.access(filePath);
+      const fileName = path.basename(filePath);
+      res.setHeader("Cache-Control", "private, no-store, max-age=0");
+      res.setHeader("Content-Disposition", `inline; filename=\"${fileName.replace(/"/g, "")}\"`);
+      return res.sendFile(filePath);
+    }
+
+    if (!isProtectedCloudinaryPremiumEbookFileUrl(fileUrl)) {
       return res.status(404).json({
-        error: "This ebook file is not available for protected download yet. Upload it under /uploads/premium-ebooks/."
+        error:
+          "This ebook file is not available for protected download yet. Upload a PDF in Premium Library and save the item again."
       });
     }
 
-    await fs.access(filePath);
-    const fileName = path.basename(filePath);
+    const cloudResponse = await fetch(fileUrl);
+    if (!cloudResponse.ok) {
+      return res.status(404).json({
+        error: "This ebook file could not be retrieved from cloud storage right now."
+      });
+    }
+    const cloudBuffer = Buffer.from(await cloudResponse.arrayBuffer());
+    if (!cloudBuffer || cloudBuffer.length === 0) {
+      return res.status(404).json({
+        error: "This ebook file is empty in cloud storage."
+      });
+    }
+
+    const cloudAsset = tryParseCloudinaryPublicAsset(fileUrl);
+    const contentType = String(cloudResponse.headers.get("content-type") || "").trim() || "application/pdf";
+    const baseFileName = String(cloudAsset?.publicId || item?.id || item?.title || "ebook")
+      .trim()
+      .split("/")
+      .pop()
+      .replace(/[^a-z0-9._-]+/gi, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 120);
+    const safeBaseName = baseFileName || "ebook";
+    const extension = contentType.toLowerCase().includes("pdf") ? ".pdf" : "";
+    const safeFileName =
+      extension && !safeBaseName.toLowerCase().endsWith(extension) ? `${safeBaseName}${extension}` : safeBaseName;
     res.setHeader("Cache-Control", "private, no-store, max-age=0");
-    res.setHeader("Content-Disposition", `inline; filename=\"${fileName.replace(/"/g, "")}\"`);
-    return res.sendFile(filePath);
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `inline; filename=\"${safeFileName.replace(/"/g, "")}\"`);
+    return res.send(cloudBuffer);
   } catch (error) {
     const details = String(error?.message || "").trim();
     return res.status(500).json({
@@ -8695,6 +8767,7 @@ app.delete("/api/admin/products/:id", requireAdmin, async (req, res) => {
 app.post("/api/admin/premium-library", requireAdmin, premiumLibraryAdminUpload, async (req, res) => {
   try {
     await maybeUploadRequestFilesToCloudinary(req.files, {
+      ebookFile: "premium-library/ebooks",
       coverImage: "premium-library/covers"
     });
     const typedFileUrl = String(req.body?.fileUrl || "").trim();
@@ -8740,6 +8813,7 @@ app.put("/api/admin/premium-library/:id", requireAdmin, premiumLibraryAdminUploa
 
   try {
     await maybeUploadRequestFilesToCloudinary(req.files, {
+      ebookFile: "premium-library/ebooks",
       coverImage: "premium-library/covers"
     });
     const uploadedFileUrl = uploadedPremiumEbookUrl(req.files, "ebookFile");

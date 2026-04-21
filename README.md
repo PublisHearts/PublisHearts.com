@@ -146,8 +146,8 @@ From the dashboard you can:
 - Premium community posts are saved to `data/member-community-posts.json` by default.
 - Member monthly perk fulfillment records are saved to `data/member-perk-fulfillment.json` by default.
 - Uploaded files are saved to `public/uploads` by default.
-- If Cloudinary env vars are configured, admin-uploaded images (site settings, product images, premium cover images, USPS label files) are stored in Cloudinary instead.
-- Premium ebook PDF uploads remain protected local files under `/uploads/premium-ebooks/` for signed member-only downloads.
+- If Cloudinary env vars are configured, admin-uploaded files are stored in Cloudinary (site settings images, product images, premium cover images, premium ebook PDFs, USPS label files).
+- Premium ebook downloads stay protected behind signed member-only links whether the PDF is stored locally (`/uploads/premium-ebooks/...`) or in Cloudinary.
 
 If `DATABASE_URL` is set, these stores use Postgres (Neon compatible) instead of local files:
 
@@ -193,7 +193,7 @@ For production, use persistent storage paths if your host supports disks:
    - promote a member account by email to `Member Admin`
    - view member account role + premium status
    - open "Membership Fulfillment" to track monthly sticker/book owed/sent status
-6. Update `data/premium-library.json` monthly with new ebook entries and protected file URLs under `/uploads/premium-ebooks/`.
+6. Add/edit premium library items monthly from Admin. Uploaded PDFs are protected by signed member-only download links (local or Cloudinary storage).
 
 ## Stripe webhook
 
