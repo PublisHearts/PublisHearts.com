@@ -1225,6 +1225,52 @@ h1 {
   gap: 0.35rem;
 }
 
+.visual-page-options {
+  border: 1px solid #e2d6c8;
+  border-radius: 12px;
+  background: #fffefb;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.visual-page-options h4 {
+  margin: 0;
+}
+
+.visual-page-options .cart-item-sub {
+  margin: 0;
+}
+
+.visual-page-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.visual-page-controls label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: #4e4337;
+}
+
+.visual-page-controls input,
+.visual-page-controls select {
+  width: 100%;
+  border: 1px solid #d8cab8;
+  border-radius: 10px;
+  padding: 0.58rem 0.7rem;
+  font: inherit;
+  color: var(--ink);
+  background: #fffdfa;
+}
+
+.visual-page-controls .checkbox-row {
+  align-self: end;
+  min-height: 2.4rem;
+}
+
 .range-caption {
   color: var(--ink-soft);
   font-size: 0.84rem;
@@ -1272,6 +1318,47 @@ h1 {
 
 .visual-section-order .cart-item-sub {
   margin: 0;
+}
+
+.visual-section-designer {
+  border: 1px solid #dfd2c3;
+  border-radius: 12px;
+  background: #fffefb;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.visual-section-designer h4 {
+  margin: 0;
+}
+
+.visual-section-designer .cart-item-sub {
+  margin: 0;
+}
+
+.visual-section-style-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.visual-section-style-grid label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: #4e4337;
+}
+
+.visual-section-style-grid input,
+.visual-section-style-grid select {
+  width: 100%;
+  border: 1px solid #d8cab8;
+  border-radius: 10px;
+  padding: 0.58rem 0.7rem;
+  font: inherit;
+  color: var(--ink);
+  background: #fffdfa;
 }
 
 .visual-section-order-list {
@@ -2696,6 +2783,14 @@ h1 {
   }
 
   .visual-slider-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .visual-page-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .visual-section-style-grid {
     grid-template-columns: 1fr;
   }
 

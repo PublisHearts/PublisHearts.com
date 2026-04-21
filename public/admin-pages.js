@@ -85,8 +85,23 @@ const visualPreviewShell = document.getElementById("visual-preview-shell");
 const visualPreviewFrame = document.getElementById("visual-preview-frame");
 const visualGeneratedCssEl = document.getElementById("visual-generated-css");
 const visualCurrentCssEl = document.getElementById("visual-current-css");
+const visualPageOptionsTitleEl = document.getElementById("visual-page-options-title");
+const visualPageOptionsCopyEl = document.getElementById("visual-page-options-copy");
+const visualPageControlsEl = document.getElementById("visual-page-controls");
 const visualSectionOrderList = document.getElementById("visual-section-order-list");
 const visualSectionOrderMessageEl = document.getElementById("visual-section-order-message");
+const visualSectionStyleTargetSelect = document.getElementById("visual-section-style-target");
+const visualSectionHiddenInput = document.getElementById("visual-section-hidden");
+const visualSectionBgInput = document.getElementById("visual-section-bg");
+const visualSectionInkInput = document.getElementById("visual-section-ink");
+const visualSectionRadiusInput = document.getElementById("visual-section-radius");
+const visualSectionPadTopInput = document.getElementById("visual-section-pad-top");
+const visualSectionPadBottomInput = document.getElementById("visual-section-pad-bottom");
+const visualSectionAlignSelect = document.getElementById("visual-section-align");
+const visualSectionRadiusValueEl = document.getElementById("visual-section-radius-value");
+const visualSectionPadTopValueEl = document.getElementById("visual-section-pad-top-value");
+const visualSectionPadBottomValueEl = document.getElementById("visual-section-pad-bottom-value");
+const visualSectionResetBtn = document.getElementById("visual-section-reset-btn");
 const applyVisualSelectedBtn = document.getElementById("apply-visual-selected-btn");
 const applyVisualGlobalBtn = document.getElementById("apply-visual-global-btn");
 const clearVisualSelectedBtn = document.getElementById("clear-visual-selected-btn");
@@ -146,6 +161,419 @@ const previewPathByPageKey = Object.freeze({
   pos: "/pos.html",
   fulfillment: "/fulfillment.html",
   completedOrders: "/completed-orders.html"
+});
+
+const commonPageOptionSchema = Object.freeze([
+  {
+    key: "pageAccent",
+    label: "Page Accent Color",
+    type: "color",
+    defaultValue: "#ad4f2d"
+  },
+  {
+    key: "pageBackground",
+    label: "Page Background Color",
+    type: "color",
+    defaultValue: "#f5efe5"
+  },
+  {
+    key: "pageInk",
+    label: "Page Text Color",
+    type: "color",
+    defaultValue: "#221d18"
+  },
+  {
+    key: "panelTone",
+    label: "Panel/Card Color",
+    type: "color",
+    defaultValue: "#fffefb"
+  },
+  {
+    key: "sectionGapScale",
+    label: "Spacing Scale",
+    type: "range",
+    min: 70,
+    max: 150,
+    step: 1,
+    unit: "%",
+    defaultValue: 100
+  },
+  {
+    key: "headerMode",
+    label: "Header Layout",
+    type: "select",
+    defaultValue: "normal",
+    options: Object.freeze([
+      { value: "normal", label: "Normal" },
+      { value: "compact", label: "Compact" },
+      { value: "centered", label: "Centered" }
+    ])
+  }
+]);
+
+const pageOptionSchemaByPage = Object.freeze({
+  home: Object.freeze([
+    {
+      key: "heroAlign",
+      label: "Hero Alignment",
+      type: "select",
+      defaultValue: "left",
+      options: Object.freeze([
+        { value: "left", label: "Left" },
+        { value: "center", label: "Center" }
+      ])
+    },
+    {
+      key: "entryButtonsLayout",
+      label: "Entry Buttons Layout",
+      type: "select",
+      defaultValue: "row",
+      options: Object.freeze([
+        { value: "row", label: "Row" },
+        { value: "stack", label: "Stacked" }
+      ])
+    }
+  ]),
+  shop: Object.freeze([
+    {
+      key: "heroAlign",
+      label: "Hero Alignment",
+      type: "select",
+      defaultValue: "left",
+      options: Object.freeze([
+        { value: "left", label: "Left" },
+        { value: "center", label: "Center" }
+      ])
+    },
+    {
+      key: "catalogColumns",
+      label: "Catalog Columns",
+      type: "range",
+      min: 2,
+      max: 5,
+      step: 1,
+      unit: " cols",
+      defaultValue: 4
+    },
+    {
+      key: "showCustomStoryPromo",
+      label: "Show Custom Story Promo",
+      type: "toggle",
+      defaultValue: true
+    },
+    {
+      key: "showPromises",
+      label: "Show Promise Cards",
+      type: "toggle",
+      defaultValue: true
+    }
+  ]),
+  login: Object.freeze([
+    {
+      key: "showHero",
+      label: "Show Hero Section",
+      type: "toggle",
+      defaultValue: true
+    },
+    {
+      key: "formWidth",
+      label: "Form Card Width",
+      type: "range",
+      min: 360,
+      max: 860,
+      step: 10,
+      unit: " px",
+      defaultValue: 620
+    }
+  ]),
+  signup: Object.freeze([
+    {
+      key: "showHero",
+      label: "Show Hero Section",
+      type: "toggle",
+      defaultValue: true
+    },
+    {
+      key: "formWidth",
+      label: "Form Card Width",
+      type: "range",
+      min: 360,
+      max: 860,
+      step: 10,
+      unit: " px",
+      defaultValue: 700
+    }
+  ]),
+  account: Object.freeze([
+    {
+      key: "planColumns",
+      label: "Membership Plan Columns",
+      type: "range",
+      min: 1,
+      max: 4,
+      step: 1,
+      unit: " cols",
+      defaultValue: 3
+    },
+    {
+      key: "contentColumns",
+      label: "E-Store/Community Columns",
+      type: "range",
+      min: 1,
+      max: 2,
+      step: 1,
+      unit: " cols",
+      defaultValue: 2
+    },
+    {
+      key: "showCommunity",
+      label: "Show Community Card",
+      type: "toggle",
+      defaultValue: true
+    },
+    {
+      key: "showOrders",
+      label: "Show Orders Section",
+      type: "toggle",
+      defaultValue: true
+    }
+  ]),
+  about: Object.freeze([
+    {
+      key: "articleWidth",
+      label: "Content Width",
+      type: "range",
+      min: 620,
+      max: 1100,
+      step: 10,
+      unit: " px",
+      defaultValue: 900
+    },
+    {
+      key: "bodyTextSize",
+      label: "Body Text Size",
+      type: "range",
+      min: 90,
+      max: 125,
+      step: 1,
+      unit: "%",
+      defaultValue: 100
+    }
+  ]),
+  delivery: Object.freeze([
+    {
+      key: "articleWidth",
+      label: "Content Width",
+      type: "range",
+      min: 620,
+      max: 1100,
+      step: 10,
+      unit: " px",
+      defaultValue: 920
+    },
+    {
+      key: "bodyTextSize",
+      label: "Body Text Size",
+      type: "range",
+      min: 90,
+      max: 125,
+      step: 1,
+      unit: "%",
+      defaultValue: 100
+    }
+  ]),
+  customStory: Object.freeze([
+    {
+      key: "storyLayout",
+      label: "Story Layout",
+      type: "select",
+      defaultValue: "split",
+      options: Object.freeze([
+        { value: "split", label: "Split Columns" },
+        { value: "stack", label: "Stacked" }
+      ])
+    },
+    {
+      key: "formFirst",
+      label: "Show Form First",
+      type: "toggle",
+      defaultValue: false
+    },
+    {
+      key: "showFooter",
+      label: "Show Footer",
+      type: "toggle",
+      defaultValue: true
+    }
+  ]),
+  success: Object.freeze([
+    {
+      key: "statusCardWidth",
+      label: "Status Card Width",
+      type: "range",
+      min: 420,
+      max: 900,
+      step: 10,
+      unit: " px",
+      defaultValue: 680
+    },
+    {
+      key: "showHeader",
+      label: "Show Header",
+      type: "toggle",
+      defaultValue: true
+    }
+  ]),
+  cancel: Object.freeze([
+    {
+      key: "statusCardWidth",
+      label: "Status Card Width",
+      type: "range",
+      min: 420,
+      max: 900,
+      step: 10,
+      unit: " px",
+      defaultValue: 620
+    },
+    {
+      key: "showHeader",
+      label: "Show Header",
+      type: "toggle",
+      defaultValue: false
+    }
+  ]),
+  admin: Object.freeze([
+    {
+      key: "toolbarMode",
+      label: "Toolbar Layout",
+      type: "select",
+      defaultValue: "row",
+      options: Object.freeze([
+        { value: "row", label: "Row" },
+        { value: "stack", label: "Stacked" }
+      ])
+    },
+    {
+      key: "adminSectionGap",
+      label: "Section Gap",
+      type: "range",
+      min: 12,
+      max: 36,
+      step: 1,
+      unit: " px",
+      defaultValue: 16
+    }
+  ]),
+  adminPages: Object.freeze([
+    {
+      key: "toolbarMode",
+      label: "Toolbar Layout",
+      type: "select",
+      defaultValue: "row",
+      options: Object.freeze([
+        { value: "row", label: "Row" },
+        { value: "stack", label: "Stacked" }
+      ])
+    },
+    {
+      key: "adminSectionGap",
+      label: "Section Gap",
+      type: "range",
+      min: 12,
+      max: 36,
+      step: 1,
+      unit: " px",
+      defaultValue: 16
+    },
+    {
+      key: "showAdvancedCss",
+      label: "Show Advanced CSS Box",
+      type: "toggle",
+      defaultValue: false
+    }
+  ]),
+  pos: Object.freeze([
+    {
+      key: "posLayout",
+      label: "POS Layout",
+      type: "select",
+      defaultValue: "split",
+      options: Object.freeze([
+        { value: "split", label: "Split" },
+        { value: "stack", label: "Stacked" }
+      ])
+    },
+    {
+      key: "posCatalogColumns",
+      label: "Catalog Columns",
+      type: "range",
+      min: 1,
+      max: 4,
+      step: 1,
+      unit: " cols",
+      defaultValue: 2
+    },
+    {
+      key: "showReceiptPanel",
+      label: "Show Receipt Panel",
+      type: "toggle",
+      defaultValue: true
+    }
+  ]),
+  fulfillment: Object.freeze([
+    {
+      key: "showEditionSidebar",
+      label: "Show Edition Sidebar",
+      type: "toggle",
+      defaultValue: true
+    },
+    {
+      key: "searchWidth",
+      label: "Search Box Width",
+      type: "range",
+      min: 220,
+      max: 480,
+      step: 10,
+      unit: " px",
+      defaultValue: 320
+    }
+  ]),
+  completedOrders: Object.freeze([
+    {
+      key: "showCustomerSummary",
+      label: "Show Customer Summary",
+      type: "toggle",
+      defaultValue: true
+    },
+    {
+      key: "searchWidth",
+      label: "Search Box Width",
+      type: "range",
+      min: 220,
+      max: 480,
+      step: 10,
+      unit: " px",
+      defaultValue: 320
+    }
+  ])
+});
+
+const pageOptionCopyByPage = Object.freeze({
+  home: "Home controls for hero and entry button layout.",
+  shop: "Shop controls for catalog columns, promo visibility, and promise cards.",
+  login: "Login controls for hero visibility and form width.",
+  signup: "Signup controls for hero visibility and form width.",
+  account: "Account controls for membership grids, community visibility, and order section visibility.",
+  about: "About controls for content width and reading size.",
+  delivery: "Delivery controls for content width and reading size.",
+  customStory: "Custom story controls for layout direction, form priority, and footer visibility.",
+  success: "Checkout success controls for card width and header visibility.",
+  cancel: "Checkout cancel controls for card width and header visibility.",
+  admin: "Admin controls for toolbar and section spacing.",
+  adminPages: "Page Editor controls for toolbar spacing and advanced box visibility.",
+  pos: "POS controls for layout, catalog density, and receipt panel visibility.",
+  fulfillment: "Fulfillment controls for edition sidebar visibility and search width.",
+  completedOrders: "Completed orders controls for summary visibility and search width."
 });
 
 const visualPresets = Object.freeze({
@@ -224,6 +652,9 @@ const state = {
   publishBusy: false,
   visualPreviewDevice: "desktop",
   sectionOrderByPage: {},
+  pageSpecificOptionsByPage: {},
+  sectionStylesByPage: {},
+  selectedSectionStyleTargetByPage: {},
   availableSectionsByPage: {},
   draggingSectionId: "",
   dragOverSectionId: ""
@@ -273,7 +704,12 @@ function setDesignBusy(isBusy) {
   if (visualRefreshPreviewBtn) {
     visualRefreshPreviewBtn.disabled = isBusy;
   }
+  if (visualSectionResetBtn) {
+    visualSectionResetBtn.disabled = isBusy;
+  }
+  renderVisualPageControls();
   renderVisualSectionOrderList();
+  renderVisualSectionDesigner();
 }
 
 function setPublishBusy(isBusy) {
@@ -325,6 +761,239 @@ function withAlpha(hex, alpha = 1) {
   }
   const safeAlpha = clampNumber(alpha, 0, 1, 1);
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${safeAlpha.toFixed(3)})`;
+}
+
+function normalizeHexColor(value, fallback = "#000000") {
+  const candidate = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(candidate)) {
+    return candidate;
+  }
+  return String(fallback || "#000000").toLowerCase();
+}
+
+function parseBoolean(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "0", "no", "off", ""].includes(normalized)) {
+      return false;
+    }
+  }
+  return fallback;
+}
+
+function normalizeOptionalHexColor(value) {
+  const candidate = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!candidate) {
+    return "";
+  }
+  if (/^#[0-9a-f]{6}$/.test(candidate)) {
+    return candidate;
+  }
+  return "";
+}
+
+function getDefaultSectionStyle() {
+  return {
+    hidden: false,
+    backgroundColor: "",
+    textColor: "",
+    radius: 0,
+    padTop: 0,
+    padBottom: 0,
+    align: "default"
+  };
+}
+
+function normalizeSectionStyleEntry(style = {}) {
+  const base = getDefaultSectionStyle();
+  const alignValue = String(style.align || base.align).trim().toLowerCase();
+  return {
+    hidden: parseBoolean(style.hidden, base.hidden),
+    backgroundColor: normalizeOptionalHexColor(style.backgroundColor),
+    textColor: normalizeOptionalHexColor(style.textColor),
+    radius: clampNumber(style.radius, 0, 40, base.radius),
+    padTop: clampNumber(style.padTop, 0, 120, base.padTop),
+    padBottom: clampNumber(style.padBottom, 0, 140, base.padBottom),
+    align: ["default", "left", "center", "right"].includes(alignValue) ? alignValue : base.align
+  };
+}
+
+function isDefaultSectionStyle(style = {}) {
+  const normalized = normalizeSectionStyleEntry(style);
+  return (
+    !normalized.hidden &&
+    !normalized.backgroundColor &&
+    !normalized.textColor &&
+    normalized.radius === 0 &&
+    normalized.padTop === 0 &&
+    normalized.padBottom === 0 &&
+    normalized.align === "default"
+  );
+}
+
+function normalizeSectionStyleMap(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const normalized = {};
+  Object.entries(source).forEach(([key, entry]) => {
+    const sectionId = String(key || "").trim();
+    if (!sectionId) {
+      return;
+    }
+    const style = normalizeSectionStyleEntry(entry || {});
+    if (!isDefaultSectionStyle(style)) {
+      normalized[sectionId] = style;
+    }
+  });
+  return normalized;
+}
+
+function getSectionStylesForPage(pageKey) {
+  const key = String(pageKey || "").trim();
+  const normalized = normalizeSectionStyleMap(state.sectionStylesByPage[key]);
+  state.sectionStylesByPage[key] = normalized;
+  return normalized;
+}
+
+function setSectionStylesForPage(pageKey, styles = {}) {
+  const key = String(pageKey || "").trim();
+  state.sectionStylesByPage[key] = normalizeSectionStyleMap(styles);
+}
+
+function getSectionStyleForPageSection(pageKey, sectionId) {
+  const sectionKey = String(sectionId || "").trim();
+  if (!sectionKey) {
+    return getDefaultSectionStyle();
+  }
+  const styles = getSectionStylesForPage(pageKey);
+  return normalizeSectionStyleEntry(styles[sectionKey] || {});
+}
+
+function upsertSectionStyleForPageSection(pageKey, sectionId, stylePatch = {}) {
+  const sectionKey = String(sectionId || "").trim();
+  if (!sectionKey) {
+    return;
+  }
+  const styles = { ...getSectionStylesForPage(pageKey) };
+  const merged = normalizeSectionStyleEntry({
+    ...(styles[sectionKey] || {}),
+    ...(stylePatch || {})
+  });
+  if (isDefaultSectionStyle(merged)) {
+    delete styles[sectionKey];
+  } else {
+    styles[sectionKey] = merged;
+  }
+  setSectionStylesForPage(pageKey, styles);
+}
+
+function getSelectedSectionStyleTarget(pageKey) {
+  return String(state.selectedSectionStyleTargetByPage[pageKey] || "").trim();
+}
+
+function setSelectedSectionStyleTarget(pageKey, sectionId) {
+  const key = String(pageKey || "").trim();
+  state.selectedSectionStyleTargetByPage[key] = String(sectionId || "").trim();
+}
+
+function getPageOptionSchema(pageKey) {
+  const key = String(pageKey || "").trim();
+  return [...commonPageOptionSchema, ...(pageOptionSchemaByPage[key] || [])];
+}
+
+function getPageOptionDefinition(pageKey, optionKey) {
+  const key = String(optionKey || "").trim();
+  return getPageOptionSchema(pageKey).find((entry) => entry.key === key) || null;
+}
+
+function getPageOptionDefaultValue(definition) {
+  if (!definition || typeof definition !== "object") {
+    return undefined;
+  }
+  const controls = readVisualControlValues();
+  if (definition.key === "pageAccent") {
+    return controls.themeAccent;
+  }
+  if (definition.key === "pageBackground") {
+    return controls.themeBackground;
+  }
+  if (definition.key === "pageInk") {
+    return controls.themeInk;
+  }
+  if (definition.key === "panelTone") {
+    return shiftHex(controls.themeBackground, 10);
+  }
+  return definition.defaultValue;
+}
+
+function normalizePageOptionValue(definition, value, defaultOverride = undefined) {
+  if (!definition || typeof definition !== "object") {
+    return value;
+  }
+  const fallback = defaultOverride !== undefined ? defaultOverride : definition.defaultValue;
+  if (definition.type === "color") {
+    return normalizeHexColor(value, normalizeHexColor(fallback, "#000000"));
+  }
+  if (definition.type === "range") {
+    return clampNumber(value, Number(definition.min), Number(definition.max), Number(fallback));
+  }
+  if (definition.type === "select") {
+    const options = Array.isArray(definition.options) ? definition.options : [];
+    const allowedValues = options.map((entry) => String(entry.value));
+    const candidate = String(value ?? "");
+    if (allowedValues.includes(candidate)) {
+      return candidate;
+    }
+    return String(fallback || allowedValues[0] || "");
+  }
+  if (definition.type === "toggle") {
+    return parseBoolean(value, Boolean(fallback));
+  }
+  return value === undefined ? fallback : value;
+}
+
+function normalizePageOptionsForPage(pageKey, options = {}) {
+  const normalized = {};
+  getPageOptionSchema(pageKey).forEach((definition) => {
+    const defaultValue = getPageOptionDefaultValue(definition);
+    const rawValue =
+      options && Object.prototype.hasOwnProperty.call(options, definition.key) ? options[definition.key] : defaultValue;
+    normalized[definition.key] = normalizePageOptionValue(definition, rawValue, defaultValue);
+  });
+  return normalized;
+}
+
+function getPageOptionsForPage(pageKey) {
+  const key = String(pageKey || "").trim();
+  const existing = state.pageSpecificOptionsByPage[key];
+  const normalized = normalizePageOptionsForPage(key, existing || {});
+  state.pageSpecificOptionsByPage[key] = normalized;
+  return normalized;
+}
+
+function setPageOptionsForPage(pageKey, options = {}) {
+  const key = String(pageKey || "").trim();
+  state.pageSpecificOptionsByPage[key] = normalizePageOptionsForPage(key, options);
+}
+
+function formatPageOptionRangeValue(definition, value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return String(value ?? "");
+  }
+  return `${numeric}${definition.unit || ""}`;
 }
 
 function getSelectedVisualPageKey() {
@@ -416,7 +1085,7 @@ function setSectionOrderForPage(pageKey, orderList) {
   state.sectionOrderByPage[key] = normalizeSectionOrder(orderList);
 }
 
-function buildVisualMetadata(controlValues, sectionOrder = []) {
+function buildVisualMetadata(controlValues, sectionOrder = [], pageOptions = {}, sectionStyles = {}) {
   const normalizedOrder = normalizeSectionOrder(sectionOrder);
   const metadata = {
     backgroundStyle: controlValues.backgroundStyle,
@@ -434,6 +1103,13 @@ function buildVisualMetadata(controlValues, sectionOrder = []) {
   if (normalizedOrder.length > 0) {
     metadata.sectionOrder = normalizedOrder;
   }
+  if (pageOptions && typeof pageOptions === "object" && Object.keys(pageOptions).length > 0) {
+    metadata.pageOptions = pageOptions;
+  }
+  const normalizedSectionStyles = normalizeSectionStyleMap(sectionStyles);
+  if (Object.keys(normalizedSectionStyles).length > 0) {
+    metadata.sectionStyles = normalizedSectionStyles;
+  }
   return `/* visual-editor:${JSON.stringify(metadata)} */`;
 }
 
@@ -450,6 +1126,9 @@ function readVisualMetadata(cssText) {
     }
     if (parsed.sectionOrder !== undefined) {
       parsed.sectionOrder = normalizeSectionOrder(parsed.sectionOrder);
+    }
+    if (parsed.sectionStyles !== undefined) {
+      parsed.sectionStyles = normalizeSectionStyleMap(parsed.sectionStyles);
     }
     return parsed;
   } catch {
@@ -484,6 +1163,24 @@ function upsertPageVisualMetadata(pageKey, updates = {}) {
     delete merged.sectionOrder;
   }
 
+  if (updates.pageOptions !== undefined) {
+    merged.pageOptions = normalizePageOptionsForPage(pageKey, updates.pageOptions || {});
+  } else if (existingMetadata.pageOptions !== undefined) {
+    merged.pageOptions = normalizePageOptionsForPage(pageKey, existingMetadata.pageOptions || {});
+  }
+  if (!merged.pageOptions || Object.keys(merged.pageOptions).length === 0) {
+    delete merged.pageOptions;
+  }
+
+  if (updates.sectionStyles !== undefined) {
+    merged.sectionStyles = normalizeSectionStyleMap(updates.sectionStyles || {});
+  } else if (existingMetadata.sectionStyles !== undefined) {
+    merged.sectionStyles = normalizeSectionStyleMap(existingMetadata.sectionStyles || {});
+  }
+  if (!merged.sectionStyles || Object.keys(merged.sectionStyles).length === 0) {
+    delete merged.sectionStyles;
+  }
+
   const rebuiltMetadata = `/* visual-editor:${JSON.stringify(merged)} */`;
   const cssWithoutMetadata = removeVisualMetadataComment(existingCss);
   input.value = cssWithoutMetadata ? `${rebuiltMetadata}\n${cssWithoutMetadata}` : rebuiltMetadata;
@@ -513,8 +1210,424 @@ function buildVisualBackground(controlValues, scopeSelector) {
   return `${scopeSelector} {\n  background:\n    radial-gradient(circle at 12% 8%, ${withAlpha(accent, 0.18)} 0%, transparent 34%),\n    radial-gradient(circle at 88% 18%, ${withAlpha(ink, 0.12)} 0%, transparent 34%),\n    linear-gradient(180deg, ${warmTop} 0%, ${warmBottom} 100%) !important;\n}`;
 }
 
+function buildHeaderModeCss(scope, headerMode) {
+  if (headerMode === "compact") {
+    return [
+      `${scope} .site-header .container {`,
+      `  padding-top: 0.28rem !important;`,
+      `  padding-bottom: 0.28rem !important;`,
+      `  min-height: auto !important;`,
+      `}`,
+      `${scope} .site-header .brand {`,
+      `  transform: scale(0.95);`,
+      `  transform-origin: left center;`,
+      `}`,
+      ""
+    ].join("\n");
+  }
+  if (headerMode === "centered") {
+    return [
+      `${scope} .site-header .container {`,
+      `  justify-content: center !important;`,
+      `  gap: 0.75rem !important;`,
+      `  flex-wrap: wrap !important;`,
+      `}`,
+      `${scope} .site-header .brand {`,
+      `  margin-inline: auto !important;`,
+      `}`,
+      `${scope} .site-header .header-actions {`,
+      `  width: 100%;`,
+      `  justify-content: center !important;`,
+      `}`,
+      ""
+    ].join("\n");
+  }
+  return "";
+}
+
+function buildPageSpecificCss(pageKey, pageOptions, scope) {
+  const cssBlocks = [];
+  const pushToggleDisplay = (selector, isVisible, fallbackDisplay = "block") => {
+    cssBlocks.push(
+      `${scope} ${selector} {`,
+      `  display: ${isVisible ? fallbackDisplay : "none"} !important;`,
+      `}`,
+      ""
+    );
+  };
+
+  if (pageKey === "home") {
+    if (pageOptions.heroAlign === "center") {
+      cssBlocks.push(
+        `${scope} .membership-hero {`,
+        `  text-align: center !important;`,
+        `}`,
+        `${scope} .membership-hero .eyebrow {`,
+        `  display: inline-block;`,
+        `  margin-inline: auto !important;`,
+        `}`,
+        `${scope} .membership-hero .membership-included-list {`,
+        `  display: inline-block;`,
+        `  text-align: left !important;`,
+        `}`,
+        ""
+      );
+    } else {
+      cssBlocks.push(
+        `${scope} .membership-hero {`,
+        `  text-align: left !important;`,
+        `}`,
+        ""
+      );
+    }
+
+    if (pageOptions.entryButtonsLayout === "stack") {
+      cssBlocks.push(
+        `${scope} [data-page-section-id="entry"] .membership-account-actions {`,
+        `  flex-direction: column !important;`,
+        `  align-items: stretch !important;`,
+        `}`,
+        ""
+      );
+    } else {
+      cssBlocks.push(
+        `${scope} [data-page-section-id="entry"] .membership-account-actions {`,
+        `  flex-direction: row !important;`,
+        `  align-items: center !important;`,
+        `}`,
+        ""
+      );
+    }
+  } else if (pageKey === "shop") {
+    if (pageOptions.heroAlign === "center") {
+      cssBlocks.push(
+        `${scope} [data-page-section-id="hero"] {`,
+        `  text-align: center !important;`,
+        `}`,
+        `${scope} [data-page-section-id="hero"] .primary-btn {`,
+        `  margin-inline: auto !important;`,
+        `}`,
+        ""
+      );
+    } else {
+      cssBlocks.push(
+        `${scope} [data-page-section-id="hero"] {`,
+        `  text-align: left !important;`,
+        `}`,
+        `${scope} [data-page-section-id="hero"] .primary-btn {`,
+        `  margin-inline: 0 !important;`,
+        `}`,
+        ""
+      );
+    }
+
+    const catalogColumns = clampNumber(pageOptions.catalogColumns, 2, 5, 4);
+    const tabletColumns = clampNumber(catalogColumns - 1, 1, 3, 2);
+    cssBlocks.push(
+      `${scope} .products-grid {`,
+      `  grid-template-columns: repeat(${catalogColumns}, minmax(0, 1fr)) !important;`,
+      `}`,
+      `@media (max-width: 980px) {`,
+      `  ${scope} .products-grid {`,
+      `    grid-template-columns: repeat(${tabletColumns}, minmax(0, 1fr)) !important;`,
+      `  }`,
+      `}`,
+      `@media (max-width: 720px) {`,
+      `  ${scope} .products-grid {`,
+      `    grid-template-columns: 1fr !important;`,
+      `  }`,
+      `}`,
+      ""
+    );
+
+    pushToggleDisplay(`[data-page-section-id="customStoryPromo"]`, pageOptions.showCustomStoryPromo, "block");
+    pushToggleDisplay(`[data-page-section-id="promises"]`, pageOptions.showPromises, "grid");
+  } else if (pageKey === "login" || pageKey === "signup") {
+    pushToggleDisplay(`[data-page-section-id="hero"]`, pageOptions.showHero, "block");
+    const formWidth = clampNumber(pageOptions.formWidth, 360, 860, pageKey === "signup" ? 700 : 620);
+    cssBlocks.push(
+      `${scope} [data-page-section-id="form"] {`,
+      `  width: min(${formWidth}px, calc(100vw - 2rem)) !important;`,
+      `  margin-inline: auto !important;`,
+      `}`,
+      ""
+    );
+  } else if (pageKey === "account") {
+    const planColumns = clampNumber(pageOptions.planColumns, 1, 4, 3);
+    const contentColumns = clampNumber(pageOptions.contentColumns, 1, 2, 2);
+    cssBlocks.push(
+      `${scope} #membership-plan-grid {`,
+      `  grid-template-columns: repeat(${planColumns}, minmax(0, 1fr)) !important;`,
+      `}`,
+      `${scope} .membership-content-grid {`,
+      `  grid-template-columns: repeat(${contentColumns}, minmax(0, 1fr)) !important;`,
+      `}`,
+      ""
+    );
+    if (pageOptions.showCommunity) {
+      cssBlocks.push(
+        `${scope} .membership-content-grid > .membership-card:has(#membership-community-list),`,
+        `${scope} .membership-content-grid > .membership-card:nth-child(2) {`,
+        `  display: grid !important;`,
+        `}`,
+        ""
+      );
+    } else {
+      cssBlocks.push(
+        `${scope} .membership-content-grid > .membership-card:has(#membership-community-list),`,
+        `${scope} .membership-content-grid > .membership-card:nth-child(2) {`,
+        `  display: none !important;`,
+        `}`,
+        ""
+      );
+    }
+    pushToggleDisplay(`[data-page-section-id="orders"]`, pageOptions.showOrders, "grid");
+  } else if (pageKey === "about" || pageKey === "delivery") {
+    const articleWidth = clampNumber(pageOptions.articleWidth, 620, 1100, pageKey === "about" ? 900 : 920);
+    const bodyTextSize = clampNumber(pageOptions.bodyTextSize, 90, 125, 100);
+    cssBlocks.push(
+      `${scope} .delivery-card {`,
+      `  width: min(${articleWidth}px, calc(100vw - 2rem)) !important;`,
+      `  margin-inline: auto !important;`,
+      `  font-size: ${bodyTextSize}% !important;`,
+      `}`,
+      ""
+    );
+  } else if (pageKey === "customStory") {
+    if (pageOptions.storyLayout === "stack") {
+      cssBlocks.push(
+        `${scope} .custom-story-layout {`,
+        `  grid-template-columns: 1fr !important;`,
+        `}`,
+        ""
+      );
+    } else {
+      cssBlocks.push(
+        `${scope} .custom-story-layout {`,
+        `  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;`,
+        `}`,
+        ""
+      );
+    }
+    if (pageOptions.formFirst) {
+      cssBlocks.push(
+        `${scope} .custom-story-form-card {`,
+        `  order: -1 !important;`,
+        `}`,
+        ""
+      );
+    } else {
+      cssBlocks.push(
+        `${scope} .custom-story-form-card {`,
+        `  order: 0 !important;`,
+        `}`,
+        ""
+      );
+    }
+    pushToggleDisplay(`.site-footer`, pageOptions.showFooter, "block");
+  } else if (pageKey === "success" || pageKey === "cancel") {
+    const statusCardWidth = clampNumber(pageOptions.statusCardWidth, 420, 900, pageKey === "success" ? 680 : 620);
+    cssBlocks.push(
+      `${scope} .status-card {`,
+      `  width: min(${statusCardWidth}px, calc(100vw - 2rem)) !important;`,
+      `}`,
+      ""
+    );
+    pushToggleDisplay(`.site-header`, pageOptions.showHeader, "block");
+  } else if (pageKey === "admin" || pageKey === "adminPages") {
+    if (pageOptions.toolbarMode === "stack") {
+      cssBlocks.push(
+        `${scope} .admin-toolbar {`,
+        `  flex-direction: column !important;`,
+        `  align-items: stretch !important;`,
+        `}`,
+        `${scope} .admin-toolbar-actions {`,
+        `  justify-content: flex-start !important;`,
+        `}`,
+        ""
+      );
+    } else {
+      cssBlocks.push(
+        `${scope} .admin-toolbar {`,
+        `  flex-direction: row !important;`,
+        `  align-items: flex-start !important;`,
+        `}`,
+        `${scope} .admin-toolbar-actions {`,
+        `  justify-content: flex-end !important;`,
+        `}`,
+        ""
+      );
+    }
+    const adminSectionGap = clampNumber(pageOptions.adminSectionGap, 12, 36, 16);
+    cssBlocks.push(
+      `${scope} .admin-panel {`,
+      `  gap: ${adminSectionGap}px !important;`,
+      `}`,
+      `${scope} .admin-section,`,
+      `${scope} .admin-form,`,
+      `${scope} .visual-editor {`,
+      `  gap: ${Math.max(8, Math.round(adminSectionGap * 0.55))}px !important;`,
+      `}`,
+      ""
+    );
+    if (pageKey === "adminPages") {
+      pushToggleDisplay(`#advanced-css-wrap`, pageOptions.showAdvancedCss, "grid");
+    }
+  } else if (pageKey === "pos") {
+    if (pageOptions.posLayout === "stack") {
+      cssBlocks.push(
+        `${scope} .pos-layout {`,
+        `  grid-template-columns: 1fr !important;`,
+        `}`,
+        `${scope} .pos-transaction-panel {`,
+        `  position: static !important;`,
+        `}`,
+        ""
+      );
+    } else {
+      cssBlocks.push(
+        `${scope} .pos-layout {`,
+        `  grid-template-columns: minmax(0, 1.25fr) minmax(330px, 430px) !important;`,
+        `}`,
+        `${scope} .pos-transaction-panel {`,
+        `  position: sticky !important;`,
+        `}`,
+        ""
+      );
+    }
+    const posColumns = clampNumber(pageOptions.posCatalogColumns, 1, 4, 2);
+    cssBlocks.push(
+      `${scope} .pos-products-grid {`,
+      `  grid-template-columns: repeat(${posColumns}, minmax(0, 1fr)) !important;`,
+      `}`,
+      `@media (max-width: 720px) {`,
+      `  ${scope} .pos-products-grid {`,
+      `    grid-template-columns: 1fr !important;`,
+      `  }`,
+      `}`,
+      ""
+    );
+    pushToggleDisplay(`.pos-receipt-panel`, pageOptions.showReceiptPanel, "block");
+  } else if (pageKey === "fulfillment") {
+    pushToggleDisplay(`.admin-edition-frame`, pageOptions.showEditionSidebar, "grid");
+    if (pageOptions.showEditionSidebar) {
+      cssBlocks.push(
+        `${scope} .admin-panel {`,
+        `  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) !important;`,
+        `}`,
+        `${scope} .admin-panel > :not(.admin-edition-frame) {`,
+        `  grid-column: 2 !important;`,
+        `}`,
+        ""
+      );
+    } else {
+      cssBlocks.push(
+        `${scope} .admin-panel {`,
+        `  grid-template-columns: minmax(0, 1fr) !important;`,
+        `}`,
+        `${scope} .admin-panel > :not(.admin-edition-frame) {`,
+        `  grid-column: 1 !important;`,
+        `}`,
+        ""
+      );
+    }
+    const searchWidth = clampNumber(pageOptions.searchWidth, 220, 480, 320);
+    cssBlocks.push(
+      `${scope} .admin-orders-search {`,
+      `  min-width: ${searchWidth}px !important;`,
+      `  width: min(100%, ${searchWidth}px) !important;`,
+      `}`,
+      ""
+    );
+  } else if (pageKey === "completedOrders") {
+    pushToggleDisplay(`#fulfillment-order-customers`, pageOptions.showCustomerSummary, "block");
+    const searchWidth = clampNumber(pageOptions.searchWidth, 220, 480, 320);
+    cssBlocks.push(
+      `${scope} .admin-orders-search {`,
+      `  min-width: ${searchWidth}px !important;`,
+      `  width: min(100%, ${searchWidth}px) !important;`,
+      `}`,
+      ""
+    );
+  }
+
+  return cssBlocks;
+}
+
+function escapeCssAttributeValue(value) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"');
+}
+
+function buildSectionStyleCss(pageKey, scope, sectionStyles = {}) {
+  const blocks = [];
+  const normalizedStyles = normalizeSectionStyleMap(sectionStyles);
+  Object.entries(normalizedStyles).forEach(([sectionId, style]) => {
+    const escapedId = escapeCssAttributeValue(sectionId);
+    const selector = `${scope} [data-page-section-id="${escapedId}"]`;
+    const rules = [];
+    if (style.hidden) {
+      rules.push(`display: none !important;`);
+    } else {
+      if (style.backgroundColor) {
+        rules.push(`background: ${style.backgroundColor} !important;`);
+      }
+      if (style.textColor) {
+        rules.push(`color: ${style.textColor} !important;`);
+      }
+      if (style.radius > 0) {
+        rules.push(`border-radius: ${Math.round(style.radius)}px !important;`);
+      }
+      if (style.padTop > 0) {
+        rules.push(`padding-top: ${Math.round(style.padTop)}px !important;`);
+      }
+      if (style.padBottom > 0) {
+        rules.push(`padding-bottom: ${Math.round(style.padBottom)}px !important;`);
+      }
+      if (style.align !== "default") {
+        rules.push(`text-align: ${style.align} !important;`);
+      }
+    }
+
+    if (rules.length > 0) {
+      blocks.push(`${selector} {`);
+      rules.forEach((rule) => {
+        blocks.push(`  ${rule}`);
+      });
+      blocks.push(`}`);
+      blocks.push("");
+    }
+
+    if (!style.hidden && style.textColor) {
+      blocks.push(
+        `${selector} h1,`,
+        `${selector} h2,`,
+        `${selector} h3,`,
+        `${selector} p,`,
+        `${selector} li,`,
+        `${selector} span,`,
+        `${selector} label,`,
+        `${selector} strong {`,
+        `  color: ${style.textColor} !important;`,
+        `}`,
+        ""
+      );
+    }
+  });
+  return blocks;
+}
+
 function buildVisualCss(pageKey = getSelectedVisualPageKey(), sectionOrderOverride = undefined) {
   const controlValues = readVisualControlValues();
+  const pageOptions = pageKey ? getPageOptionsForPage(pageKey) : {};
+  const sectionStyles = pageKey ? getSectionStylesForPage(pageKey) : {};
+  const effectiveAccent = normalizeHexColor(pageOptions.pageAccent, controlValues.themeAccent);
+  const effectiveAccentStrong = shiftHex(effectiveAccent, -28);
+  const effectiveBackground = normalizeHexColor(pageOptions.pageBackground, controlValues.themeBackground);
+  const effectiveInk = normalizeHexColor(pageOptions.pageInk, controlValues.themeInk);
+  const effectivePanel = normalizeHexColor(pageOptions.panelTone, "#fffefb");
+  const sectionGapScale = clampNumber(Number(pageOptions.sectionGapScale) / 100, 0.7, 1.5, 1);
   const scope = pageKey ? `body[data-page-key="${pageKey}"]` : "body";
   const headingScaleFactor = clampNumber(controlValues.headingScale / 100, 0.88, 1.3, 1.04);
   const buttonRadiusValue = Math.round(controlValues.buttonRadius) >= 78 ? "999px" : `${Math.round(controlValues.buttonRadius)}px`;
@@ -522,27 +1635,46 @@ function buildVisualCss(pageKey = getSelectedVisualPageKey(), sectionOrderOverri
   const shadowAlpha = clampNumber(0.05 + controlValues.shadowStrength / 280, 0.05, 0.42, 0.18);
   const shadowBlur = Math.round(12 + controlValues.shadowStrength * 0.38);
   const shadowDrop = `${Math.round(shadowBlur * 0.42)}px`;
-  const sectionGap = Math.round(controlValues.sectionGap);
+  const sectionGap = Math.round(controlValues.sectionGap * sectionGapScale);
+  const sectionGridGap = Math.max(10, Math.round(sectionGap * 0.64));
   const containerWidth = Math.round(controlValues.containerWidth);
   const generatedAt = new Date().toISOString();
 
-  const backgroundBlock = buildVisualBackground(controlValues, scope);
+  const backgroundBlock = buildVisualBackground(
+    {
+      ...controlValues,
+      themeAccent: effectiveAccent,
+      themeBackground: effectiveBackground,
+      themeInk: effectiveInk
+    },
+    scope
+  );
   const sectionOrder =
     sectionOrderOverride === undefined ? getSectionOrderForPage(pageKey) : normalizeSectionOrder(sectionOrderOverride);
-  const metadata = buildVisualMetadata(controlValues, sectionOrder);
+  const metadata = buildVisualMetadata(controlValues, sectionOrder, pageOptions, sectionStyles);
+  const headerModeCss = buildHeaderModeCss(scope, pageOptions.headerMode);
+  const pageSpecificCssBlocks = buildPageSpecificCss(pageKey, pageOptions, scope);
+  const sectionStyleBlocks = buildSectionStyleCss(pageKey, scope, sectionStyles);
 
   return [
     metadata,
     `/* generated:${generatedAt} */`,
     `${scope} {`,
-    `  --accent: ${controlValues.themeAccent} !important;`,
-    `  --accent-strong: ${controlValues.themeAccentStrong} !important;`,
-    `  --bg: ${controlValues.themeBackground} !important;`,
-    `  --ink: ${controlValues.themeInk} !important;`,
+    `  --accent: ${effectiveAccent} !important;`,
+    `  --accent-strong: ${effectiveAccentStrong} !important;`,
+    `  --bg: ${effectiveBackground} !important;`,
+    `  --ink: ${effectiveInk} !important;`,
     `  --radius-lg: ${Math.round(controlValues.cardRadius)}px !important;`,
     `  --radius-md: ${Math.max(8, Math.round(controlValues.cardRadius * 0.64))}px !important;`,
     `}`,
     backgroundBlock,
+    `${scope} .membership-shell,`,
+    `${scope} .delivery-wrap,`,
+    `${scope} .custom-story-page,`,
+    `${scope} .admin-shell,`,
+    `${scope} .pos-shell {`,
+    `  gap: ${sectionGridGap}px !important;`,
+    `}`,
     `${scope} .container {`,
     `  width: min(${containerWidth}px, calc(100vw - 2.4rem)) !important;`,
     `}`,
@@ -571,9 +1703,13 @@ function buildVisualCss(pageKey = getSelectedVisualPageKey(), sectionOrderOverri
     `${scope} .pos-catalog-panel,`,
     `${scope} .pos-transaction-card,`,
     `${scope} .pos-receipt-panel {`,
+    `  background: ${effectivePanel} !important;`,
     `  border-radius: ${Math.round(controlValues.cardRadius)}px !important;`,
-    `  box-shadow: 0 ${shadowDrop} ${shadowBlur}px ${withAlpha(controlValues.themeInk, shadowAlpha)} !important;`,
+    `  box-shadow: 0 ${shadowDrop} ${shadowBlur}px ${withAlpha(effectiveInk, shadowAlpha)} !important;`,
     `}`,
+    headerModeCss,
+    ...pageSpecificCssBlocks,
+    ...sectionStyleBlocks,
     `${scope} .primary-btn,`,
     `${scope} .ghost-btn,`,
     `${scope} .danger-btn,`,
@@ -613,6 +1749,304 @@ function refreshVisualRangeLabels() {
   setVisualRangeLabel(visualButtonRadiusValue, clampNumber(visualButtonRadiusInput?.value, 6, 80, 80));
   setVisualRangeLabel(visualShadowStrengthValue, clampNumber(visualShadowStrengthInput?.value, 0, 100, 35));
   setVisualRangeLabel(visualHeadingScaleValue, clampNumber(visualHeadingScaleInput?.value, 88, 130, 104));
+}
+
+function renderVisualPageControls() {
+  if (!visualPageControlsEl) {
+    return;
+  }
+
+  const pageKey = getSelectedVisualPageKey();
+  const pageLabel = getVisualPageLabel(pageKey);
+  if (visualPageOptionsTitleEl) {
+    visualPageOptionsTitleEl.textContent = `${pageLabel} Controls`;
+  }
+  if (visualPageOptionsCopyEl) {
+    visualPageOptionsCopyEl.textContent =
+      pageOptionCopyByPage[pageKey] || "Use these options to tailor layout and colors for this page.";
+  }
+
+  const schema = getPageOptionSchema(pageKey);
+  const options = getPageOptionsForPage(pageKey);
+  visualPageControlsEl.innerHTML = "";
+
+  if (schema.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "cart-item-sub";
+    empty.textContent = "No controls available for this page yet.";
+    visualPageControlsEl.appendChild(empty);
+    return;
+  }
+
+  const updateOption = (definition, input, valueEl = null) => {
+    const key = String(definition.key || "");
+    if (!key) {
+      return;
+    }
+    const nextOptions = {
+      ...getPageOptionsForPage(pageKey),
+      [key]: normalizePageOptionValue(definition, definition.type === "toggle" ? input.checked : input.value)
+    };
+    setPageOptionsForPage(pageKey, nextOptions);
+    upsertPageVisualMetadata(pageKey, { pageOptions: nextOptions });
+
+    if (valueEl && definition.type === "range") {
+      valueEl.textContent = formatPageOptionRangeValue(definition, nextOptions[key]);
+    }
+
+    updateVisualGeneratedCssPreview();
+    applyVisualCssToPreview();
+    updateVisualCurrentCssSnapshot();
+  };
+
+  schema.forEach((definition) => {
+    const key = String(definition.key || "").trim();
+    if (!key) {
+      return;
+    }
+    const value = options[key];
+
+    if (definition.type === "toggle") {
+      const toggleLabel = document.createElement("label");
+      toggleLabel.className = "checkbox-row";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = Boolean(value);
+      input.disabled = state.designBusy;
+      input.addEventListener("change", () => {
+        updateOption(definition, input);
+      });
+      toggleLabel.append(input, document.createTextNode(definition.label));
+      visualPageControlsEl.appendChild(toggleLabel);
+      return;
+    }
+
+    const label = document.createElement("label");
+    label.textContent = definition.label;
+
+    if (definition.type === "select") {
+      const select = document.createElement("select");
+      (definition.options || []).forEach((option) => {
+        const optionEl = document.createElement("option");
+        optionEl.value = String(option.value);
+        optionEl.textContent = String(option.label || option.value);
+        select.appendChild(optionEl);
+      });
+      select.value = String(value ?? definition.defaultValue ?? "");
+      select.disabled = state.designBusy;
+      select.addEventListener("change", () => {
+        updateOption(definition, select);
+      });
+      label.appendChild(select);
+      visualPageControlsEl.appendChild(label);
+      return;
+    }
+
+    if (definition.type === "color") {
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      colorInput.value = normalizeHexColor(value, definition.defaultValue);
+      colorInput.disabled = state.designBusy;
+      colorInput.addEventListener("input", () => {
+        updateOption(definition, colorInput);
+      });
+      colorInput.addEventListener("change", () => {
+        updateOption(definition, colorInput);
+      });
+      label.appendChild(colorInput);
+      visualPageControlsEl.appendChild(label);
+      return;
+    }
+
+    if (definition.type === "range") {
+      const rangeInput = document.createElement("input");
+      rangeInput.type = "range";
+      rangeInput.min = String(definition.min);
+      rangeInput.max = String(definition.max);
+      rangeInput.step = String(definition.step || 1);
+      rangeInput.value = String(clampNumber(value, Number(definition.min), Number(definition.max), Number(definition.defaultValue)));
+      rangeInput.disabled = state.designBusy;
+
+      const caption = document.createElement("span");
+      caption.className = "range-caption";
+      caption.textContent = formatPageOptionRangeValue(definition, rangeInput.value);
+
+      rangeInput.addEventListener("input", () => {
+        updateOption(definition, rangeInput, caption);
+      });
+      rangeInput.addEventListener("change", () => {
+        updateOption(definition, rangeInput, caption);
+      });
+
+      label.append(rangeInput, caption);
+      visualPageControlsEl.appendChild(label);
+      return;
+    }
+  });
+}
+
+function setVisualSectionStyleRangeLabels() {
+  setVisualRangeLabel(visualSectionRadiusValueEl, clampNumber(visualSectionRadiusInput?.value, 0, 40, 0));
+  setVisualRangeLabel(visualSectionPadTopValueEl, clampNumber(visualSectionPadTopInput?.value, 0, 120, 0));
+  setVisualRangeLabel(visualSectionPadBottomValueEl, clampNumber(visualSectionPadBottomInput?.value, 0, 140, 0));
+}
+
+function setVisualSectionStyleControlsDisabled(isDisabled) {
+  if (visualSectionStyleTargetSelect) {
+    visualSectionStyleTargetSelect.disabled = isDisabled;
+  }
+  if (visualSectionHiddenInput) {
+    visualSectionHiddenInput.disabled = isDisabled;
+  }
+  if (visualSectionBgInput) {
+    visualSectionBgInput.disabled = isDisabled;
+  }
+  if (visualSectionInkInput) {
+    visualSectionInkInput.disabled = isDisabled;
+  }
+  if (visualSectionRadiusInput) {
+    visualSectionRadiusInput.disabled = isDisabled;
+  }
+  if (visualSectionPadTopInput) {
+    visualSectionPadTopInput.disabled = isDisabled;
+  }
+  if (visualSectionPadBottomInput) {
+    visualSectionPadBottomInput.disabled = isDisabled;
+  }
+  if (visualSectionAlignSelect) {
+    visualSectionAlignSelect.disabled = isDisabled;
+  }
+  if (visualSectionResetBtn) {
+    visualSectionResetBtn.disabled = isDisabled || state.designBusy;
+  }
+}
+
+function renderVisualSectionDesigner() {
+  if (!visualSectionStyleTargetSelect) {
+    return;
+  }
+  const pageKey = getSelectedVisualPageKey();
+  const sections = getAvailableSectionsForPage(pageKey);
+  const selected = getSelectedSectionStyleTarget(pageKey);
+  const resolvedTarget = sections.some((entry) => entry.id === selected) ? selected : sections[0]?.id || "";
+  setSelectedSectionStyleTarget(pageKey, resolvedTarget);
+
+  const beforeValue = visualSectionStyleTargetSelect.value;
+  visualSectionStyleTargetSelect.innerHTML = "";
+  sections.forEach((section) => {
+    const option = document.createElement("option");
+    option.value = section.id;
+    option.textContent = section.label;
+    visualSectionStyleTargetSelect.appendChild(option);
+  });
+  visualSectionStyleTargetSelect.value = resolvedTarget;
+  if (!resolvedTarget && beforeValue) {
+    visualSectionStyleTargetSelect.value = "";
+  }
+
+  if (!resolvedTarget) {
+    if (visualSectionHiddenInput) {
+      visualSectionHiddenInput.checked = false;
+    }
+    if (visualSectionBgInput) {
+      visualSectionBgInput.value = "#fffefb";
+    }
+    if (visualSectionInkInput) {
+      visualSectionInkInput.value = "#221d18";
+    }
+    if (visualSectionRadiusInput) {
+      visualSectionRadiusInput.value = "0";
+    }
+    if (visualSectionPadTopInput) {
+      visualSectionPadTopInput.value = "0";
+    }
+    if (visualSectionPadBottomInput) {
+      visualSectionPadBottomInput.value = "0";
+    }
+    if (visualSectionAlignSelect) {
+      visualSectionAlignSelect.value = "default";
+    }
+    setVisualSectionStyleRangeLabels();
+    setVisualSectionStyleControlsDisabled(true);
+    return;
+  }
+
+  const style = getSectionStyleForPageSection(pageKey, resolvedTarget);
+  const baseControls = readVisualControlValues();
+  if (visualSectionHiddenInput) {
+    visualSectionHiddenInput.checked = Boolean(style.hidden);
+  }
+  if (visualSectionBgInput) {
+    visualSectionBgInput.value = style.backgroundColor || normalizeHexColor(pageOptionsFallbackColor(pageKey, "panelTone", baseControls.themeBackground), "#fffefb");
+  }
+  if (visualSectionInkInput) {
+    visualSectionInkInput.value = style.textColor || normalizeHexColor(pageOptionsFallbackColor(pageKey, "pageInk", baseControls.themeInk), "#221d18");
+  }
+  if (visualSectionRadiusInput) {
+    visualSectionRadiusInput.value = String(style.radius);
+  }
+  if (visualSectionPadTopInput) {
+    visualSectionPadTopInput.value = String(style.padTop);
+  }
+  if (visualSectionPadBottomInput) {
+    visualSectionPadBottomInput.value = String(style.padBottom);
+  }
+  if (visualSectionAlignSelect) {
+    visualSectionAlignSelect.value = style.align;
+  }
+  setVisualSectionStyleRangeLabels();
+  setVisualSectionStyleControlsDisabled(state.designBusy);
+}
+
+function pageOptionsFallbackColor(pageKey, optionKey, fallbackColor) {
+  const definition = getPageOptionDefinition(pageKey, optionKey);
+  const defaultValue = getPageOptionDefaultValue(definition);
+  return normalizeHexColor(defaultValue, fallbackColor);
+}
+
+function applyVisualSectionStyleDraft() {
+  const pageKey = getSelectedVisualPageKey();
+  const sectionId = String(visualSectionStyleTargetSelect?.value || "").trim();
+  if (!sectionId) {
+    return;
+  }
+
+  const nextStyle = normalizeSectionStyleEntry({
+    hidden: Boolean(visualSectionHiddenInput?.checked),
+    backgroundColor: normalizeOptionalHexColor(visualSectionBgInput?.value),
+    textColor: normalizeOptionalHexColor(visualSectionInkInput?.value),
+    radius: clampNumber(visualSectionRadiusInput?.value, 0, 40, 0),
+    padTop: clampNumber(visualSectionPadTopInput?.value, 0, 120, 0),
+    padBottom: clampNumber(visualSectionPadBottomInput?.value, 0, 140, 0),
+    align: String(visualSectionAlignSelect?.value || "default")
+  });
+
+  upsertSectionStyleForPageSection(pageKey, sectionId, nextStyle);
+  upsertPageVisualMetadata(pageKey, {
+    sectionStyles: getSectionStylesForPage(pageKey)
+  });
+  setVisualSectionStyleRangeLabels();
+  updateVisualGeneratedCssPreview();
+  applyVisualCssToPreview();
+  updateVisualCurrentCssSnapshot();
+}
+
+function resetVisualSectionStyleDraft() {
+  const pageKey = getSelectedVisualPageKey();
+  const sectionId = String(visualSectionStyleTargetSelect?.value || "").trim();
+  if (!sectionId) {
+    return;
+  }
+  const styles = { ...getSectionStylesForPage(pageKey) };
+  delete styles[sectionId];
+  setSectionStylesForPage(pageKey, styles);
+  upsertPageVisualMetadata(pageKey, {
+    sectionStyles: getSectionStylesForPage(pageKey)
+  });
+  renderVisualSectionDesigner();
+  updateVisualGeneratedCssPreview();
+  applyVisualCssToPreview();
+  updateVisualCurrentCssSnapshot();
 }
 
 function getPreviewSectionDescriptors() {
@@ -937,13 +2371,30 @@ function applyVisualMetadataIfPresent() {
   const pageKey = getSelectedVisualPageKey();
   const selectedCss = String(pageCssInputByKey[pageKey]?.value || "");
   const globalCss = String(siteInputs.globalCustomCss?.value || "");
-  const metadata = readVisualMetadata(selectedCss) || readVisualMetadata(globalCss);
+  const selectedMetadata = readVisualMetadata(selectedCss);
+  const globalMetadata = readVisualMetadata(globalCss);
+  const metadata = selectedMetadata || globalMetadata;
   if (metadata) {
     setVisualControlValues(metadata);
-    if (Array.isArray(metadata.sectionOrder)) {
-      setSectionOrderForPage(pageKey, metadata.sectionOrder);
-    }
   }
+
+  if (Array.isArray(selectedMetadata?.sectionOrder)) {
+    setSectionOrderForPage(pageKey, selectedMetadata.sectionOrder);
+  } else if (Array.isArray(globalMetadata?.sectionOrder)) {
+    setSectionOrderForPage(pageKey, globalMetadata.sectionOrder);
+  }
+
+  const selectedPageOptions =
+    selectedMetadata?.pageOptions && typeof selectedMetadata.pageOptions === "object" ? selectedMetadata.pageOptions : null;
+  const globalPageOptions =
+    globalMetadata?.pageOptions && typeof globalMetadata.pageOptions === "object" ? globalMetadata.pageOptions : null;
+  setPageOptionsForPage(pageKey, selectedPageOptions || globalPageOptions || {});
+
+  const selectedSectionStyles =
+    selectedMetadata?.sectionStyles && typeof selectedMetadata.sectionStyles === "object" ? selectedMetadata.sectionStyles : null;
+  const globalSectionStyles =
+    globalMetadata?.sectionStyles && typeof globalMetadata.sectionStyles === "object" ? globalMetadata.sectionStyles : null;
+  setSectionStylesForPage(pageKey, selectedSectionStyles || globalSectionStyles || {});
 }
 
 function syncSectionDataFromPreview(pageKey = getSelectedVisualPageKey()) {
@@ -955,6 +2406,7 @@ function syncSectionDataFromPreview(pageKey = getSelectedVisualPageKey()) {
   const normalizedOrder = normalizeSectionOrderForPage(pageKey, preferredOrder);
   setSectionOrderForPage(pageKey, normalizedOrder);
   renderVisualSectionOrderList();
+  renderVisualSectionDesigner();
   applySectionOrderToPreview(pageKey);
 }
 
@@ -989,6 +2441,10 @@ function clearSelectedVisualStyle() {
     return;
   }
   targetInput.value = "";
+  setPageOptionsForPage(pageKey, {});
+  setSectionStylesForPage(pageKey, {});
+  renderVisualPageControls();
+  renderVisualSectionDesigner();
   const defaultOrder = normalizeSectionOrderForPage(pageKey, getAvailableSectionsForPage(pageKey).map((entry) => entry.id));
   setSectionOrderForPage(pageKey, defaultOrder);
   renderVisualSectionOrderList();
@@ -1000,6 +2456,8 @@ function clearSelectedVisualStyle() {
 
 function refreshVisualEditorFromCurrentState() {
   applyVisualMetadataIfPresent();
+  renderVisualPageControls();
+  renderVisualSectionDesigner();
   refreshVisualRangeLabels();
   updateVisualCurrentCssSnapshot();
   updateVisualGeneratedCssPreview();
@@ -1033,6 +2491,30 @@ function initializeVisualEditor() {
     refreshVisualPreviewFrame();
   });
 
+  visualSectionStyleTargetSelect?.addEventListener("change", () => {
+    const pageKey = getSelectedVisualPageKey();
+    setSelectedSectionStyleTarget(pageKey, visualSectionStyleTargetSelect.value);
+    renderVisualSectionDesigner();
+    applyVisualCssToPreview();
+  });
+  [
+    visualSectionHiddenInput,
+    visualSectionBgInput,
+    visualSectionInkInput,
+    visualSectionRadiusInput,
+    visualSectionPadTopInput,
+    visualSectionPadBottomInput,
+    visualSectionAlignSelect
+  ].forEach((input) => {
+    input?.addEventListener("input", () => {
+      applyVisualSectionStyleDraft();
+    });
+    input?.addEventListener("change", () => {
+      applyVisualSectionStyleDraft();
+    });
+  });
+  visualSectionResetBtn?.addEventListener("click", resetVisualSectionStyleDraft);
+
   visualPresetButtons.forEach((button) => {
     button.addEventListener("click", () => {
       applyVisualPreset(button.dataset.visualPreset);
@@ -1055,6 +2537,9 @@ function initializeVisualEditor() {
     applyVisualCssToPreview();
   });
 
+  renderVisualPageControls();
+  renderVisualSectionDesigner();
+  setVisualSectionStyleRangeLabels();
   refreshVisualRangeLabels();
   updateVisualGeneratedCssPreview();
   updateVisualCurrentCssSnapshot();
@@ -1174,6 +2659,11 @@ function fillSiteSettingsForm(settings) {
   }
 
   state.siteSettings = settings;
+  state.sectionOrderByPage = {};
+  state.pageSpecificOptionsByPage = {};
+  state.sectionStylesByPage = {};
+  state.selectedSectionStyleTargetByPage = {};
+  state.availableSectionsByPage = {};
   resetSiteSettingsDraftFields();
   setSectionOrderMessage("");
   refreshVisualEditorFromCurrentState();

@@ -356,6 +356,14 @@
                 </label>
               </div>
 
+              <section class="visual-page-options">
+                <div class="row-between">
+                  <h4 id="visual-page-options-title">Page-Specific Controls</h4>
+                  <p id="visual-page-options-copy" class="cart-item-sub"></p>
+                </div>
+                <div id="visual-page-controls" class="visual-page-controls"></div>
+              </section>
+
               <div class="visual-device-row" role="group" aria-label="Preview device size">
                 <button type="button" class="ghost-btn visual-device-btn is-active" data-preview-device="desktop">Desktop Preview</button>
                 <button type="button" class="ghost-btn visual-device-btn" data-preview-device="tablet">Tablet Preview</button>
@@ -376,6 +384,60 @@
                 </div>
                 <p id="visual-section-order-message" class="checkout-message"></p>
                 <ol id="visual-section-order-list" class="visual-section-order-list"></ol>
+              </section>
+
+              <section class="visual-section-designer">
+                <div class="row-between">
+                  <h4>Section Designer</h4>
+                  <p class="cart-item-sub">Style each block visually, no CSS needed.</p>
+                </div>
+                <div class="admin-form-grid">
+                  <label>
+                    Section
+                    <select id="visual-section-style-target"></select>
+                  </label>
+                  <label class="checkbox-row">
+                    <input id="visual-section-hidden" type="checkbox" />
+                    Hide this section
+                  </label>
+                </div>
+                <div class="visual-section-style-grid">
+                  <label>
+                    Section Background
+                    <input id="visual-section-bg" type="color" value="#fffefb" />
+                  </label>
+                  <label>
+                    Section Text
+                    <input id="visual-section-ink" type="color" value="#221d18" />
+                  </label>
+                  <label>
+                    Corner Roundness
+                    <input id="visual-section-radius" type="range" min="0" max="40" step="1" value="0" />
+                    <span class="range-caption"><span id="visual-section-radius-value">0</span> px</span>
+                  </label>
+                  <label>
+                    Top Spacing
+                    <input id="visual-section-pad-top" type="range" min="0" max="120" step="1" value="0" />
+                    <span class="range-caption"><span id="visual-section-pad-top-value">0</span> px</span>
+                  </label>
+                  <label>
+                    Bottom Spacing
+                    <input id="visual-section-pad-bottom" type="range" min="0" max="140" step="1" value="0" />
+                    <span class="range-caption"><span id="visual-section-pad-bottom-value">0</span> px</span>
+                  </label>
+                  <label>
+                    Text Alignment
+                    <select id="visual-section-align">
+                      <option value="default">Default</option>
+                      <option value="left">Left</option>
+                      <option value="center">Center</option>
+                      <option value="right">Right</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="admin-form-actions">
+                  <button id="visual-section-reset-btn" class="ghost-btn" type="button">Reset Selected Section Style</button>
+                </div>
               </section>
 
               <label>
