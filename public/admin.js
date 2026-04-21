@@ -45,6 +45,8 @@ const ordersEl = document.getElementById("admin-orders");
 const ordersMessageEl = document.getElementById("orders-message");
 const memberAdminForm = document.getElementById("member-admin-form");
 const memberAdminEmailInput = document.getElementById("member-admin-email");
+const memberAdminTierInput = document.getElementById("member-admin-tier");
+const memberAdminPromoteBtn = document.getElementById("member-admin-promote-btn");
 const refreshMembersBtn = document.getElementById("refresh-members-btn");
 const memberAdminListEl = document.getElementById("admin-member-list");
 const memberAdminMessageEl = document.getElementById("member-admin-message");
@@ -2088,6 +2090,27 @@ function normalizeMemberRole(value) {
     : "member";
 }
 
+function normalizeMembershipTier(value) {
+  const tier = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (tier === "standard" || tier === "plus" || tier === "premium" || tier === "none") {
+    return tier;
+  }
+  return "";
+}
+
+function describeMemberTierCredits(member) {
+  if (member?.allEbooksAccess === true) {
+    return "All ebooks unlocked";
+  }
+  const limit = Number(member?.ebookMonthlyLimit) || 0;
+  if (limit > 0) {
+    return `${limit} ebook credits / month`;
+  }
+  return "No ebook credits";
+}
+
 function renderMemberAdminList() {
   if (!memberAdminListEl) {
     return;
@@ -2101,6 +2124,7 @@ function renderMemberAdminList() {
   memberAdminListEl.innerHTML = state.members
     .map((member) => {
       const role = normalizeMemberRole(member.role);
+      const tier = normalizeMembershipTier(member.membershipTier) || "none";
       const premiumActive = member.premiumAccess === true;
       const roleBadgeClass = role === "admin" ? "in-stock" : "sold-out";
       const premiumBadgeClass = premiumActive ? "in-stock" : "sold-out";
@@ -2109,6 +2133,8 @@ function renderMemberAdminList() {
           <h3>${escapeHtml(member.displayName || "Member")}</h3>
           <p><strong>Email:</strong> ${escapeHtml(member.email || "")}</p>
           <p><strong>Member ID:</strong> ${escapeHtml(member.id || "")}</p>
+          <p><strong>Tier:</strong> ${escapeHtml(member.membershipTierLabel || "Free")} (${escapeHtml(tier)})</p>
+          <p><strong>Credits:</strong> ${escapeHtml(describeMemberTierCredits(member))}</p>
           <p><strong>Last Login:</strong> ${escapeHtml(formatDateLabel(member.lastLoginAt))}</p>
           <div class="admin-badges">
             <span class="admin-stock-badge ${roleBadgeClass}">${role === "admin" ? "Member Admin" : "Member"}</span>
@@ -2128,6 +2154,18 @@ function renderMemberAdminList() {
                     member.id
                   )}">Make Admin</button>`
             }
+            <button class="ghost-btn" type="button" data-member-action="set-tier" data-member-tier="standard" data-member-id="${escapeHtml(
+              member.id
+            )}">Set Standard</button>
+            <button class="ghost-btn" type="button" data-member-action="set-tier" data-member-tier="plus" data-member-id="${escapeHtml(
+              member.id
+            )}">Set Plus</button>
+            <button class="ghost-btn" type="button" data-member-action="set-tier" data-member-tier="premium" data-member-id="${escapeHtml(
+              member.id
+            )}">Set Premium</button>
+            <button class="ghost-btn" type="button" data-member-action="set-tier" data-member-tier="none" data-member-id="${escapeHtml(
+              member.id
+            )}">Remove Tier</button>
           </div>
         </div>
       </article>`;
@@ -2142,6 +2180,28 @@ async function loadMembers() {
   const members = await adminRequest("/api/admin/members");
   state.members = Array.isArray(members) ? members : [];
   renderMemberAdminList();
+}
+
+async function applyTierForMember({ memberId = "", email = "", tier = "" } = {}) {
+  const normalizedTier = normalizeMembershipTier(tier);
+  if (!normalizedTier) {
+    throw new Error("Choose a valid tier.");
+  }
+  const payload = {
+    tier: normalizedTier
+  };
+  if (memberId) {
+    payload.memberId = String(memberId || "").trim();
+  } else if (email) {
+    payload.email = String(email || "").trim();
+  }
+  return adminRequest("/api/admin/members/set-tier", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
 }
 
 function renderMemberFulfillmentSummary(payload) {
@@ -3000,6 +3060,35 @@ memberAdminForm?.addEventListener("submit", async (event) => {
 
   const email = String(memberAdminEmailInput?.value || "").trim();
   if (!email) {
+    setMembersMessage("Enter a member email to assign tier access.", true);
+    return;
+  }
+  const tier = normalizeMembershipTier(memberAdminTierInput?.value || "") || "standard";
+
+  setMembersBusy(true);
+  setMembersMessage(`Applying ${tier} access for ${email}...`);
+  try {
+    await applyTierForMember({ email, tier });
+    await loadMembers();
+    setMembersMessage(`Applied ${tier} access for ${email}.`);
+  } catch (error) {
+    if (error.status === 401) {
+      logoutBtn.click();
+      return;
+    }
+    setMembersMessage(error.message || "Could not apply tier access.", true);
+  } finally {
+    setMembersBusy(false);
+  }
+});
+
+memberAdminPromoteBtn?.addEventListener("click", async () => {
+  if (state.membersBusy) {
+    return;
+  }
+
+  const email = String(memberAdminEmailInput?.value || "").trim();
+  if (!email) {
     setMembersMessage("Enter a member email to promote.", true);
     return;
   }
@@ -3014,9 +3103,6 @@ memberAdminForm?.addEventListener("submit", async (event) => {
       },
       body: JSON.stringify({ email })
     });
-    if (memberAdminEmailInput) {
-      memberAdminEmailInput.value = "";
-    }
     await loadMembers();
     setMembersMessage(`Member admin enabled for ${email}.`);
   } catch (error) {
@@ -3044,8 +3130,9 @@ memberAdminListEl?.addEventListener("click", async (event) => {
 
   const selectedMember = state.members.find((member) => String(member.id || "").trim() === memberId);
   const emailLabel = selectedMember?.email || "selected member";
+  const tierFromButton = normalizeMembershipTier(button.dataset.memberTier || "");
 
-  if (action !== "promote" && action !== "demote") {
+  if (action !== "promote" && action !== "demote" && action !== "set-tier") {
     return;
   }
 
@@ -3055,29 +3142,48 @@ memberAdminListEl?.addEventListener("click", async (event) => {
       return;
     }
   }
+  if (action === "set-tier" && !tierFromButton) {
+    setMembersMessage("Choose a valid tier action.", true);
+    return;
+  }
 
   setMembersBusy(true);
-  setMembersMessage(action === "promote" ? "Applying member admin role..." : "Removing member admin role...");
+  setMembersMessage(
+    action === "promote"
+      ? "Applying member admin role..."
+      : action === "demote"
+        ? "Removing member admin role..."
+        : `Applying ${tierFromButton} tier...`
+  );
   try {
-    await adminRequest(`/api/admin/members/${action}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ memberId })
-    });
+    if (action === "set-tier") {
+      await applyTierForMember({ memberId, tier: tierFromButton });
+    } else {
+      await adminRequest(`/api/admin/members/${action}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ memberId })
+      });
+    }
     await loadMembers();
     setMembersMessage(
       action === "promote"
         ? `Member admin enabled for ${emailLabel}.`
-        : `Member admin removed for ${emailLabel}.`
+        : action === "demote"
+          ? `Member admin removed for ${emailLabel}.`
+          : `Applied ${tierFromButton} tier for ${emailLabel}.`
     );
   } catch (error) {
     if (error.status === 401) {
       logoutBtn.click();
       return;
     }
-    setMembersMessage(error.message || "Could not update member role.", true);
+    setMembersMessage(
+      error.message || (action === "set-tier" ? "Could not update member tier." : "Could not update member role."),
+      true
+    );
   } finally {
     setMembersBusy(false);
   }

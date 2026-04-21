@@ -89,7 +89,7 @@
           <div class="admin-section-head row-between">
             <div>
               <h2>Member Admin</h2>
-              <p>Promote premium members to member-admin role and review account status.</p>
+              <p>Promote member-admins, assign membership tiers, and review account status.</p>
             </div>
             <button id="refresh-members-btn" class="ghost-btn" type="button">Refresh Members</button>
           </div>
@@ -106,8 +106,18 @@
                   required
                 />
               </label>
+              <label>
+                Membership Tier
+                <select id="member-admin-tier" name="memberAdminTier" required>
+                  <option value="standard">Standard (2 ebook credits)</option>
+                  <option value="plus">Plus (4 ebook credits)</option>
+                  <option value="premium">Premium (all access)</option>
+                  <option value="none">None (remove premium access)</option>
+                </select>
+              </label>
               <div class="admin-form-actions">
-                <button id="member-admin-promote-btn" class="primary-btn" type="submit">Make Member Admin</button>
+                <button id="member-admin-assign-tier-btn" class="primary-btn" type="submit">Apply Tier</button>
+                <button id="member-admin-promote-btn" class="ghost-btn" type="button">Make Member Admin</button>
               </div>
             </div>
           </form>

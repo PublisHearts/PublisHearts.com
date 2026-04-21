@@ -2187,6 +2187,17 @@ function secureEquals(left, right) {
 }
 
 const activePremiumSubscriptionStatuses = new Set(["active", "trialing"]);
+const adminAssignableSubscriptionStatuses = new Set([
+  "inactive",
+  "active",
+  "trialing",
+  "past_due",
+  "unpaid",
+  "paused",
+  "canceled",
+  "incomplete",
+  "incomplete_expired"
+]);
 const membershipTierCatalog = {
   standard: {
     key: "standard",
@@ -2484,14 +2495,61 @@ function parseAdminBoolean(value, fallback = false) {
   return fallback;
 }
 
-function getMemberTierConfig(member) {
-  if (isMemberAdmin(member)) {
-    return membershipTierCatalog.premium;
+function normalizeAdminMembershipTier(value) {
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!raw) {
+    return "";
   }
+  if (raw === "none") {
+    return "none";
+  }
+  if (raw in membershipTierCatalog) {
+    return raw;
+  }
+  return "";
+}
+
+function normalizeAdminSubscriptionStatus(value, fallback = "") {
+  const raw = String(value || fallback || "")
+    .trim()
+    .toLowerCase();
+  if (!raw) {
+    return "";
+  }
+  if (!adminAssignableSubscriptionStatuses.has(raw)) {
+    return "";
+  }
+  return raw;
+}
+
+function defaultSubscriptionStatusForTier(tierKey) {
+  return tierKey === "none" ? "inactive" : "active";
+}
+
+async function resolveAdminTargetMember({ memberId = "", email = "" } = {}) {
+  const normalizedMemberId = String(memberId || "").trim();
+  const rawEmail = String(email || "").trim();
+  const normalizedEmail = rawEmail ? normalizeCustomerEmail(rawEmail) : "";
+
+  if (normalizedMemberId) {
+    return findMemberById(normalizedMemberId);
+  }
+  if (normalizedEmail) {
+    return findMemberByEmail(normalizedEmail);
+  }
+  return null;
+}
+
+function getMemberTierConfig(member) {
   const tierKey = normalizeMembershipTierKey(member?.membershipTier);
   const explicit = getMembershipTierConfigByKey(tierKey);
   if (explicit) {
     return explicit;
+  }
+  if (isMemberAdmin(member)) {
+    return membershipTierCatalog.premium;
   }
   if (isMemberPremiumActive(member)) {
     return membershipTierCatalog.standard;
@@ -6864,16 +6922,10 @@ app.put("/api/admin/members/fulfillment", requireAdmin, async (req, res) => {
 
 app.post("/api/admin/members/promote", requireAdmin, async (req, res) => {
   try {
-    const targetMemberId = String(req.body?.memberId || "").trim();
-    const targetEmailRaw = String(req.body?.email || "").trim();
-    const targetEmail = targetEmailRaw ? normalizeCustomerEmail(targetEmailRaw) : "";
-
-    let member = null;
-    if (targetMemberId) {
-      member = await findMemberById(targetMemberId);
-    } else if (targetEmail) {
-      member = await findMemberByEmail(targetEmail);
-    }
+    const member = await resolveAdminTargetMember({
+      memberId: req.body?.memberId,
+      email: req.body?.email
+    });
 
     if (!member) {
       return res.status(404).json({ error: "Member not found." });
@@ -6897,16 +6949,10 @@ app.post("/api/admin/members/promote", requireAdmin, async (req, res) => {
 
 app.post("/api/admin/members/demote", requireAdmin, async (req, res) => {
   try {
-    const targetMemberId = String(req.body?.memberId || "").trim();
-    const targetEmailRaw = String(req.body?.email || "").trim();
-    const targetEmail = targetEmailRaw ? normalizeCustomerEmail(targetEmailRaw) : "";
-
-    let member = null;
-    if (targetMemberId) {
-      member = await findMemberById(targetMemberId);
-    } else if (targetEmail) {
-      member = await findMemberByEmail(targetEmail);
-    }
+    const member = await resolveAdminTargetMember({
+      memberId: req.body?.memberId,
+      email: req.body?.email
+    });
 
     if (!member) {
       return res.status(404).json({ error: "Member not found." });
@@ -6924,6 +6970,59 @@ app.post("/api/admin/members/demote", requireAdmin, async (req, res) => {
     const details = String(error?.message || "").trim();
     return res.status(details === "Enter a valid email address." ? 400 : 500).json({
       error: details ? `Could not demote member: ${details}` : "Could not demote member right now."
+    });
+  }
+});
+
+app.post("/api/admin/members/set-tier", requireAdmin, async (req, res) => {
+  try {
+    const member = await resolveAdminTargetMember({
+      memberId: req.body?.memberId,
+      email: req.body?.email
+    });
+    if (!member) {
+      return res.status(404).json({ error: "Member not found." });
+    }
+
+    const tierInput = req.body?.tier !== undefined ? req.body?.tier : req.body?.membershipTier;
+    const tier = normalizeAdminMembershipTier(tierInput);
+    if (!tier) {
+      return res.status(400).json({ error: "Tier must be standard, plus, premium, or none." });
+    }
+
+    const requestedStatus = normalizeAdminSubscriptionStatus(req.body?.subscriptionStatus);
+    const nextSubscriptionStatus = requestedStatus || defaultSubscriptionStatusForTier(tier);
+    const keepPeriodEnd = parseAdminBoolean(req.body?.keepPeriodEnd, false);
+    const now = Date.now();
+    const defaultPeriodEndIso = new Date(now + 31 * 24 * 60 * 60 * 1000).toISOString();
+    const shouldHavePeriodEnd = nextSubscriptionStatus !== "inactive" && nextSubscriptionStatus !== "canceled";
+
+    const patch = {
+      membershipTier: tier,
+      subscriptionStatus: nextSubscriptionStatus,
+      subscriptionCancelAtPeriodEnd: false
+    };
+    if (shouldHavePeriodEnd) {
+      patch.subscriptionCurrentPeriodEnd =
+        keepPeriodEnd && String(member.subscriptionCurrentPeriodEnd || "").trim()
+          ? String(member.subscriptionCurrentPeriodEnd || "").trim()
+          : defaultPeriodEndIso;
+    } else {
+      patch.subscriptionCurrentPeriodEnd = "";
+    }
+
+    const updated = await updateMember(member.id, patch);
+    return res.json({
+      ok: true,
+      member: buildMemberAdminPayload(updated || member)
+    });
+  } catch (error) {
+    if (error instanceof MemberValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(details === "Enter a valid email address." ? 400 : 500).json({
+      error: details ? `Could not update member tier: ${details}` : "Could not update member tier right now."
     });
   }
 });
