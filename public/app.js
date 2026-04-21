@@ -3,6 +3,8 @@ import { getCustomerState, setupStateGate } from "./stateGate.js";
 const memberTokenStorageKey = "publishearts_member_token_v1";
 
 const productsGrid = document.getElementById("products-grid");
+const storeSearchInput = document.getElementById("store-search");
+const storeFilterTabs = Array.from(document.querySelectorAll("[data-store-filter]"));
 const cartPanel = document.getElementById("cart-panel");
 const cartItems = document.getElementById("cart-items");
 const cartCount = document.getElementById("cart-count");
@@ -42,7 +44,9 @@ const state = {
   products: [],
   cart: new Map(),
   checkingOut: false,
-  siteSettings: null
+  siteSettings: null,
+  activeStoreFilter: "all",
+  searchQuery: ""
 };
 let stateGate = null;
 
@@ -236,6 +240,67 @@ function isOrderable(product) {
     return false;
   }
   return true;
+}
+
+function normalizeStoreFilterValue(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (["books", "accessories", "games", "stickers"].includes(normalized)) {
+    return normalized;
+  }
+  return "all";
+}
+
+function getStoreSearchHaystack(product) {
+  return [product?.title, product?.subtitle, product?.included, product?.productCategory]
+    .map((entry) => String(entry || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getStoreCategory(product) {
+  const productCategory = String(product?.productCategory || "")
+    .trim()
+    .toLowerCase();
+  if (productCategory === "book") {
+    return "books";
+  }
+
+  const haystack = getStoreSearchHaystack(product);
+  if (/(sticker|stickers|decal|decals)/i.test(haystack)) {
+    return "stickers";
+  }
+  if (/(game|games|card game|board game|puzzle|dice|deck)/i.test(haystack)) {
+    return "games";
+  }
+  return "accessories";
+}
+
+function updateStoreFilterUi() {
+  const activeFilter = normalizeStoreFilterValue(state.activeStoreFilter);
+  storeFilterTabs.forEach((button) => {
+    const buttonFilter = normalizeStoreFilterValue(button.dataset.storeFilter);
+    const isActive = buttonFilter === activeFilter;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+}
+
+function getFilteredProducts() {
+  const activeFilter = normalizeStoreFilterValue(state.activeStoreFilter);
+  const searchQuery = String(state.searchQuery || "")
+    .trim()
+    .toLowerCase();
+  return state.products.filter((product) => {
+    if (activeFilter !== "all" && getStoreCategory(product) !== activeFilter) {
+      return false;
+    }
+    if (searchQuery && !getStoreSearchHaystack(product).includes(searchQuery)) {
+      return false;
+    }
+    return true;
+  });
 }
 
 function collectImageUrls(value) {
@@ -688,7 +753,13 @@ function renderProducts() {
     return;
   }
 
-  productsGrid.innerHTML = state.products
+  const filteredProducts = getFilteredProducts();
+  if (filteredProducts.length === 0) {
+    productsGrid.innerHTML = `<p>No products match this filter yet.</p>`;
+    return;
+  }
+
+  productsGrid.innerHTML = filteredProducts
     .map((product, index) => {
       const preorderOpen = isComingSoon(product) && isPreorderEnabled(product);
       const orderable = isOrderable(product);
@@ -1003,6 +1074,21 @@ cartPanel.addEventListener("click", (event) => {
     closeCart();
   }
 });
+
+storeFilterTabs.forEach((button) => {
+  button.addEventListener("click", () => {
+    state.activeStoreFilter = normalizeStoreFilterValue(button.dataset.storeFilter);
+    updateStoreFilterUi();
+    renderProducts();
+  });
+});
+
+storeSearchInput?.addEventListener("input", () => {
+  state.searchQuery = String(storeSearchInput.value || "");
+  renderProducts();
+});
+
+updateStoreFilterUi();
 
 loadCart();
 stateGate = setupStateGate({

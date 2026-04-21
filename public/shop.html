@@ -31,8 +31,7 @@
         </a>
         <div class="header-actions">
           <button id="state-chip" class="ghost-btn" type="button">Set State</button>
-          <a class="ghost-btn ghost-link" href="/">Home</a>
-          <a class="ghost-btn ghost-link" href="/membership.html">Premium</a>
+          <a class="ghost-btn ghost-link" href="/membership.html">Account</a>
           <a class="ghost-btn ghost-link" href="/admin.html">Admin</a>
           <button id="open-cart" class="ghost-btn" type="button" aria-label="Open shopping cart">
             Cart
@@ -69,16 +68,33 @@
         </p>
         <div class="hero-actions">
           <a id="hero-cta" class="primary-btn" href="/membership.html">Join Premium</a>
-          <a id="hero-books-cta" class="ghost-btn ghost-link" href="#books">Shop Physical Books</a>
+          <a id="hero-books-cta" class="ghost-btn ghost-link" href="#books">Shop</a>
         </div>
       </section>
 
       <section id="books" class="container" data-page-section-id="catalog" data-page-section-label="Book Catalog">
-        <div class="section-head">
-          <h2 id="featured-title">Featured Titles</h2>
-          <p id="featured-copy">Each order is processed securely and shipped to the address collected at checkout.</p>
+        <div class="store-browser">
+          <aside class="store-filters" aria-label="Store categories">
+            <p class="eyebrow">Browse</p>
+            <h3>Categories</h3>
+            <button class="store-tab is-active" type="button" data-store-filter="all">All</button>
+            <button class="store-tab" type="button" data-store-filter="books">Books</button>
+            <button class="store-tab" type="button" data-store-filter="accessories">Accessories</button>
+            <button class="store-tab" type="button" data-store-filter="games">Games</button>
+            <button class="store-tab" type="button" data-store-filter="stickers">Stickers</button>
+          </aside>
+          <div class="store-results">
+            <div class="store-search-row">
+              <label class="store-search-label" for="store-search">Search Store</label>
+              <input id="store-search" class="store-search" type="search" placeholder="Search books, accessories, games, stickers..." autocomplete="off" />
+            </div>
+            <div class="section-head">
+              <h2 id="featured-title">Featured Titles</h2>
+              <p id="featured-copy">Each order is processed securely and shipped to the address collected at checkout.</p>
+            </div>
+            <div id="products-grid" class="products-grid" aria-live="polite"></div>
+          </div>
         </div>
-        <div id="products-grid" class="products-grid" aria-live="polite"></div>
       </section>
 
       <section

@@ -453,6 +453,81 @@ h1 {
   margin-top: 0.45rem;
 }
 
+.store-browser {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+  align-items: start;
+}
+
+.store-filters {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fffefb;
+  box-shadow: var(--shadow);
+  padding: 0.8rem;
+  display: grid;
+  gap: 0.45rem;
+  position: sticky;
+  top: 88px;
+}
+
+.store-filters .eyebrow {
+  margin: 0;
+}
+
+.store-filters h3 {
+  margin: 0 0 0.3rem;
+}
+
+.store-tab {
+  border: 1px solid #d6c8b8;
+  border-radius: 10px;
+  background: #fffdfa;
+  color: #4f3f31;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  cursor: pointer;
+}
+
+.store-tab:hover {
+  border-color: rgba(141, 57, 28, 0.45);
+}
+
+.store-tab.is-active {
+  border-color: rgba(141, 57, 28, 0.55);
+  background: linear-gradient(160deg, rgba(173, 79, 45, 0.12), rgba(141, 57, 28, 0.06));
+  color: #5e2410;
+}
+
+.store-results {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.store-search-row {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.store-search-label {
+  font-weight: 700;
+  color: #4e4337;
+}
+
+.store-search {
+  width: 100%;
+  border: 1px solid #d8cab8;
+  border-radius: 999px;
+  padding: 0.6rem 0.9rem;
+  font: inherit;
+  color: var(--ink);
+  background: #fffdfa;
+}
+
 .products-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -2808,6 +2883,25 @@ h1 {
 
   .visual-device-btn {
     flex: 1 1 100%;
+  }
+
+  .store-browser {
+    grid-template-columns: 1fr;
+  }
+
+  .store-filters {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+
+  .store-filters .eyebrow,
+  .store-filters h3 {
+    grid-column: 1 / -1;
+  }
+
+  .store-tab {
+    text-align: center;
   }
 
   .membership-ebook-card {
