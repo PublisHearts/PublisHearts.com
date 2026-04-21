@@ -34,6 +34,10 @@ const promise3Copy = document.getElementById("promise-3-copy");
 const footerLeft = document.getElementById("footer-left");
 const footerRight = document.getElementById("footer-right");
 
+const SHOP_PREMIUM_CTA_LABEL = "Join Premium: Get a Free Book + Full Collection Access";
+const SHOP_PREMIUM_CTA_HREF = "/membership.html";
+const SHOP_HERO_BANNER_FALLBACK = "/uploads/shop-hero-membership-tiers.png";
+
 const state = {
   products: [],
   cart: new Map(),
@@ -366,12 +370,18 @@ function applySiteSettings(settings) {
     return;
   }
 
+  const pageKey = String(document.body?.dataset?.pageKey || "").trim();
+  const isShopPage = pageKey === "shop";
+
   setText(brandNameHeader, settings.brandName);
   setText(brandMarkText, settings.brandMark);
   setText(heroEyebrow, settings.heroEyebrow);
   setText(heroTitle, settings.heroTitle);
   setText(heroCopy, settings.heroCopy);
-  setText(heroCta, settings.heroCtaLabel);
+  if (heroCta) {
+    heroCta.href = SHOP_PREMIUM_CTA_HREF;
+    setText(heroCta, isShopPage ? SHOP_PREMIUM_CTA_LABEL : settings.heroCtaLabel);
+  }
   setText(featuredTitle, settings.featuredTitle);
   setText(featuredCopy, settings.featuredCopy);
   setText(promise1Title, settings.promise1Title);
@@ -410,7 +420,8 @@ function applySiteSettings(settings) {
     }
   }
 
-  const bannerUrl = String(settings.heroBannerImageUrl || "").trim();
+  const configuredBannerUrl = String(settings.heroBannerImageUrl || "").trim();
+  const bannerUrl = isShopPage ? SHOP_HERO_BANNER_FALLBACK : configuredBannerUrl;
   if (heroBannerWrap && heroBannerImage) {
     if (bannerUrl) {
       heroBannerImage.src = bannerUrl;
