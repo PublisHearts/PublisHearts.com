@@ -1,5 +1,7 @@
 import { getCustomerState, setupStateGate } from "./stateGate.js";
 
+const memberTokenStorageKey = "publishearts_member_token_v1";
+
 const productsGrid = document.getElementById("products-grid");
 const cartPanel = document.getElementById("cart-panel");
 const cartItems = document.getElementById("cart-items");
@@ -125,6 +127,19 @@ function formatMoney(amountCents = 0) {
     style: "currency",
     currency: "USD"
   }).format(amountCents / 100);
+}
+
+function readMemberToken() {
+  const sessionToken = String(window.sessionStorage.getItem(memberTokenStorageKey) || "").trim();
+  const localToken = String(window.localStorage.getItem(memberTokenStorageKey) || "").trim();
+  const token = sessionToken || localToken;
+  if (token && !sessionToken) {
+    window.sessionStorage.setItem(memberTokenStorageKey, token);
+  }
+  if (localToken) {
+    window.localStorage.removeItem(memberTokenStorageKey);
+  }
+  return token;
 }
 
 function getShippingConfig() {
@@ -879,6 +894,15 @@ async function checkout() {
     return;
   }
 
+  const memberToken = readMemberToken();
+  if (!memberToken) {
+    setCheckoutMessage("Create a free account or sign in before checkout.", true);
+    window.setTimeout(() => {
+      window.location.assign("/signup.html");
+    }, 450);
+    return;
+  }
+
   const customerState = getCustomerState();
   if (!customerState) {
     setCheckoutMessage("Select your state before checkout.", true);
@@ -900,13 +924,23 @@ async function checkout() {
     const response = await fetch("/api/create-checkout-session", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${memberToken}`
       },
       body: JSON.stringify({ cart, customerState })
     });
 
     const payload = await response.json();
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        setCheckoutMessage("Sign in required before checkout.", true);
+        state.checkingOut = false;
+        updateCartUi();
+        window.setTimeout(() => {
+          window.location.assign("/login.html");
+        }, 450);
+        return;
+      }
       throw new Error(payload.error || "Checkout failed");
     }
     if (!payload.url) {

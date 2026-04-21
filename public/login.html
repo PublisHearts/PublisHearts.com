@@ -3,11 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PublisHearts Home</title>
-    <meta
-      name="description"
-      content="Create a free PublisHearts account or sign in to access your profile, upgrade tiers, and enter the bookstore."
-    />
+    <title>PublisHearts Login</title>
+    <meta name="description" content="Sign in to your PublisHearts account." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -16,7 +13,7 @@
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body class="membership-page" data-page-key="home">
+  <body class="membership-page" data-page-key="login">
     <div class="page-glow page-glow-a"></div>
     <div class="page-glow page-glow-b"></div>
     <header class="site-header">
@@ -26,32 +23,37 @@
           <span>PublisHearts</span>
         </a>
         <div class="header-actions">
-          <a class="ghost-btn ghost-link" href="/login.html">Login</a>
-          <a class="primary-btn ghost-link" href="/signup.html">Sign Up</a>
+          <a class="ghost-btn ghost-link" href="/">Home</a>
+          <a class="ghost-btn ghost-link" href="/signup.html?next=/membership.html">Sign Up</a>
         </div>
       </div>
     </header>
 
     <main class="membership-shell container">
       <section class="membership-hero">
-        <p class="eyebrow">Member Access</p>
-        <h1>Login or Create Your Account</h1>
-        <p>
-          Start with a free account, manage your profile, choose your membership tier anytime, and then enter the
-          physical bookstore or ebook experience.
-        </p>
+        <p class="eyebrow">Account</p>
+        <h1>Login</h1>
+        <p>Sign in to open your account page and access store checkout.</p>
       </section>
 
       <section class="membership-card">
-        <div class="membership-account-actions">
-          <a class="primary-btn" href="/login.html">Login</a>
-          <a class="ghost-btn ghost-link" href="/signup.html">Sign Up</a>
-        </div>
-        <p class="cart-item-sub">
-          New accounts go to your profile first, where you can upgrade tiers or keep free access and enter the store.
-        </p>
+        <form id="login-form" class="membership-form">
+          <label>
+            Email
+            <input id="login-email" type="email" maxlength="180" required />
+          </label>
+          <label>
+            Password
+            <input id="login-password" type="password" minlength="8" maxlength="200" required />
+          </label>
+          <button id="login-submit-btn" class="primary-btn block" type="submit">Login</button>
+          <a class="ghost-btn ghost-link block" href="/signup.html?next=/membership.html">Need an account? Sign Up</a>
+        </form>
+        <p id="login-message" class="checkout-message"></p>
       </section>
     </main>
+
     <script type="module" src="/page-design.js"></script>
+    <script type="module" src="/login.js"></script>
   </body>
 </html>

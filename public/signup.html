@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PublisHearts Sign Up</title>
+    <meta name="description" content="Create your free PublisHearts account." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="membership-page" data-page-key="signup">
+    <div class="page-glow page-glow-a"></div>
+    <div class="page-glow page-glow-b"></div>
+    <header class="site-header">
+      <div class="container row-between">
+        <a class="brand" href="/">
+          <span class="brand-mark">P</span>
+          <span>PublisHearts</span>
+        </a>
+        <div class="header-actions">
+          <a class="ghost-btn ghost-link" href="/">Home</a>
+          <a class="ghost-btn ghost-link" href="/login.html?next=/membership.html">Login</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="membership-shell container">
+      <section class="membership-hero">
+        <p class="eyebrow">Free Account</p>
+        <h1>Sign Up</h1>
+        <p>Create your account, then you will be sent to your profile page.</p>
+      </section>
+
+      <section class="membership-card">
+        <form id="signup-form" class="membership-form">
+          <label>
+            Display Name
+            <input id="signup-display-name" type="text" maxlength="80" required />
+          </label>
+          <label>
+            Email
+            <input id="signup-email" type="email" maxlength="180" required />
+          </label>
+          <label>
+            Password
+            <input id="signup-password" type="password" minlength="8" maxlength="200" required />
+          </label>
+          <label>
+            Phone Number
+            <input id="signup-phone" type="tel" maxlength="24" placeholder="(555) 555-5555" required />
+          </label>
+          <label>
+            State
+            <select id="signup-state" required></select>
+          </label>
+          <button id="signup-submit-btn" class="primary-btn block" type="submit">Create Account</button>
+          <a class="ghost-btn ghost-link block" href="/login.html?next=/membership.html">Already have an account? Login</a>
+        </form>
+        <p id="signup-message" class="checkout-message"></p>
+      </section>
+    </main>
+
+    <script type="module" src="/page-design.js"></script>
+    <script type="module" src="/signup.js"></script>
+  </body>
+</html>

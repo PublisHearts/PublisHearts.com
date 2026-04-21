@@ -2200,7 +2200,8 @@ h1 {
 }
 
 .membership-form input,
-.membership-form textarea {
+.membership-form textarea,
+.membership-form select {
   width: 100%;
   border: 1px solid #d8cab8;
   border-radius: 10px;
@@ -2208,6 +2209,16 @@ h1 {
   font: inherit;
   color: var(--ink);
   background: #fffdfa;
+}
+
+.membership-account-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.membership-account-nav .ghost-link {
+  text-align: center;
 }
 
 .membership-account-head {

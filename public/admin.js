@@ -277,8 +277,12 @@ function setProductBusy(isBusy) {
 
 function setDesignBusy(isBusy) {
   state.designBusy = isBusy;
-  saveSiteSettingsBtn.disabled = isBusy;
-  resetSiteSettingsBtn.disabled = isBusy;
+  if (saveSiteSettingsBtn) {
+    saveSiteSettingsBtn.disabled = isBusy;
+  }
+  if (resetSiteSettingsBtn) {
+    resetSiteSettingsBtn.disabled = isBusy;
+  }
 }
 
 function setPublishBusy(isBusy) {
@@ -4270,12 +4274,12 @@ shippingEnabledInput.addEventListener("change", () => {
   syncShippingInputs();
 });
 
-resetSiteSettingsBtn.addEventListener("click", () => {
+resetSiteSettingsBtn?.addEventListener("click", () => {
   fillSiteSettingsForm(state.siteSettings);
   setDesignMessage("Unsaved design changes were cleared.");
 });
 
-siteSettingsForm.addEventListener("submit", async (event) => {
+siteSettingsForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (state.designBusy) {
     return;

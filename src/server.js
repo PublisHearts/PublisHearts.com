@@ -958,6 +958,8 @@ async function createCheckoutSessionForCart(req, cart, customerState, options = 
   const orderSource = String(options?.orderSource || "storefront")
     .trim()
     .toLowerCase() || "storefront";
+  const customerId = String(options?.customerId || "").trim();
+  const memberId = String(options?.memberId || "").trim();
   const successUrl = String(options?.successUrl || "").trim();
   const cancelUrl = String(options?.cancelUrl || "").trim();
   const sessionDetails = await buildCheckoutSessionCartDetails(cart, customerState, {
@@ -1010,8 +1012,18 @@ async function createCheckoutSessionForCart(req, cart, customerState, options = 
     }
   };
 
+  if (memberId) {
+    sessionOptions.metadata.member_id = memberId;
+    sessionOptions.payment_intent_data.metadata.member_id = memberId;
+  }
+
+  if (customerId) {
+    sessionOptions.customer = customerId;
+  }
   if (customerEmail) {
-    sessionOptions.customer_email = customerEmail;
+    if (!customerId) {
+      sessionOptions.customer_email = customerEmail;
+    }
     sessionOptions.payment_intent_data.receipt_email = customerEmail;
   }
 
@@ -3067,6 +3079,16 @@ function buildMemberClientPayload(member) {
     id: member.id,
     displayName: member.displayName,
     email: member.email,
+    phone: String(member.phone || "").trim(),
+    state: String(member.state || "").trim(),
+    bio: String(member.bio || "").trim(),
+    shippingName: String(member.shippingName || "").trim(),
+    shippingAddressLine1: String(member.shippingAddressLine1 || "").trim(),
+    shippingAddressLine2: String(member.shippingAddressLine2 || "").trim(),
+    shippingCity: String(member.shippingCity || "").trim(),
+    shippingState: String(member.shippingState || "").trim(),
+    shippingPostalCode: String(member.shippingPostalCode || "").trim(),
+    shippingCountry: String(member.shippingCountry || "").trim() || "US",
     role: isMemberAdmin(member) ? "admin" : "member",
     stripeCustomerId: member.stripeCustomerId || "",
     stripeSubscriptionId: member.stripeSubscriptionId || "",
@@ -3867,6 +3889,35 @@ function normalizePhoneList(values) {
     normalized.push(phone);
   }
   return normalized;
+}
+
+function cleanMemberProfileText(value, maxLength = 240) {
+  return String(value || "")
+    .trim()
+    .replace(/\r\n/g, "\n")
+    .slice(0, maxLength);
+}
+
+function cleanMemberProfilePhone(value, maxLength = 24) {
+  return String(value || "")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function cleanMemberProfileState(value) {
+  return normalizeUsStateCode(value);
+}
+
+function cleanMemberProfilePostalCode(value, maxLength = 20) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .slice(0, maxLength);
+}
+
+function cleanMemberProfileCountry(value, fallback = "US") {
+  return normalizeIsoCountry(value, fallback);
 }
 
 function cleanQuoteRequestText(value, maxLength = 2000) {
@@ -5318,7 +5369,23 @@ function extractSiteSettingsChanges(req) {
     "themeAccent",
     "themeAccentStrong",
     "themeBackground",
-    "themeInk"
+    "themeInk",
+    "globalCustomCss",
+    "homeCustomCss",
+    "shopCustomCss",
+    "loginCustomCss",
+    "signupCustomCss",
+    "accountCustomCss",
+    "aboutCustomCss",
+    "deliveryCustomCss",
+    "customStoryCustomCss",
+    "successCustomCss",
+    "cancelCustomCss",
+    "adminCustomCss",
+    "adminPagesCustomCss",
+    "posCustomCss",
+    "fulfillmentCustomCss",
+    "completedOrdersCustomCss"
   ];
 
   const changes = {};
@@ -5906,16 +5973,26 @@ app.post("/api/members/register", async (req, res) => {
       return res.status(400).json({ error: "Email is required." });
     }
     const password = cleanMemberPassword(req.body?.password);
+    const accountState = cleanMemberProfileState(req.body?.state);
+    if (!accountState) {
+      return res.status(400).json({ error: "State is required." });
+    }
+    const accountPhone = cleanMemberProfilePhone(req.body?.phone);
+    if (!accountPhone) {
+      return res.status(400).json({ error: "Phone is required." });
+    }
     const passwordSalt = createMemberPasswordSaltHex();
     const passwordHash = hashMemberPassword(password, passwordSalt);
     const authToken = createMemberAuthToken();
     const authTokenHash = hashMemberAuthToken(authToken);
     const issuedAt = new Date().toISOString();
-    const orderLookupPhone = normalizePhoneForLookup(req.body?.phone);
+    const orderLookupPhone = normalizePhoneForLookup(accountPhone);
 
     const created = await createMember({
       displayName,
       email,
+      phone: accountPhone,
+      state: accountState,
       orderLookupEmails: [email],
       orderLookupPhones: orderLookupPhone ? [orderLookupPhone] : [],
       passwordHash,
@@ -6268,6 +6345,69 @@ app.put("/api/members/order-access", requireMember, async (req, res) => {
     const details = String(error?.message || "").trim();
     return res.status(500).json({
       error: details ? `Could not update order access contacts: ${details}` : "Could not update order access contacts."
+    });
+  }
+});
+
+app.put("/api/members/profile", requireMember, async (req, res) => {
+  try {
+    const member = req.member;
+    const patch = {};
+
+    if (req.body?.displayName !== undefined) {
+      patch.displayName = cleanMemberDisplayName(req.body?.displayName);
+    }
+    if (req.body?.phone !== undefined) {
+      patch.phone = cleanMemberProfilePhone(req.body?.phone);
+    }
+    if (req.body?.state !== undefined) {
+      patch.state = cleanMemberProfileState(req.body?.state);
+    }
+    if (req.body?.bio !== undefined) {
+      patch.bio = cleanMemberProfileText(req.body?.bio, 1200);
+    }
+    if (req.body?.shippingName !== undefined) {
+      patch.shippingName = cleanMemberProfileText(req.body?.shippingName, 120);
+    }
+    if (req.body?.shippingAddressLine1 !== undefined) {
+      patch.shippingAddressLine1 = cleanMemberProfileText(req.body?.shippingAddressLine1, 220);
+    }
+    if (req.body?.shippingAddressLine2 !== undefined) {
+      patch.shippingAddressLine2 = cleanMemberProfileText(req.body?.shippingAddressLine2, 220);
+    }
+    if (req.body?.shippingCity !== undefined) {
+      patch.shippingCity = cleanMemberProfileText(req.body?.shippingCity, 120);
+    }
+    if (req.body?.shippingState !== undefined) {
+      patch.shippingState = cleanMemberProfileState(req.body?.shippingState);
+    }
+    if (req.body?.shippingPostalCode !== undefined) {
+      patch.shippingPostalCode = cleanMemberProfilePostalCode(req.body?.shippingPostalCode, 20);
+    }
+    if (req.body?.shippingCountry !== undefined) {
+      patch.shippingCountry = cleanMemberProfileCountry(req.body?.shippingCountry, "US");
+    }
+
+    const normalizedPhone = normalizePhoneForLookup(patch.phone !== undefined ? patch.phone : member.phone);
+    if (normalizedPhone) {
+      const currentPhones = getMemberOrderLookupPhones(member);
+      if (!currentPhones.includes(normalizedPhone)) {
+        patch.orderLookupPhones = [...currentPhones, normalizedPhone];
+      }
+    }
+
+    const updated = await updateMember(member.id, patch);
+    return res.json({
+      ok: true,
+      member: buildMemberClientPayload(updated || member)
+    });
+  } catch (error) {
+    if (error instanceof MemberValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
+    const details = String(error?.message || "").trim();
+    return res.status(500).json({
+      error: details ? `Could not update profile: ${details}` : "Could not update profile right now."
     });
   }
 });
@@ -9024,18 +9164,23 @@ app.post("/api/admin/publish", requireAdmin, async (req, res) => {
   }
 });
 
-app.post("/api/create-checkout-session", async (req, res) => {
+app.post("/api/create-checkout-session", requireMember, async (req, res) => {
   if (!requireStripe(res)) {
     return;
   }
 
   try {
+    const member = req.member;
+    const customerId = await ensureStripeCustomerForMember(member);
     const appUrl = getAppUrl(req);
     const cart = Array.isArray(req.body?.cart) ? req.body.cart : [];
     const customerState = req.body?.customerState;
     const { session } = await createCheckoutSessionForCart(req, cart, customerState, {
       shippingRequired: true,
       orderSource: "storefront",
+      customerId,
+      memberId: member.id,
+      customerEmail: member.email,
       successUrl: `${appUrl}/success.html?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${appUrl}/cancel.html`,
       allowPromotionCodes: true,
@@ -9529,6 +9674,10 @@ app.get("/admin", (req, res) => {
   res.redirect("/admin.html");
 });
 
+app.get("/admin-pages", (req, res) => {
+  res.redirect("/admin-pages.html");
+});
+
 app.get("/pos", (req, res) => {
   res.redirect("/pos.html");
 });
@@ -9539,6 +9688,22 @@ app.get("/fulfillment", (req, res) => {
 
 app.get("/completed-orders", (req, res) => {
   res.redirect("/completed-orders.html");
+});
+
+app.get("/login", (req, res) => {
+  res.redirect("/login.html");
+});
+
+app.get("/signup", (req, res) => {
+  res.redirect("/signup.html");
+});
+
+app.get("/account", (req, res) => {
+  res.redirect("/membership.html");
+});
+
+app.get("/store", (req, res) => {
+  res.redirect("/shop.html");
 });
 
 app.use((error, req, res, next) => {

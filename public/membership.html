@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PublisHearts Premium Membership</title>
+    <title>PublisHearts Account</title>
     <meta
       name="description"
-      content="Join the PublisHearts premium membership for member-only ebook access, monthly sticker sheet, and private community forum."
+      content="Manage your PublisHearts account, update profile and shipping info, upgrade membership tiers, and access ebooks and community."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,7 +16,7 @@
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body class="membership-page">
+  <body class="membership-page" data-page-key="account">
     <div class="page-glow page-glow-a"></div>
     <div class="page-glow page-glow-b"></div>
     <header class="site-header">
@@ -27,8 +27,8 @@
         </a>
         <div class="header-actions">
           <a class="ghost-btn ghost-link" href="/">Home</a>
-          <a class="ghost-btn ghost-link" href="/shop.html">Shop</a>
-          <a class="ghost-btn ghost-link" href="/membership.html">Premium</a>
+          <a class="ghost-btn ghost-link" href="/shop.html">Physical Store</a>
+          <a class="ghost-btn ghost-link" href="/membership.html">Account</a>
           <a class="ghost-btn ghost-link" href="/admin.html">Admin</a>
         </div>
       </div>
@@ -36,25 +36,24 @@
 
     <main class="membership-shell container">
       <section class="membership-hero">
-        <p class="eyebrow">Premium Membership</p>
-        <h1>Choose Your Tier</h1>
+        <p class="eyebrow">Account Hub</p>
+        <h1>Your Account, Store Access, and Membership Tiers</h1>
         <p>
-          Every tier includes stickers, premium account access, and profile-based order tracking. Your ebook picks reset
-          each month like a library checkout window.
+          Free accounts can place physical store orders. Upgrade anytime for Standard, Plus, or Premium ebook access.
+          Keep your profile and shipping details updated in one place.
         </p>
         <ul class="membership-included-list">
+          <li>Free account: profile, order history, and physical store checkout</li>
           <li>Standard: 2 ebooks per month</li>
           <li>Plus: 4 ebooks per month</li>
-          <li>Premium: all ebooks + random monthly PublisHearts paperback</li>
-          <li>Monthly sticker sheet</li>
-          <li>Private member community feed</li>
+          <li>Premium: all ebooks + random monthly paperback</li>
         </ul>
         <p id="membership-page-message" class="checkout-message"></p>
       </section>
 
       <section class="membership-card">
         <div class="row-between">
-          <h2>Membership Plans</h2>
+          <h2>Upgrade Membership</h2>
           <span class="cart-item-sub">Pick your monthly tier</span>
         </div>
         <div id="membership-plan-grid" class="membership-plan-grid"></div>
@@ -62,43 +61,13 @@
 
       <section class="membership-grid">
         <article id="membership-auth-card" class="membership-card">
-          <h2>Create or Sign In</h2>
-          <p class="cart-item-sub">Use the same email each time so your subscription and content stay linked.</p>
-
-          <div class="membership-auth-layout">
-            <form id="membership-register-form" class="membership-form">
-              <h3>Create Account</h3>
-              <label>
-                Display Name
-                <input id="register-display-name" type="text" maxlength="80" required />
-              </label>
-              <label>
-                Email
-                <input id="register-email" type="email" maxlength="180" required />
-              </label>
-              <label>
-                Password
-                <input id="register-password" type="password" minlength="8" maxlength="200" required />
-              </label>
-              <label>
-                Phone (optional, for order tracking)
-                <input id="register-phone" type="tel" maxlength="24" placeholder="(555) 555-5555" />
-              </label>
-              <button class="primary-btn block" type="submit">Create Account</button>
-            </form>
-
-            <form id="membership-login-form" class="membership-form">
-              <h3>Sign In</h3>
-              <label>
-                Email
-                <input id="login-email" type="email" maxlength="180" required />
-              </label>
-              <label>
-                Password
-                <input id="login-password" type="password" minlength="8" maxlength="200" required />
-              </label>
-              <button class="ghost-btn block" type="submit">Sign In</button>
-            </form>
+          <h2>Sign In Required</h2>
+          <p class="cart-item-sub">
+            Sign in to open your account profile, manage shipping info, and place physical store orders.
+          </p>
+          <div class="membership-account-actions">
+            <a class="primary-btn ghost-link" href="/login.html?next=/membership.html">Login</a>
+            <a class="ghost-btn ghost-link" href="/signup.html?next=/membership.html">Create Free Account</a>
           </div>
           <p id="membership-auth-message" class="checkout-message"></p>
         </article>
@@ -108,11 +77,70 @@
             <h2>Your Account</h2>
             <button id="membership-logout-btn" class="ghost-btn" type="button">Log Out</button>
           </div>
+          <div class="membership-account-nav">
+            <a class="primary-btn ghost-link" href="/shop.html">Physical Store</a>
+            <a class="ghost-btn ghost-link" href="#membership-estore">E-Store</a>
+            <a class="ghost-btn ghost-link" href="#membership-plan-grid">Upgrade Tier</a>
+          </div>
           <p id="membership-account-name" class="membership-account-name"></p>
           <p id="membership-account-email" class="cart-item-sub"></p>
           <p id="membership-account-role" class="cart-item-sub"></p>
           <p id="membership-tier-summary" class="cart-item-sub"></p>
           <p id="membership-tier-perks" class="cart-item-sub"></p>
+
+          <form id="membership-profile-form" class="membership-form">
+            <h3>Profile and Shipping</h3>
+            <p class="cart-item-sub">
+              Save your profile details and shipping info so your account stays ready for bookstore orders.
+            </p>
+            <label>
+              Display Name
+              <input id="membership-profile-display-name" type="text" maxlength="80" required />
+            </label>
+            <label>
+              Phone
+              <input id="membership-profile-phone" type="tel" maxlength="24" placeholder="(555) 555-5555" />
+            </label>
+            <label>
+              State
+              <select id="membership-profile-state" required></select>
+            </label>
+            <label>
+              Bio
+              <textarea id="membership-profile-bio" rows="3" maxlength="1200" placeholder="Tell members about yourself..."></textarea>
+            </label>
+            <label>
+              Shipping Name
+              <input id="membership-shipping-name" type="text" maxlength="120" />
+            </label>
+            <label>
+              Shipping Address Line 1
+              <input id="membership-shipping-line1" type="text" maxlength="220" />
+            </label>
+            <label>
+              Shipping Address Line 2
+              <input id="membership-shipping-line2" type="text" maxlength="220" />
+            </label>
+            <label>
+              Shipping City
+              <input id="membership-shipping-city" type="text" maxlength="120" />
+            </label>
+            <label>
+              Shipping State
+              <select id="membership-shipping-state"></select>
+            </label>
+            <label>
+              Shipping ZIP
+              <input id="membership-shipping-postal-code" type="text" maxlength="20" />
+            </label>
+            <label>
+              Shipping Country
+              <input id="membership-shipping-country" type="text" maxlength="2" value="US" />
+            </label>
+            <button id="membership-save-profile-btn" class="ghost-btn block" type="submit">Save Profile</button>
+            <p id="membership-profile-message" class="checkout-message"></p>
+          </form>
+
           <form id="membership-order-access-form" class="membership-form">
             <h3>Order Tracking Contacts</h3>
             <p class="cart-item-sub">
@@ -129,6 +157,7 @@
             <button id="membership-save-order-access-btn" class="ghost-btn" type="submit">Save Order Contacts</button>
             <p id="membership-order-access-message" class="checkout-message"></p>
           </form>
+
           <div class="membership-status-row">
             <span class="membership-status-label">Subscription Status</span>
             <strong id="membership-status-pill" class="membership-status-pill">Inactive</strong>
@@ -143,9 +172,9 @@
       </section>
 
       <section class="membership-content-grid">
-        <article class="membership-card">
+        <article id="membership-estore" class="membership-card">
           <div class="row-between">
-            <h2>Premium Ebook Library</h2>
+            <h2>E-Store Ebook Library</h2>
             <span id="membership-library-lock" class="membership-lock">Locked</span>
           </div>
           <p class="cart-item-sub">
@@ -207,11 +236,12 @@
 
     <footer class="site-footer">
       <div class="container row-between">
-        <span>PublisHearts Premium</span>
-        <span>Members-only ebooks + community</span>
+        <span>PublisHearts Account Center</span>
+        <span>Physical Store + E-Store + Membership</span>
       </div>
     </footer>
 
+    <script type="module" src="/page-design.js"></script>
     <script type="module" src="/membership.js"></script>
   </body>
 </html>

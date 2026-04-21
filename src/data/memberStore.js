@@ -106,6 +106,50 @@ function cleanOptionalStripeId(value, maxLength = 180) {
   return text;
 }
 
+function cleanOptionalText(value, maxLength = 240) {
+  return String(value || "")
+    .trim()
+    .replace(/\r\n/g, "\n")
+    .slice(0, maxLength);
+}
+
+function cleanOptionalPhone(value, maxLength = 24) {
+  return String(value || "")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function cleanOptionalStateCode(value) {
+  const code = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (!code) {
+    return "";
+  }
+  if (!/^[A-Z]{2}$/.test(code)) {
+    return "";
+  }
+  return code;
+}
+
+function cleanOptionalPostalCode(value, maxLength = 20) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .slice(0, maxLength);
+}
+
+function cleanOptionalCountryCode(value, fallback = "US") {
+  const code = String(value || fallback)
+    .trim()
+    .toUpperCase();
+  if (/^[A-Z]{2}$/.test(code)) {
+    return code;
+  }
+  return fallback;
+}
+
 function cleanIsoTimestamp(value) {
   const text = String(value || "").trim();
   if (!text) {
@@ -276,6 +320,16 @@ function normalizeStoredMember(raw = {}) {
     subscriptionStatus: cleanSubscriptionStatus(raw.subscriptionStatus),
     subscriptionCurrentPeriodEnd: cleanIsoTimestamp(raw.subscriptionCurrentPeriodEnd),
     subscriptionCancelAtPeriodEnd: cleanBoolean(raw.subscriptionCancelAtPeriodEnd, false),
+    phone: cleanOptionalPhone(raw.phone),
+    state: cleanOptionalStateCode(raw.state),
+    bio: cleanOptionalText(raw.bio, 1200),
+    shippingName: cleanOptionalText(raw.shippingName, 120),
+    shippingAddressLine1: cleanOptionalText(raw.shippingAddressLine1, 220),
+    shippingAddressLine2: cleanOptionalText(raw.shippingAddressLine2, 220),
+    shippingCity: cleanOptionalText(raw.shippingCity, 120),
+    shippingState: cleanOptionalStateCode(raw.shippingState),
+    shippingPostalCode: cleanOptionalPostalCode(raw.shippingPostalCode, 20),
+    shippingCountry: cleanOptionalCountryCode(raw.shippingCountry, "US"),
     createdAt,
     updatedAt
   };
@@ -413,6 +467,16 @@ export async function createMember({
   email,
   role,
   membershipTier,
+  phone = "",
+  state = "",
+  bio = "",
+  shippingName = "",
+  shippingAddressLine1 = "",
+  shippingAddressLine2 = "",
+  shippingCity = "",
+  shippingState = "",
+  shippingPostalCode = "",
+  shippingCountry = "US",
   orderLookupEmails,
   orderLookupPhones,
   passwordHash,
@@ -456,6 +520,16 @@ export async function createMember({
     subscriptionStatus: "inactive",
     subscriptionCurrentPeriodEnd: "",
     subscriptionCancelAtPeriodEnd: false,
+    phone: cleanOptionalPhone(phone),
+    state: cleanOptionalStateCode(state),
+    bio: cleanOptionalText(bio, 1200),
+    shippingName: cleanOptionalText(shippingName, 120),
+    shippingAddressLine1: cleanOptionalText(shippingAddressLine1, 220),
+    shippingAddressLine2: cleanOptionalText(shippingAddressLine2, 220),
+    shippingCity: cleanOptionalText(shippingCity, 120),
+    shippingState: cleanOptionalStateCode(shippingState),
+    shippingPostalCode: cleanOptionalPostalCode(shippingPostalCode, 20),
+    shippingCountry: cleanOptionalCountryCode(shippingCountry, "US"),
     createdAt,
     updatedAt: createdAt
   };
@@ -560,6 +634,46 @@ export async function updateMember(memberId, updates) {
       patch.subscriptionCancelAtPeriodEnd !== undefined
         ? cleanBoolean(patch.subscriptionCancelAtPeriodEnd, current.subscriptionCancelAtPeriodEnd)
         : current.subscriptionCancelAtPeriodEnd,
+    phone:
+      patch.phone !== undefined
+        ? cleanOptionalPhone(patch.phone)
+        : cleanOptionalPhone(current.phone),
+    state:
+      patch.state !== undefined
+        ? cleanOptionalStateCode(patch.state)
+        : cleanOptionalStateCode(current.state),
+    bio:
+      patch.bio !== undefined
+        ? cleanOptionalText(patch.bio, 1200)
+        : cleanOptionalText(current.bio, 1200),
+    shippingName:
+      patch.shippingName !== undefined
+        ? cleanOptionalText(patch.shippingName, 120)
+        : cleanOptionalText(current.shippingName, 120),
+    shippingAddressLine1:
+      patch.shippingAddressLine1 !== undefined
+        ? cleanOptionalText(patch.shippingAddressLine1, 220)
+        : cleanOptionalText(current.shippingAddressLine1, 220),
+    shippingAddressLine2:
+      patch.shippingAddressLine2 !== undefined
+        ? cleanOptionalText(patch.shippingAddressLine2, 220)
+        : cleanOptionalText(current.shippingAddressLine2, 220),
+    shippingCity:
+      patch.shippingCity !== undefined
+        ? cleanOptionalText(patch.shippingCity, 120)
+        : cleanOptionalText(current.shippingCity, 120),
+    shippingState:
+      patch.shippingState !== undefined
+        ? cleanOptionalStateCode(patch.shippingState)
+        : cleanOptionalStateCode(current.shippingState),
+    shippingPostalCode:
+      patch.shippingPostalCode !== undefined
+        ? cleanOptionalPostalCode(patch.shippingPostalCode, 20)
+        : cleanOptionalPostalCode(current.shippingPostalCode, 20),
+    shippingCountry:
+      patch.shippingCountry !== undefined
+        ? cleanOptionalCountryCode(patch.shippingCountry, "US")
+        : cleanOptionalCountryCode(current.shippingCountry, "US"),
     updatedAt: new Date().toISOString()
   };
 

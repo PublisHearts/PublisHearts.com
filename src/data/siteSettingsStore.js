@@ -43,7 +43,23 @@ const defaults = {
   themeAccent: "#ad4f2d",
   themeAccentStrong: "#8d391c",
   themeBackground: "#f5efe5",
-  themeInk: "#221d18"
+  themeInk: "#221d18",
+  globalCustomCss: "",
+  homeCustomCss: "",
+  shopCustomCss: "",
+  loginCustomCss: "",
+  signupCustomCss: "",
+  accountCustomCss: "",
+  aboutCustomCss: "",
+  deliveryCustomCss: "",
+  customStoryCustomCss: "",
+  successCustomCss: "",
+  cancelCustomCss: "",
+  adminCustomCss: "",
+  adminPagesCustomCss: "",
+  posCustomCss: "",
+  fulfillmentCustomCss: "",
+  completedOrdersCustomCss: ""
 };
 
 const textLimits = {
@@ -69,7 +85,23 @@ const textLimits = {
   promise3Title: 120,
   promise3Copy: 400,
   footerLeft: 120,
-  footerRight: 120
+  footerRight: 120,
+  globalCustomCss: 120000,
+  homeCustomCss: 40000,
+  shopCustomCss: 40000,
+  loginCustomCss: 40000,
+  signupCustomCss: 40000,
+  accountCustomCss: 40000,
+  aboutCustomCss: 40000,
+  deliveryCustomCss: 40000,
+  customStoryCustomCss: 40000,
+  successCustomCss: 40000,
+  cancelCustomCss: 40000,
+  adminCustomCss: 40000,
+  adminPagesCustomCss: 40000,
+  posCustomCss: 40000,
+  fulfillmentCustomCss: 40000,
+  completedOrdersCustomCss: 40000
 };
 
 let loaded = false;
@@ -105,6 +137,14 @@ function cleanOptionalAssetUrl(value, maxLength, label) {
     return text;
   }
   throw new SiteSettingsValidationError(`${label} must start with https://, http://, or /uploads/.`);
+}
+
+function cleanOptionalCss(value, maxLength, label) {
+  const text = String(value || "").replace(/\r\n/g, "\n");
+  if (text.length > maxLength) {
+    throw new SiteSettingsValidationError(`${label} must be ${maxLength} characters or less.`);
+  }
+  return text;
 }
 
 function cleanColor(value, fieldName) {
@@ -160,7 +200,39 @@ function normalize(raw = {}) {
     themeAccent: cleanColor(merged.themeAccent, "Accent color"),
     themeAccentStrong: cleanColor(merged.themeAccentStrong, "Accent strong color"),
     themeBackground: cleanColor(merged.themeBackground, "Background color"),
-    themeInk: cleanColor(merged.themeInk, "Text color")
+    themeInk: cleanColor(merged.themeInk, "Text color"),
+    globalCustomCss: cleanOptionalCss(merged.globalCustomCss, textLimits.globalCustomCss, "Global custom CSS"),
+    homeCustomCss: cleanOptionalCss(merged.homeCustomCss, textLimits.homeCustomCss, "Home custom CSS"),
+    shopCustomCss: cleanOptionalCss(merged.shopCustomCss, textLimits.shopCustomCss, "Shop custom CSS"),
+    loginCustomCss: cleanOptionalCss(merged.loginCustomCss, textLimits.loginCustomCss, "Login custom CSS"),
+    signupCustomCss: cleanOptionalCss(merged.signupCustomCss, textLimits.signupCustomCss, "Signup custom CSS"),
+    accountCustomCss: cleanOptionalCss(merged.accountCustomCss, textLimits.accountCustomCss, "Account custom CSS"),
+    aboutCustomCss: cleanOptionalCss(merged.aboutCustomCss, textLimits.aboutCustomCss, "About custom CSS"),
+    deliveryCustomCss: cleanOptionalCss(merged.deliveryCustomCss, textLimits.deliveryCustomCss, "Delivery custom CSS"),
+    customStoryCustomCss: cleanOptionalCss(
+      merged.customStoryCustomCss,
+      textLimits.customStoryCustomCss,
+      "Custom story custom CSS"
+    ),
+    successCustomCss: cleanOptionalCss(merged.successCustomCss, textLimits.successCustomCss, "Success custom CSS"),
+    cancelCustomCss: cleanOptionalCss(merged.cancelCustomCss, textLimits.cancelCustomCss, "Cancel custom CSS"),
+    adminCustomCss: cleanOptionalCss(merged.adminCustomCss, textLimits.adminCustomCss, "Admin custom CSS"),
+    adminPagesCustomCss: cleanOptionalCss(
+      merged.adminPagesCustomCss,
+      textLimits.adminPagesCustomCss,
+      "Admin pages custom CSS"
+    ),
+    posCustomCss: cleanOptionalCss(merged.posCustomCss, textLimits.posCustomCss, "POS custom CSS"),
+    fulfillmentCustomCss: cleanOptionalCss(
+      merged.fulfillmentCustomCss,
+      textLimits.fulfillmentCustomCss,
+      "Fulfillment custom CSS"
+    ),
+    completedOrdersCustomCss: cleanOptionalCss(
+      merged.completedOrdersCustomCss,
+      textLimits.completedOrdersCustomCss,
+      "Completed orders custom CSS"
+    )
   };
 }
 

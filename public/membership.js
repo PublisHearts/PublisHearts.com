@@ -18,8 +18,20 @@ const periodEndEl = document.getElementById("membership-period-end");
 const subscribeBtn = document.getElementById("membership-subscribe-btn");
 const billingBtn = document.getElementById("membership-billing-btn");
 const logoutBtn = document.getElementById("membership-logout-btn");
-const registerForm = document.getElementById("membership-register-form");
-const loginForm = document.getElementById("membership-login-form");
+const profileForm = document.getElementById("membership-profile-form");
+const profileDisplayNameEl = document.getElementById("membership-profile-display-name");
+const profilePhoneEl = document.getElementById("membership-profile-phone");
+const profileStateEl = document.getElementById("membership-profile-state");
+const profileBioEl = document.getElementById("membership-profile-bio");
+const shippingNameEl = document.getElementById("membership-shipping-name");
+const shippingLine1El = document.getElementById("membership-shipping-line1");
+const shippingLine2El = document.getElementById("membership-shipping-line2");
+const shippingCityEl = document.getElementById("membership-shipping-city");
+const shippingStateEl = document.getElementById("membership-shipping-state");
+const shippingPostalCodeEl = document.getElementById("membership-shipping-postal-code");
+const shippingCountryEl = document.getElementById("membership-shipping-country");
+const profileMessageEl = document.getElementById("membership-profile-message");
+const saveProfileBtn = document.getElementById("membership-save-profile-btn");
 const libraryListEl = document.getElementById("membership-library-list");
 const libraryMetaEl = document.getElementById("membership-library-meta");
 const savePicksBtn = document.getElementById("membership-save-picks-btn");
@@ -61,6 +73,102 @@ if (!window.sessionStorage.getItem(memberTokenStorageKey) && window.localStorage
   window.sessionStorage.setItem(memberTokenStorageKey, state.token);
 }
 window.localStorage.removeItem(memberTokenStorageKey);
+
+const US_STATE_CODES = [
+  "AL",
+  "AK",
+  "AZ",
+  "AR",
+  "CA",
+  "CO",
+  "CT",
+  "DE",
+  "FL",
+  "GA",
+  "HI",
+  "ID",
+  "IL",
+  "IN",
+  "IA",
+  "KS",
+  "KY",
+  "LA",
+  "ME",
+  "MD",
+  "MA",
+  "MI",
+  "MN",
+  "MS",
+  "MO",
+  "MT",
+  "NE",
+  "NV",
+  "NH",
+  "NJ",
+  "NM",
+  "NY",
+  "NC",
+  "ND",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VT",
+  "VA",
+  "WA",
+  "WV",
+  "WI",
+  "WY",
+  "DC"
+];
+
+const US_STATE_SET = new Set(US_STATE_CODES);
+
+function normalizeStateCode(value) {
+  const code = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (!US_STATE_SET.has(code)) {
+    return "";
+  }
+  return code;
+}
+
+function populateStateSelectOptions(selectEl, { includeEmpty = true, emptyLabel = "Select your state" } = {}) {
+  if (!selectEl) {
+    return;
+  }
+  const previousValue = normalizeStateCode(selectEl.value);
+  const options = [
+    includeEmpty ? `<option value="">${escapeHtml(emptyLabel)}</option>` : "",
+    ...US_STATE_CODES.map((code) => `<option value="${code}">${code}</option>`)
+  ].join("");
+  selectEl.innerHTML = options;
+  if (previousValue) {
+    selectEl.value = previousValue;
+  }
+}
+
+function syncInputValue(inputEl, nextValue) {
+  if (!inputEl || document.activeElement === inputEl) {
+    return;
+  }
+  inputEl.value = String(nextValue || "");
+}
+
+function syncSelectValue(selectEl, nextValue) {
+  if (!selectEl || document.activeElement === selectEl) {
+    return;
+  }
+  const normalized = normalizeStateCode(nextValue);
+  selectEl.value = normalized;
+}
 
 function escapeHtml(value) {
   return String(value || "")
@@ -454,23 +562,52 @@ function renderAccount() {
   const complimentaryPremium = member?.complimentaryPremiumAccess === true;
   const selectedPlan = getPlanByKey(state.selectedTierKey);
 
-  authCardEl.classList.toggle("hidden", authenticated);
-  accountCardEl.classList.toggle("hidden", !authenticated);
-  subscribeBtn.disabled = state.busy;
-  billingBtn.disabled = state.busy;
-  logoutBtn.disabled = state.busy;
-  refreshOrdersBtn.disabled = state.busy;
-  saveOrderAccessBtn.disabled = state.busy;
+  authCardEl?.classList.toggle("hidden", authenticated);
+  accountCardEl?.classList.toggle("hidden", !authenticated);
+  if (subscribeBtn) {
+    subscribeBtn.disabled = state.busy;
+  }
+  if (billingBtn) {
+    billingBtn.disabled = state.busy;
+  }
+  if (logoutBtn) {
+    logoutBtn.disabled = state.busy;
+  }
+  if (refreshOrdersBtn) {
+    refreshOrdersBtn.disabled = state.busy;
+  }
+  if (saveOrderAccessBtn) {
+    saveOrderAccessBtn.disabled = state.busy;
+  }
+  if (saveProfileBtn) {
+    saveProfileBtn.disabled = state.busy;
+  }
 
   if (!authenticated) {
-    accountNameEl.textContent = "";
-    accountEmailEl.textContent = "";
-    accountRoleEl.textContent = "";
-    tierSummaryEl.textContent = "";
-    tierPerksEl.textContent = "";
-    statusPillEl.textContent = "Inactive";
-    statusPillEl.classList.remove("is-active");
-    periodEndEl.textContent = "";
+    if (accountNameEl) {
+      accountNameEl.textContent = "";
+    }
+    if (accountEmailEl) {
+      accountEmailEl.textContent = "";
+    }
+    if (accountRoleEl) {
+      accountRoleEl.textContent = "";
+    }
+    if (tierSummaryEl) {
+      tierSummaryEl.textContent = "";
+    }
+    if (tierPerksEl) {
+      tierPerksEl.textContent = "";
+    }
+    if (statusPillEl) {
+      statusPillEl.textContent = "Inactive";
+      statusPillEl.classList.remove("is-active");
+    }
+    if (periodEndEl) {
+      periodEndEl.textContent = "";
+    }
+    setMessage(authMessageEl, "Login or create a free account to manage profile and place store orders.");
+    setMessage(profileMessageEl, "");
     setMessage(orderAccessMessageEl, "");
     if (orderAccessEmailsEl) {
       orderAccessEmailsEl.value = "";
@@ -478,6 +615,17 @@ function renderAccount() {
     if (orderAccessPhonesEl) {
       orderAccessPhonesEl.value = "";
     }
+    syncInputValue(profileDisplayNameEl, "");
+    syncInputValue(profilePhoneEl, "");
+    syncSelectValue(profileStateEl, "");
+    syncInputValue(profileBioEl, "");
+    syncInputValue(shippingNameEl, "");
+    syncInputValue(shippingLine1El, "");
+    syncInputValue(shippingLine2El, "");
+    syncInputValue(shippingCityEl, "");
+    syncSelectValue(shippingStateEl, "");
+    syncInputValue(shippingPostalCodeEl, "");
+    syncInputValue(shippingCountryEl, "US");
     renderLibrary();
     renderCommunity();
     renderOrders();
@@ -485,12 +633,31 @@ function renderAccount() {
     return;
   }
 
-  accountNameEl.textContent = member.displayName || "Premium Member";
-  accountEmailEl.textContent = member.email || "";
-  accountRoleEl.textContent =
-    String(member.role || "member").trim().toLowerCase() === "admin"
-      ? "Account role: Member Admin"
-      : "Account role: Member";
+  setMessage(authMessageEl, "");
+  if (accountNameEl) {
+    accountNameEl.textContent = member.displayName || "Member";
+  }
+  if (accountEmailEl) {
+    accountEmailEl.textContent = member.email || "";
+  }
+  if (accountRoleEl) {
+    accountRoleEl.textContent =
+      String(member.role || "member").trim().toLowerCase() === "admin"
+        ? "Account role: Member Admin"
+        : "Account role: Member";
+  }
+  syncInputValue(profileDisplayNameEl, member.displayName || "");
+  syncInputValue(profilePhoneEl, member.phone || "");
+  syncSelectValue(profileStateEl, member.state || "");
+  syncInputValue(profileBioEl, member.bio || "");
+  syncInputValue(shippingNameEl, member.shippingName || "");
+  syncInputValue(shippingLine1El, member.shippingAddressLine1 || "");
+  syncInputValue(shippingLine2El, member.shippingAddressLine2 || "");
+  syncInputValue(shippingCityEl, member.shippingCity || "");
+  syncSelectValue(shippingStateEl, member.shippingState || "");
+  syncInputValue(shippingPostalCodeEl, member.shippingPostalCode || "");
+  syncInputValue(shippingCountryEl, member.shippingCountry || "US");
+
   if (orderAccessEmailsEl && document.activeElement !== orderAccessEmailsEl) {
     const emails = Array.isArray(member.orderLookupEmails) ? member.orderLookupEmails : member.email ? [member.email] : [];
     orderAccessEmailsEl.value = emails.join("\n");
@@ -503,7 +670,11 @@ function renderAccount() {
   const activeTierPriceLabel = complimentaryPremium
     ? "Free (Admin)"
     : String(activeTierPlan?.monthlyPriceLabel || member.monthlyPriceLabel || "").trim();
-  tierSummaryEl.textContent = `Tier: ${member.membershipTierLabel || "Free"} ${activeTierPriceLabel ? `(${activeTierPriceLabel})` : ""}`;
+  if (tierSummaryEl) {
+    tierSummaryEl.textContent = `Tier: ${member.membershipTierLabel || "Free"} ${
+      activeTierPriceLabel ? `(${activeTierPriceLabel})` : ""
+    }`;
+  }
 
   const perkBits = [];
   if (member.allEbooksAccess) {
@@ -517,24 +688,36 @@ function renderAccount() {
   if (member.includesStickers) {
     perkBits.push("Monthly sticker sheet");
   }
-  tierPerksEl.textContent = perkBits.length > 0 ? `Perks: ${perkBits.join(" | ")}` : "Perks: None yet";
+  if (tierPerksEl) {
+    tierPerksEl.textContent = perkBits.length > 0 ? `Perks: ${perkBits.join(" | ")}` : "Perks: None yet";
+  }
 
-  statusPillEl.textContent = prettyStatusLabel(member);
-  statusPillEl.classList.toggle("is-active", premium);
+  if (statusPillEl) {
+    statusPillEl.textContent = prettyStatusLabel(member);
+    statusPillEl.classList.toggle("is-active", premium);
+  }
   if (complimentaryPremium) {
-    subscribeBtn.textContent = "Admin Access Included";
-    subscribeBtn.disabled = true;
-    billingBtn.classList.add("hidden");
-    periodEndEl.textContent = "Complimentary premium access is active for Member Admin accounts.";
+    if (subscribeBtn) {
+      subscribeBtn.textContent = "Admin Access Included";
+      subscribeBtn.disabled = true;
+    }
+    billingBtn?.classList.add("hidden");
+    if (periodEndEl) {
+      periodEndEl.textContent = "Complimentary premium access is active for Member Admin accounts.";
+    }
   } else {
-    subscribeBtn.textContent = selectedPlan
-      ? `Start ${selectedPlan.label} (${selectedPlan.monthlyPriceLabel})`
-      : "Start Selected Tier";
-    subscribeBtn.disabled = state.busy || !selectedPlan || !selectedPlan.configured;
-    billingBtn.classList.toggle("hidden", !member.stripeCustomerId);
-    periodEndEl.textContent = member.subscriptionCurrentPeriodEnd
-      ? `Current period ends: ${formatDate(member.subscriptionCurrentPeriodEnd)}`
-      : "No active billing period yet.";
+    if (subscribeBtn) {
+      subscribeBtn.textContent = selectedPlan
+        ? `Start ${selectedPlan.label} (${selectedPlan.monthlyPriceLabel})`
+        : "Start Selected Tier";
+      subscribeBtn.disabled = state.busy || !selectedPlan || !selectedPlan.configured;
+    }
+    billingBtn?.classList.toggle("hidden", !member.stripeCustomerId);
+    if (periodEndEl) {
+      periodEndEl.textContent = member.subscriptionCurrentPeriodEnd
+        ? `Current period ends: ${formatDate(member.subscriptionCurrentPeriodEnd)}`
+        : "No active billing period yet.";
+    }
   }
 
   renderLibrary();
@@ -682,60 +865,56 @@ async function startCheckoutForTier(tierKey) {
   }
 }
 
-registerForm.addEventListener("submit", async (event) => {
+profileForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  setMessage(authMessageEl, "");
+  setMessage(profileMessageEl, "");
   setMessage(accountMessageEl, "");
-  const displayName = document.getElementById("register-display-name").value.trim();
-  const email = document.getElementById("register-email").value.trim();
-  const password = document.getElementById("register-password").value;
-  const phone = document.getElementById("register-phone").value.trim();
-
-  try {
-    state.busy = true;
-    renderAccount();
-    const result = await apiRequest("/api/members/register", {
-      method: "POST",
-      auth: false,
-      body: { displayName, email, password, phone }
-    });
-    setToken(result?.token || "");
-    state.member = result?.member || null;
-    registerForm.reset();
-    setMessage(authMessageEl, "Account created. Pick a tier and start checkout.");
-    renderAccount();
-    await Promise.all([loadPremiumContent(), loadOrders()]);
-  } catch (error) {
-    setMessage(authMessageEl, error.message || "Could not create account.", true);
-  } finally {
-    state.busy = false;
-    renderAccount();
+  if (!state.member) {
+    setMessage(profileMessageEl, "Sign in required.", true);
+    return;
   }
-});
 
-loginForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  setMessage(authMessageEl, "");
-  setMessage(accountMessageEl, "");
-  const email = document.getElementById("login-email").value.trim();
-  const password = document.getElementById("login-password").value;
+  const displayName = String(profileDisplayNameEl?.value || "").trim();
+  const stateCode = normalizeStateCode(profileStateEl?.value);
+  if (!displayName) {
+    setMessage(profileMessageEl, "Display name is required.", true);
+    return;
+  }
+  if (!stateCode) {
+    setMessage(profileMessageEl, "State is required.", true);
+    return;
+  }
+
+  const payload = {
+    displayName,
+    phone: String(profilePhoneEl?.value || "").trim(),
+    state: stateCode,
+    bio: String(profileBioEl?.value || "").trim(),
+    shippingName: String(shippingNameEl?.value || "").trim(),
+    shippingAddressLine1: String(shippingLine1El?.value || "").trim(),
+    shippingAddressLine2: String(shippingLine2El?.value || "").trim(),
+    shippingCity: String(shippingCityEl?.value || "").trim(),
+    shippingState: normalizeStateCode(shippingStateEl?.value),
+    shippingPostalCode: String(shippingPostalCodeEl?.value || "").trim(),
+    shippingCountry: String(shippingCountryEl?.value || "US")
+      .trim()
+      .toUpperCase()
+      .slice(0, 2)
+  };
 
   try {
     state.busy = true;
     renderAccount();
-    const result = await apiRequest("/api/members/login", {
-      method: "POST",
-      auth: false,
-      body: { email, password }
+    const result = await apiRequest("/api/members/profile", {
+      method: "PUT",
+      auth: true,
+      body: payload
     });
-    setToken(result?.token || "");
-    state.member = result?.member || null;
-    loginForm.reset();
-    setMessage(authMessageEl, "Signed in.");
-    renderAccount();
-    await Promise.all([loadPremiumContent(), loadOrders()]);
+    state.member = result?.member || state.member;
+    setMessage(profileMessageEl, "Profile saved.");
+    await loadOrders();
   } catch (error) {
-    setMessage(authMessageEl, error.message || "Could not sign in.", true);
+    setMessage(profileMessageEl, error.message || "Could not save profile.", true);
   } finally {
     state.busy = false;
     renderAccount();
@@ -946,11 +1125,23 @@ communityPostForm.addEventListener("submit", async (event) => {
   }
 });
 
+function initializeProfileStateSelectors() {
+  populateStateSelectOptions(profileStateEl, {
+    includeEmpty: true,
+    emptyLabel: "Select your state"
+  });
+  populateStateSelectOptions(shippingStateEl, {
+    includeEmpty: true,
+    emptyLabel: "Optional"
+  });
+}
+
 function getJoinQueryContext() {
   const params = new URLSearchParams(window.location.search);
   return {
     join: String(params.get("join") || "").trim().toLowerCase(),
-    sessionId: String(params.get("session_id") || "").trim()
+    sessionId: String(params.get("session_id") || "").trim(),
+    welcome: String(params.get("welcome") || "").trim().toLowerCase()
   };
 }
 
@@ -963,6 +1154,10 @@ function clearJoinQueryContext() {
   }
   if (url.searchParams.has("session_id")) {
     url.searchParams.delete("session_id");
+    changed = true;
+  }
+  if (url.searchParams.has("welcome")) {
+    url.searchParams.delete("welcome");
     changed = true;
   }
   if (!changed) {
@@ -978,6 +1173,9 @@ function applyJoinQueryMessage() {
     setMessage(pageMessageEl, "Subscription checkout completed. Refreshing access...");
   } else if (join === "cancel") {
     setMessage(pageMessageEl, "Checkout canceled. You can restart anytime.");
+    clearJoinQueryContext();
+  } else if (context.welcome === "1" || context.welcome === "true") {
+    setMessage(pageMessageEl, "Account created. Update your profile, then choose Free, Standard, Plus, or Premium.");
     clearJoinQueryContext();
   }
   return context;
@@ -1027,6 +1225,7 @@ async function confirmJoinSuccessAccess(joinContext) {
 }
 
 async function initializeMembershipPage() {
+  initializeProfileStateSelectors();
   const joinContext = applyJoinQueryMessage();
   renderAccount();
   await Promise.all([loadPlans(), refreshMember()]);

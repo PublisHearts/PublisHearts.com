@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PublisHearts Site Page Editor</title>
+    <meta name="description" content="PublisHearts all-pages design editor" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="admin-page" data-page-key="adminPages">
+    <header class="site-header">
+      <div class="container row-between">
+        <a class="brand" href="/">
+          <span class="brand-mark">P</span>
+          <span>PublisHearts</span>
+        </a>
+        <div class="header-actions">
+          <a class="ghost-btn ghost-link" href="/admin">Back to Admin</a>
+          <a class="ghost-btn ghost-link" href="/">Back to Store</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="container admin-shell">
+      <section id="login-card" class="admin-login-card">
+        <h1>Page Editor Login</h1>
+        <p>Use your admin password to edit every page layout, copy, and design styling.</p>
+        <form id="login-form" class="admin-login-form" autocomplete="off">
+          <label for="admin-password">Password</label>
+          <input
+            id="admin-password"
+            name="admin_secret"
+            type="password"
+            autocomplete="new-password"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            data-lpignore="true"
+            data-1p-ignore="true"
+            required
+          />
+          <button class="primary-btn block" type="submit">Sign in</button>
+        </form>
+        <p id="login-message" class="checkout-message"></p>
+      </section>
+
+      <section id="admin-panel" class="admin-panel admin-panel-single hidden">
+        <div class="admin-toolbar">
+          <div>
+            <h1>Page Editor</h1>
+            <p>Change every storefront content field and visual style in one place.</p>
+          </div>
+          <div class="admin-toolbar-actions">
+            <button id="publish-btn" class="primary-btn" type="button">Publish Live Changes</button>
+            <a class="ghost-btn ghost-link" href="/admin">Store Manager</a>
+            <button id="logout-btn" class="ghost-btn" type="button">Log out</button>
+          </div>
+        </div>
+        <p id="publish-message" class="checkout-message"></p>
+
+        <section class="admin-section">
+          <div class="admin-section-head">
+            <h2>Sitewide Page Design</h2>
+            <p>Control brand/logo assets, shared copy, colors, and per-page custom CSS.</p>
+          </div>
+          <form id="site-settings-form" class="admin-form" enctype="multipart/form-data">
+            <div class="admin-form-grid">
+              <label>
+                Brand Name
+                <input id="site-brand-name" name="brandName" type="text" maxlength="80" required />
+              </label>
+              <label>
+                Brand Mark (fallback letter)
+                <input id="site-brand-mark" name="brandMark" type="text" maxlength="4" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Upload Logo Image
+                <input id="site-logo-file" name="logoImage" type="file" accept="image/*" />
+              </label>
+              <label>
+                Or Logo Image URL
+                <input
+                  id="site-logo-url"
+                  name="logoImageUrl"
+                  type="url"
+                  placeholder="https://example.com/logo.png"
+                />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="site-remove-logo" name="removeLogo" type="checkbox" />
+              Remove logo image (show brand mark letter instead)
+            </label>
+            <div class="admin-form-grid">
+              <label>
+                Upload Hero Banner Image
+                <input id="site-banner-file" name="heroBannerImage" type="file" accept="image/*" />
+              </label>
+              <label>
+                Or Hero Banner URL
+                <input
+                  id="site-banner-url"
+                  name="heroBannerImageUrl"
+                  type="url"
+                  placeholder="https://example.com/banner.jpg"
+                />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="site-remove-banner" name="removeBanner" type="checkbox" />
+              Remove hero banner image
+            </label>
+            <div class="admin-form-grid">
+              <label>
+                Upload Standard Plan Image
+                <input id="site-membership-standard-file" name="membershipStandardImage" type="file" accept="image/*" />
+              </label>
+              <label>
+                Or Standard Plan Image URL
+                <input
+                  id="site-membership-standard-url"
+                  name="membershipStandardImageUrl"
+                  type="url"
+                  placeholder="https://example.com/standard-plan.png"
+                />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="site-remove-membership-standard" name="removeMembershipStandardImage" type="checkbox" />
+              Remove standard plan image
+            </label>
+            <div class="admin-form-grid">
+              <label>
+                Upload Plus Plan Image
+                <input id="site-membership-plus-file" name="membershipPlusImage" type="file" accept="image/*" />
+              </label>
+              <label>
+                Or Plus Plan Image URL
+                <input
+                  id="site-membership-plus-url"
+                  name="membershipPlusImageUrl"
+                  type="url"
+                  placeholder="https://example.com/plus-plan.png"
+                />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="site-remove-membership-plus" name="removeMembershipPlusImage" type="checkbox" />
+              Remove plus plan image
+            </label>
+            <div class="admin-form-grid">
+              <label>
+                Upload Premium Plan Image
+                <input id="site-membership-premium-file" name="membershipPremiumImage" type="file" accept="image/*" />
+              </label>
+              <label>
+                Or Premium Plan Image URL
+                <input
+                  id="site-membership-premium-url"
+                  name="membershipPremiumImageUrl"
+                  type="url"
+                  placeholder="https://example.com/premium-plan.png"
+                />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="site-remove-membership-premium" name="removeMembershipPremiumImage" type="checkbox" />
+              Remove premium plan image
+            </label>
+
+            <div class="admin-form-grid">
+              <label>
+                Browser Tab Title
+                <input id="site-page-title" name="pageTitle" type="text" maxlength="100" required />
+              </label>
+              <label>
+                Hero Button Label
+                <input id="site-hero-cta-label" name="heroCtaLabel" type="text" maxlength="60" required />
+              </label>
+            </div>
+            <label>
+              Page Description
+              <textarea id="site-page-description" name="pageDescription" rows="2" maxlength="220" required></textarea>
+            </label>
+            <div class="admin-form-grid">
+              <label>
+                Hero Eyebrow
+                <input id="site-hero-eyebrow" name="heroEyebrow" type="text" maxlength="80" required />
+              </label>
+              <label>
+                Hero Title
+                <input id="site-hero-title" name="heroTitle" type="text" maxlength="180" required />
+              </label>
+            </div>
+            <label>
+              Hero Copy
+              <textarea id="site-hero-copy" name="heroCopy" rows="3" maxlength="600" required></textarea>
+            </label>
+            <div class="admin-form-grid">
+              <label>
+                Featured Section Title
+                <input id="site-featured-title" name="featuredTitle" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Featured Section Copy
+                <input id="site-featured-copy" name="featuredCopy" type="text" maxlength="400" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Promise 1 Title
+                <input id="site-promise-1-title" name="promise1Title" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Promise 1 Copy
+                <input id="site-promise-1-copy" name="promise1Copy" type="text" maxlength="400" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Promise 2 Title
+                <input id="site-promise-2-title" name="promise2Title" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Promise 2 Copy
+                <input id="site-promise-2-copy" name="promise2Copy" type="text" maxlength="400" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Promise 3 Title
+                <input id="site-promise-3-title" name="promise3Title" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Promise 3 Copy
+                <input id="site-promise-3-copy" name="promise3Copy" type="text" maxlength="400" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Footer Left Text
+                <input id="site-footer-left" name="footerLeft" type="text" maxlength="120" required />
+              </label>
+              <label>
+                Footer Right Text
+                <input id="site-footer-right" name="footerRight" type="text" maxlength="120" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Accent Color
+                <input id="site-theme-accent" name="themeAccent" type="color" required />
+              </label>
+              <label>
+                Accent Strong Color
+                <input id="site-theme-accent-strong" name="themeAccentStrong" type="color" required />
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Background Color
+                <input id="site-theme-background" name="themeBackground" type="color" required />
+              </label>
+              <label>
+                Text Color
+                <input id="site-theme-ink" name="themeInk" type="color" required />
+              </label>
+            </div>
+            <div class="admin-section-head">
+              <h3>All Pages Custom CSS</h3>
+              <p>
+                These styles let you redesign literally every page. Use global CSS for site-wide changes, then page CSS for
+                one page at a time.
+              </p>
+            </div>
+            <label>
+              Global CSS (all pages)
+              <textarea id="site-global-custom-css" name="globalCustomCss" rows="8" maxlength="120000"></textarea>
+            </label>
+            <div class="admin-form-grid">
+              <label>
+                Home CSS
+                <textarea id="site-home-custom-css" name="homeCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+              <label>
+                Shop CSS
+                <textarea id="site-shop-custom-css" name="shopCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Login CSS
+                <textarea id="site-login-custom-css" name="loginCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+              <label>
+                Signup CSS
+                <textarea id="site-signup-custom-css" name="signupCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Account CSS
+                <textarea id="site-account-custom-css" name="accountCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+              <label>
+                About CSS
+                <textarea id="site-about-custom-css" name="aboutCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Delivery CSS
+                <textarea id="site-delivery-custom-css" name="deliveryCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+              <label>
+                Custom Story CSS
+                <textarea id="site-custom-story-custom-css" name="customStoryCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Success CSS
+                <textarea id="site-success-custom-css" name="successCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+              <label>
+                Cancel CSS
+                <textarea id="site-cancel-custom-css" name="cancelCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                Admin CSS
+                <textarea id="site-admin-custom-css" name="adminCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+              <label>
+                Admin Page Editor CSS
+                <textarea id="site-admin-pages-custom-css" name="adminPagesCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+            </div>
+            <div class="admin-form-grid">
+              <label>
+                POS CSS
+                <textarea id="site-pos-custom-css" name="posCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+              <label>
+                Fulfillment CSS
+                <textarea id="site-fulfillment-custom-css" name="fulfillmentCustomCss" rows="6" maxlength="40000"></textarea>
+              </label>
+            </div>
+            <label>
+              Completed Orders CSS
+              <textarea id="site-completed-orders-custom-css" name="completedOrdersCustomCss" rows="6" maxlength="40000"></textarea>
+            </label>
+            <div class="admin-form-actions">
+              <button id="save-site-settings-btn" class="primary-btn" type="submit">Save All Page Design</button>
+              <button id="reset-site-settings-btn" class="ghost-btn" type="button">Reset Unsaved Changes</button>
+            </div>
+          </form>
+          <p id="design-message" class="checkout-message"></p>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/page-design.js"></script>
+    <script type="module" src="/admin-pages.js"></script>
+  </body>
+</html>
